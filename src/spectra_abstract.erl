@@ -82,42 +82,42 @@ enrich_from_debug_info(Beam, Dbgi, Exports, Summary) ->
 
 parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types = AttrExpTypes} = Summary) ->
     ExportSet = maps:from_list([{FA, true} || FA <- Exports]),
-    {RawTypes, FormExpTypes, Specs, Funcs} = lists:foldl(
-        fun(Form, {TAcc, ETAcc, SAcc, FAcc}) ->
+    {RawTypes, FormExpTypes, Specs, InitialFuncs, ClausesByMFA} = lists:foldl(
+        fun(Form, {TAcc, ETAcc, SAcc, FAcc, CAcc}) ->
             case Form of
                 {attribute, _Anno, export_type, ExpList} when is_list(ExpList) ->
-                    {TAcc, ExpList ++ ETAcc, SAcc, FAcc};
+                    {TAcc, ExpList ++ ETAcc, SAcc, FAcc, CAcc};
                 {attribute, _Anno, Kind, {_TypeName, _TypeDef, _TypeArgs} = TypeAttr}
                   when Kind =:= type; Kind =:= opaque; Kind =:= nominal ->
                     Decl = spectra_type:from_type_attr(Mod, Kind, TypeAttr),
                     Key = Decl#type_decl.key,
-                    {TAcc#{Key => Decl}, ETAcc, SAcc, FAcc};
+                    {TAcc#{Key => Decl}, ETAcc, SAcc, FAcc, CAcc};
                 {attribute, _Anno, spec, {{F, A}, SpecClauses}} ->
                     Key = {Mod, F, A},
                     NormSpecs = [spectra_type:from_abstract(S) || S <- SpecClauses],
-                    {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc};
+                    {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc, CAcc};
                 {attribute, _Anno, spec, {{M, F, A}, SpecClauses}} ->
                     Key = {M, F, A},
                     NormSpecs = [spectra_type:from_abstract(S) || S <- SpecClauses],
-                    {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc};
+                    {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc, CAcc};
                 {function, Anno, F, A, Clauses} ->
                     Key = {Mod, F, A},
                     Line = erl_anno:line(Anno),
                     Calls = extract_calls_from_clauses(Mod, Clauses),
-                    Inferred = infer_simple_clause_type(Clauses),
+                    InitType = {fun_type, lists:duplicate(A, any), any},
                     Contract = #func_contract{
                         mfa = Key,
                         exported = maps:is_key({F, A}, ExportSet),
-                        inferred_type = Inferred,
+                        inferred_type = InitType,
                         calls = Calls,
                         line = Line
                     },
-                    {TAcc, ETAcc, SAcc, FAcc#{Key => Contract}};
+                    {TAcc, ETAcc, SAcc, FAcc#{Key => Contract}, CAcc#{Key => {Line, Clauses}}};
                 _ ->
-                    {TAcc, ETAcc, SAcc, FAcc}
+                    {TAcc, ETAcc, SAcc, FAcc, CAcc}
             end
         end,
-        {#{}, AttrExpTypes, #{}, #{}},
+        {#{}, AttrExpTypes, #{}, #{}, #{}},
         Forms
     ),
     AllExpTypes = lists:usort(FormExpTypes),
@@ -128,11 +128,12 @@ parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types 
         end,
         RawTypes
     ),
-    MergedFuncs = merge_specs_into_funcs(Mod, ExportSet, Specs, Funcs),
+    WithSpecs = merge_specs_into_funcs(Mod, ExportSet, Specs, InitialFuncs),
+    InferredFuncs = spectra_infer:infer_module_functions(Mod, ClausesByMFA, WithSpecs),
     Summary#module_summary{
         export_types = AllExpTypes,
         types = MarkedTypes,
-        functions = MergedFuncs
+        functions = InferredFuncs
     }.
 
 parse_fallback_dbgi({debug_info_v1, elixir_erl, {elixir_v1, _Map, SpecsForms}}, Exports, Summary)
@@ -184,20 +185,3 @@ collect_calls(_Mod, _Other, Acc) ->
 
 collect_calls_list(Mod, Items, Acc) ->
     lists:foldl(fun(Item, A) -> collect_calls(Mod, Item, A) end, Acc, Items).
-
-infer_simple_clause_type([{clause, _Anno, Args, _Guards, Body} | _]) ->
-    ArgTypes = [infer_expr_type(Arg) || Arg <- Args],
-    RetType = infer_expr_type(lists:last(Body)),
-    {fun_type, ArgTypes, RetType};
-infer_simple_clause_type(_) ->
-    any.
-
-infer_expr_type({integer, _, Int}) -> {int_lit, Int};
-infer_expr_type({float, _, _}) -> float;
-infer_expr_type({atom, _, Atom}) -> {atom_lit, Atom};
-infer_expr_type({nil, _}) -> nil;
-infer_expr_type({cons, _, H, _T}) -> {nonempty_list, infer_expr_type(H)};
-infer_expr_type({bin, _, _}) -> {binary, 0, 8};
-infer_expr_type({map, _, _}) -> any_map;
-infer_expr_type({tuple, _, Elements}) -> {tuple, [infer_expr_type(E) || E <- Elements]};
-infer_expr_type(_) -> any.

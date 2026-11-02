@@ -11,6 +11,8 @@
     from_abstract/1,
     from_type_attr/3,
     normalize_union/1,
+    join/2,
+    meet/2,
     substitute/2,
     unfold_bounded_fun/1,
     expand/4
@@ -178,6 +180,159 @@ normalize_union(Types) ->
                 [Single] -> Single;
                 Many -> {union, Many}
             end
+    end.
+
+%% @doc Computes the least upper bound (union) of two types.
+-spec join(stype(), stype()) -> stype().
+join(T1, T2) ->
+    normalize_union([T1, T2]).
+
+%% @doc Computes the greatest lower bound (intersection) of two types.
+%% Returns `none` when the two types are provably disjoint.
+-spec meet(stype(), stype()) -> stype().
+meet(none, _) -> none;
+meet(_, none) -> none;
+meet(any, T) -> T;
+meet(T, any) -> T;
+meet({var, _}, T) -> T;
+meet(T, {var, _}) -> T;
+meet({recursive_ref, _, _}, T) -> T;
+meet(T, {recursive_ref, _, _}) -> T;
+meet(Same, Same) -> Same;
+meet({union, Members}, T2) ->
+    normalize_union([meet(M, T2) || M <- Members]);
+meet(T1, {union, Members}) ->
+    normalize_union([meet(T1, M) || M <- Members]);
+meet(T1, T2) ->
+    case is_numeric(T1) andalso is_numeric(T2) of
+        true -> meet_numeric(T1, T2);
+        false -> meet_non_numeric(T1, T2)
+    end.
+
+is_numeric(number) -> true;
+is_numeric(float) -> true;
+is_numeric(integer) -> true;
+is_numeric(pos_integer) -> true;
+is_numeric(non_neg_integer) -> true;
+is_numeric(neg_integer) -> true;
+is_numeric({int_lit, _}) -> true;
+is_numeric({int_range, _, _}) -> true;
+is_numeric(_) -> false.
+
+meet_numeric(number, T) -> T;
+meet_numeric(T, number) -> T;
+meet_numeric(float, float) -> float;
+meet_numeric(float, _) -> none;
+meet_numeric(_, float) -> none;
+meet_numeric(T1, T2) ->
+    {Lo1, Hi1} = int_bounds(T1),
+    {Lo2, Hi2} = int_bounds(T2),
+    Lo = max_bound(Lo1, Lo2),
+    Hi = min_bound(Hi1, Hi2),
+    range_to_stype(Lo, Hi).
+
+int_bounds(integer) -> {neg_inf, pos_inf};
+int_bounds(pos_integer) -> {1, pos_inf};
+int_bounds(non_neg_integer) -> {0, pos_inf};
+int_bounds(neg_integer) -> {neg_inf, -1};
+int_bounds({int_lit, I}) -> {I, I};
+int_bounds({int_range, Lo, Hi}) -> {Lo, Hi}.
+
+max_bound(neg_inf, B) -> B;
+max_bound(A, neg_inf) -> A;
+max_bound(pos_inf, _) -> pos_inf;
+max_bound(_, pos_inf) -> pos_inf;
+max_bound(A, B) -> erlang:max(A, B).
+
+min_bound(pos_inf, B) -> B;
+min_bound(A, pos_inf) -> A;
+min_bound(neg_inf, _) -> neg_inf;
+min_bound(_, neg_inf) -> neg_inf;
+min_bound(A, B) -> erlang:min(A, B).
+
+range_to_stype(pos_inf, _) -> none;
+range_to_stype(_, neg_inf) -> none;
+range_to_stype(Lo, Hi) when is_integer(Lo), is_integer(Hi), Lo > Hi -> none;
+range_to_stype(Val, Val) when is_integer(Val) -> {int_lit, Val};
+range_to_stype(neg_inf, pos_inf) -> integer;
+range_to_stype(1, pos_inf) -> pos_integer;
+range_to_stype(0, pos_inf) -> non_neg_integer;
+range_to_stype(neg_inf, -1) -> neg_integer;
+range_to_stype(Lo, Hi) -> {int_range, Lo, Hi}.
+
+meet_non_numeric(atom, boolean) -> boolean;
+meet_non_numeric(boolean, atom) -> boolean;
+meet_non_numeric(atom, {atom_lit, _} = Lit) -> Lit;
+meet_non_numeric({atom_lit, _} = Lit, atom) -> Lit;
+meet_non_numeric(boolean, {atom_lit, B} = Lit) when is_boolean(B) -> Lit;
+meet_non_numeric({atom_lit, B} = Lit, boolean) when is_boolean(B) -> Lit;
+meet_non_numeric(boolean, {atom_lit, _}) -> none;
+meet_non_numeric({atom_lit, _}, boolean) -> none;
+meet_non_numeric({binary, B1, U1}, {binary, B2, U2}) ->
+    {binary, erlang:max(B1, B2), erlang:min(U1, U2)};
+meet_non_numeric(any_tuple, {tuple, _} = T) -> T;
+meet_non_numeric({tuple, _} = T, any_tuple) -> T;
+meet_non_numeric(any_tuple, {record, _, _} = R) -> R;
+meet_non_numeric({record, _, _} = R, any_tuple) -> R;
+meet_non_numeric({tuple, E1}, {tuple, E2}) when length(E1) =:= length(E2) ->
+    Meets = [meet(A, B) || {A, B} <- lists:zip(E1, E2)],
+    case lists:member(none, Meets) of
+        true -> none;
+        false -> {tuple, Meets}
+    end;
+meet_non_numeric({list, _}, nil) -> nil;
+meet_non_numeric(nil, {list, _}) -> nil;
+meet_non_numeric({list, E1}, {nonempty_list, E2}) ->
+    case meet(E1, E2) of
+        none -> none;
+        M -> {nonempty_list, M}
+    end;
+meet_non_numeric({nonempty_list, E1}, {list, E2}) ->
+    case meet(E1, E2) of
+        none -> none;
+        M -> {nonempty_list, M}
+    end;
+meet_non_numeric({nonempty_list, E1}, {nonempty_list, E2}) ->
+    case meet(E1, E2) of
+        none -> none;
+        M -> {nonempty_list, M}
+    end;
+meet_non_numeric({list, E1}, {list, E2}) ->
+    case meet(E1, E2) of
+        none -> nil;
+        M -> {list, M}
+    end;
+meet_non_numeric(any_map, {map, _} = M) -> M;
+meet_non_numeric({map, _} = M, any_map) -> M;
+meet_non_numeric({map, F1}, {map, F2}) ->
+    meet_map_fields(F1, F2);
+meet_non_numeric({fun_type, A1, R1}, {fun_type, A2, R2}) when length(A1) =:= length(A2) ->
+    ArgMeets = [meet(X, Y) || {X, Y} <- lists:zip(A1, A2)],
+    RetMeet = meet(R1, R2),
+    case lists:member(none, ArgMeets) orelse RetMeet =:= none of
+        true -> none;
+        false -> {fun_type, ArgMeets, RetMeet}
+    end;
+meet_non_numeric(any_fun, {fun_type, _, _} = F) -> F;
+meet_non_numeric({fun_type, _, _} = F, any_fun) -> F;
+meet_non_numeric(any_fun, {fun_any_args, _} = F) -> F;
+meet_non_numeric({fun_any_args, _} = F, any_fun) -> F;
+meet_non_numeric(_, _) ->
+    none.
+
+meet_map_fields(F1, F2) ->
+    Exact1 = #{K => V || {exact, K, V} <- F1},
+    Exact2 = #{K => V || {exact, K, V} <- F2},
+    CommonKeys = [K || K <- maps:keys(Exact1), maps:is_key(K, Exact2)],
+    HasConflict = lists:any(
+        fun(K) ->
+            meet(maps:get(K, Exact1), maps:get(K, Exact2)) =:= none
+        end,
+        CommonKeys
+    ),
+    case HasConflict of
+        true -> none;
+        false -> {map, lists:usort(F1 ++ F2)}
     end.
 
 %% @doc Substitutes type variables (`{var, Name}`) according to `Env`.

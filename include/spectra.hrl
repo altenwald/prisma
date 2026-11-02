@@ -17,12 +17,23 @@
     body :: spectra_type:stype()
 }).
 
+-record( spectra_warning, {
+    kind :: gradual_mismatch | discrepancy | unknown_function | dead_code | opacity_violation,
+    mfa :: mfa_key(),
+    line = 0 :: non_neg_integer(),
+    message :: binary()
+}).
+
+-type call_site() :: {non_neg_integer(), mfa_key(), [spectra_type:stype()]}.
+
 -record(func_contract, {
     mfa :: mfa_key(),
     exported = false :: boolean(),
     declared_specs = [] :: [spectra_type:stype()],
     inferred_type = any :: spectra_type:stype(),
     calls = [] :: [mfa_key()],
+    call_sites = [] :: [call_site()],
+    local_warnings = [] :: [#spectra_warning{}],
     line = 0 :: non_neg_integer()
 }).
 
@@ -43,13 +54,6 @@
     package_vsn :: binary() | undefined,
     otp_release :: binary(),
     modules = #{} :: #{module() => #module_summary{}}
-}).
-
--record(spectra_warning, {
-    kind :: gradual_mismatch | discrepancy | unknown_function | dead_code | opacity_violation,
-    mfa :: mfa_key(),
-    line = 0 :: non_neg_integer(),
-    message :: binary()
 }).
 
 -endif.

@@ -60,7 +60,7 @@ analyze_beams(Beams, Opts) ->
         {ok, DepsPlt} ->
             case spectra_plt:from_beams(Beams, Opts) of
                 {ok, TargetPlt} ->
-                    Warnings = spectra_checker:check_plt(TargetPlt, DepsPlt),
+                    Warnings = spectra_checker:check_plt(TargetPlt, DepsPlt, Opts),
                     {ok, Warnings};
                 {error, Reason} ->
                     {error, Reason}
