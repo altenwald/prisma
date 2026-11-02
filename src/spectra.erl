@@ -10,7 +10,8 @@
     build_plt/2,
     analyze_dirs/1,
     analyze_dirs/2,
-    analyze_beams/2
+    analyze_beams/2,
+    parse_check_args/1
 ]).
 
 %% @doc Rebar3 plugin entrypoint.
@@ -57,7 +58,9 @@ analyze_dirs(Dirs, Opts) ->
 analyze_beams(Beams, Opts) ->
     PltFiles = maps:get(plts, Opts, []),
     case load_plts(PltFiles) of
-        {ok, DepsPlt} ->
+        {ok, ExplicitPlt} ->
+            LockPlt = resolve_lock_plt(Opts),
+            DepsPlt = spectra_plt:merge(ExplicitPlt, LockPlt),
             case spectra_plt:from_beams(Beams, Opts) of
                 {ok, TargetPlt} ->
                     Warnings = spectra_checker:check_plt(TargetPlt, DepsPlt, Opts),
@@ -67,6 +70,17 @@ analyze_beams(Beams, Opts) ->
             end;
         {error, Reason} ->
             {error, Reason}
+    end.
+
+resolve_lock_plt(Opts) ->
+    case maps:find(project_root, Opts) of
+        {ok, Root} ->
+            case spectra_lock:resolve_project_plts(Root, Opts) of
+                {ok, Plt} -> Plt;
+                _ -> spectra_plt:new()
+            end;
+        error ->
+            spectra_plt:new()
     end.
 
 %% @doc Escript CLI entrypoint.
@@ -85,8 +99,8 @@ main(["build-plt", "--output", OutFile | Inputs]) when Inputs =/= [] ->
             erlang:halt(1)
     end;
 main(["check" | Rest]) ->
-    {Plts, Targets} = parse_check_args(Rest, [], []),
-    case analyze_dirs(Targets, #{plts => Plts}) of
+    {Plts, Targets} = parse_check_args(Rest),
+    case analyze_dirs(Targets, #{plts => Plts, project_root => "."}) of
         {ok, []} ->
             io:format("Spectra: 0 warnings found.~n"),
             erlang:halt(0);
@@ -110,6 +124,11 @@ main(_) ->
         "  spectra check [--plt <file.splt>...] <ebin_or_beam...>~n"
     ),
     erlang:halt(1).
+
+%% @doc Parses CLI arguments for `spectra check`.
+-spec parse_check_args([string()]) -> {[string()], [string()]}.
+parse_check_args(Args) ->
+    parse_check_args(Args, [], []).
 
 parse_check_args(["--plt", PltFile | Rest], Plts, Targets) ->
     parse_check_args(Rest, [PltFile | Plts], Targets);

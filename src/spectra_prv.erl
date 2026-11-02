@@ -37,8 +37,9 @@ do(State) ->
         undefined -> rebar_state:project_apps(State);
         AppInfo -> [AppInfo]
     end,
+    Root = rebar_state:dir(State),
     EbinDirs = [rebar_app_info:ebin_dir(App) || App <- Apps],
-    case spectra:analyze_dirs(EbinDirs) of
+    case spectra:analyze_dirs(EbinDirs, #{project_root => Root}) of
         {ok, []} ->
             {ok, State};
         {ok, Warnings} ->
