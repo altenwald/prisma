@@ -100,14 +100,69 @@ NO_COLOR=1 spectra check
 spectra check --splt /path/to/project.splt _build/default/lib/*/ebin
 ```
 
-### Running as a Mix Task (Elixir)
+### Running as a Rebar3 Plugin (Erlang)
 
-When added as a dependency to your `mix.exs`:
+Add Spectra to your `rebar.config` as a project plugin:
+
+```erlang
+{project_plugins, [
+    {spectra, "~> 0.1.0"}
+]}.
+```
+
+Run analysis:
+
+```bash
+rebar3 spectra
+rebar3 spectra --format oneline
+rebar3 spectra --format json
+```
+
+Optional project-level defaults in `rebar.config`:
+
+```erlang
+{spectra, [
+    {mode, hybrid},      %% hybrid | gradual | discrepancy
+    {format, human},     %% human | oneline | json
+    {oxbow, true},       %% detect dead functions and ignored parameters
+    {color, auto}        %% auto | always | never
+]}.
+```
+
+### Running as a Mix Dependency (Elixir)
+
+Add Spectra to your `mix.exs` dependencies:
+
+```elixir
+def deps do
+  [
+    {:spectra, "~> 0.1.0", only: [:dev, :test], runtime: false}
+  ]
+end
+```
+
+Run analysis:
 
 ```bash
 mix spectra
 mix spectra --format oneline
 mix spectra --format json
+```
+
+Optional project-level defaults in `mix.exs`:
+
+```elixir
+def project do
+  [
+    ...,
+    spectra: [
+      mode: :hybrid,     # :hybrid | :gradual | :discrepancy
+      format: :human,    # :human | :oneline | :json
+      oxbow: true,       # detect dead functions and ignored parameters
+      color: :auto       # :auto | :always | :never
+    ]
+  ]
+end
 ```
 
 ---

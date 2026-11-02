@@ -4,11 +4,22 @@
 -export([
     init/1,
     do/1,
-    format_error/1
+    format_error/1,
+    parse_cli_args/1,
+    parse_config_opts/1
 ]).
 
 -define(PROVIDER, spectra).
 -define(DEPS, [compile]).
+-define(OPTS, [
+    {format, $f, "format", string, "Output format: human, oneline, json (default: human)"},
+    {mode, $m, "mode", string, "Analysis mode: hybrid, gradual, discrepancy (default: hybrid)"},
+    {no_color, undefined, "no-color", boolean, "Disable ANSI colors"},
+    {color, undefined, "color", boolean, "Force ANSI colors"},
+    {no_oxbow, undefined, "no-oxbow", boolean, "Disable oxbow code detection"},
+    {oxbow, undefined, "oxbow", boolean, "Enable oxbow code detection"},
+    {plt, undefined, "plt", string, "Path to .splt file (can be specified multiple times)"}
+]).
 
 %% @doc Registers the `spectra` provider with Rebar3.
 -spec init(term()) -> {ok, term()}.
@@ -21,7 +32,7 @@ init(State) ->
                 {bare, true},
                 {deps, ?DEPS},
                 {example, "rebar3 spectra"},
-                {opts, []},
+                {opts, ?OPTS},
                 {short_desc, "Run Spectra hybrid type and discrepancy analysis"},
                 {desc, "Analyzes compiled BEAM files using Spectra's hybrid gradual and discrepancy checker."}
             ]),
@@ -31,24 +42,34 @@ init(State) ->
     end.
 
 %% @doc Executes the analysis over the Rebar3 project's compiled BEAM directories.
--spec do(term()) -> {ok, term()} | {error, string()}.
+-spec do(term()) -> {ok, term()} | {error, iolist()}.
 do(State) ->
+    Root = rebar_state:dir(State),
+    {ParsedOpts, Targets} = parse_opts(State),
     Apps = case rebar_state:current_app(State) of
         undefined -> rebar_state:project_apps(State);
         AppInfo -> [AppInfo]
     end,
-    Root = rebar_state:dir(State),
-    EbinDirs = [rebar_app_info:ebin_dir(App) || App <- Apps],
-    case spectra:analyze_dirs(EbinDirs, #{project_root => Root}) of
+    AppEbins = case is_list(Apps) of
+        true -> lists:flatmap(fun safe_app_ebin/1, Apps);
+        false -> []
+    end,
+    EbinDirs = resolve_ebins(AppEbins, Root, Targets),
+    Opts = ParsedOpts#{project_root => Root},
+    case spectra:analyze_dirs(EbinDirs, Opts) of
         {ok, []} ->
+            case maps:get(format, Opts, human) of
+                json ->
+                    io:format("[]~n");
+                _ ->
+                    UseColor = spectra_checker:should_color(Opts),
+                    Msg = spectra_checker:colorize("Spectra: 0 warnings found.", "\e[1;32m", UseColor),
+                    io:format("~ts~n", [Msg])
+            end,
             {ok, State};
         {ok, Warnings} ->
-            lists:foreach(
-                fun(W) ->
-                    io:format("~ts~n", [spectra_checker:format_warning(W)])
-                end,
-                Warnings
-            ),
+            Formatted = spectra_checker:format_warnings(Warnings, Opts),
+            io:format("~ts~n", [Formatted]),
             {error, format_error({warnings_found, length(Warnings)})};
         {error, Reason} ->
             {error, format_error(Reason)}
@@ -60,3 +81,115 @@ format_error({warnings_found, Count}) ->
     io_lib:format("Spectra found ~B type warning(s)", [Count]);
 format_error(Reason) ->
     io_lib:format("Spectra error: ~p", [Reason]).
+
+%% @private Safely gets ebin dir for an app info record.
+safe_app_ebin(App) ->
+    try rebar_app_info:ebin_dir(App) of
+        Dir when is_list(Dir) -> [Dir];
+        _ -> []
+    catch
+        _:_ -> []
+    end.
+
+%% @private Parses configuration and CLI options from Rebar3 state.
+parse_opts(State) ->
+    ConfigOpts = try rebar_state:get(State, spectra, []) of
+        List when is_list(List) -> parse_config_opts(List);
+        _ -> #{}
+    catch
+        _:_ -> #{}
+    end,
+    {CliOpts, Targets} = try rebar_state:command_parsed_args(State) of
+        {ParsedArgs, OtherArgs} when is_list(ParsedArgs) ->
+            {parse_cli_args(ParsedArgs), OtherArgs};
+        ParsedList when is_list(ParsedList) ->
+            {parse_cli_args(ParsedList), []};
+        _ ->
+            {#{}, []}
+    catch
+        _:_ ->
+            {#{}, []}
+    end,
+    Defaults = #{mode => hybrid, format => human, color => auto},
+    Merged = maps:merge(Defaults, maps:merge(ConfigOpts, CliOpts)),
+    FinalPlts = maps:get(plts, ConfigOpts, []) ++ maps:get(plts, CliOpts, []),
+    {Merged#{plts => FinalPlts}, Targets}.
+
+%% @doc Parses CLI options received from Rebar3.
+-spec parse_cli_args([term()]) -> map().
+parse_cli_args(Args) ->
+    lists:foldl(
+        fun
+            ({format, Fmt}, Acc) -> Acc#{format => parse_format(Fmt)};
+            ({mode, Mode}, Acc) -> Acc#{mode => parse_mode(Mode)};
+            ({no_color, true}, Acc) -> Acc#{color => never};
+            (no_color, Acc) -> Acc#{color => never};
+            ({color, true}, Acc) -> Acc#{color => always};
+            (color, Acc) -> Acc#{color => always};
+            ({no_oxbow, true}, Acc) -> Acc#{oxbow => false};
+            (no_oxbow, Acc) -> Acc#{oxbow => false};
+            ({oxbow, true}, Acc) -> Acc#{oxbow => true};
+            (oxbow, Acc) -> Acc#{oxbow => true};
+            ({plt, PltPath}, #{plts := Plts} = Acc) -> Acc#{plts => Plts ++ [unicode:characters_to_list(PltPath)]};
+            ({plt, PltPath}, Acc) -> Acc#{plts => [unicode:characters_to_list(PltPath)]};
+            (_, Acc) -> Acc
+        end,
+        #{},
+        Args
+    ).
+
+%% @doc Parses options configured under `{spectra, [...]}` in `rebar.config`.
+-spec parse_config_opts([term()]) -> map().
+parse_config_opts(Opts) ->
+    lists:foldl(
+        fun
+            ({format, Fmt}, Acc) -> Acc#{format => parse_format(Fmt)};
+            ({mode, Mode}, Acc) -> Acc#{mode => parse_mode(Mode)};
+            ({color, Val}, Acc) when Val =:= always; Val =:= never; Val =:= auto -> Acc#{color => Val};
+            ({oxbow, Val}, Acc) when is_boolean(Val) -> Acc#{oxbow => Val};
+            ({plts, Plts}, Acc) when is_list(Plts) ->
+                Acc#{plts => [unicode:characters_to_list(P) || P <- Plts]};
+            ({plt, Plt}, #{plts := Plts} = Acc) ->
+                Acc#{plts => Plts ++ [unicode:characters_to_list(Plt)]};
+            ({plt, Plt}, Acc) ->
+                Acc#{plts => [unicode:characters_to_list(Plt)]};
+            (_, Acc) ->
+                Acc
+        end,
+        #{},
+        Opts
+    ).
+
+parse_format(json) -> json;
+parse_format("json") -> json;
+parse_format(<<"json">>) -> json;
+parse_format(oneline) -> oneline;
+parse_format("oneline") -> oneline;
+parse_format(<<"oneline">>) -> oneline;
+parse_format(_) -> human.
+
+parse_mode(gradual) -> gradual;
+parse_mode("gradual") -> gradual;
+parse_mode(<<"gradual">>) -> gradual;
+parse_mode(discrepancy) -> discrepancy;
+parse_mode("discrepancy") -> discrepancy;
+parse_mode(<<"discrepancy">>) -> discrepancy;
+parse_mode(_) -> hybrid.
+
+resolve_ebins(_AppEbins, _Root, [_|_] = Targets) ->
+    [unicode:characters_to_list(T) || T <- Targets];
+resolve_ebins([_|_] = AppEbins, _Root, []) ->
+    [unicode:characters_to_list(D) || D <- AppEbins];
+resolve_ebins([], Root, []) ->
+    Wildcard = filename:join([Root, "_build", "*", "lib", "*", "ebin"]),
+    Found = filelib:wildcard(Wildcard),
+    case Found of
+        [_|_] ->
+            Found;
+        [] ->
+            DefaultEbin = filename:join(Root, "ebin"),
+            case filelib:is_dir(DefaultEbin) of
+                true -> [DefaultEbin];
+                false -> []
+            end
+    end.

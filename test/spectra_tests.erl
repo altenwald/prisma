@@ -184,6 +184,83 @@ warning_formats_human_oneline_json_and_color_test() ->
     ?assertEqual(["my_ebin"], maps:get(targets, ParsedOpts)),
 
     %% Mix task parsing
-    MixOpts = 'Elixir.Mix.Tasks.Spectra':parse_args([<<"--format">>, <<"oneline">>, <<"--no-color">>]),
+    MixOpts = 'Elixir.Mix.Tasks.Spectra':parse_args([<<"--format">>, <<"oneline">>, <<"--no-color">>, <<"--mode">>, <<"gradual">>, <<"--plt">>, <<"extra.splt">>]),
     ?assertEqual(oneline, maps:get(format, MixOpts)),
-    ?assertEqual(never, maps:get(color, MixOpts)).
+    ?assertEqual(never, maps:get(color, MixOpts)),
+    ?assertEqual(gradual, maps:get(mode, MixOpts)),
+    ?assertEqual(["extra.splt"], maps:get(plts, MixOpts)),
+
+    MixConfig = 'Elixir.Mix.Tasks.Spectra':parse_mix_config([
+        {mode, gradual},
+        {format, json},
+        {oxbow, false},
+        {color, never},
+        {plts, [<<"mix.splt">>]}
+    ]),
+    ?assertEqual(gradual, maps:get(mode, MixConfig)),
+    ?assertEqual(json, maps:get(format, MixConfig)),
+    ?assertEqual(false, maps:get(oxbow, MixConfig)),
+    ?assertEqual(never, maps:get(color, MixConfig)),
+    ?assertEqual(["mix.splt"], maps:get(plts, MixConfig)),
+
+    Attrs = 'Elixir.Mix.Tasks.Spectra':'__info__'(attributes),
+    ?assert(lists:member({behaviour, ['Elixir.Mix.Task']}, Attrs)),
+    ?assertMatch({shortdoc, [_]}, lists:keyfind(shortdoc, 1, Attrs)),
+    ?assertEqual(false, 'Elixir.Mix.Tasks.Spectra':'__mix_recompile__?'()),
+
+    %% Rebar3 provider parsing & formatting
+    RebarCli = spectra_prv:parse_cli_args([
+        {format, "oneline"},
+        {format, json},
+        {mode, "discrepancy"},
+        {mode, gradual},
+        {no_color, true},
+        {color, true},
+        no_color,
+        color,
+        {no_oxbow, true},
+        {oxbow, true},
+        no_oxbow,
+        oxbow,
+        {plt, "rebar.splt"},
+        {plt, <<"rebar2.splt">>}
+    ]),
+    ?assertEqual(json, maps:get(format, RebarCli)),
+    ?assertEqual(gradual, maps:get(mode, RebarCli)),
+    ?assertEqual(always, maps:get(color, RebarCli)),
+    ?assertEqual(true, maps:get(oxbow, RebarCli)),
+    ?assertEqual(["rebar.splt", "rebar2.splt"], maps:get(plts, RebarCli)),
+
+    RebarConfig = spectra_prv:parse_config_opts([
+        {format, json},
+        {format, "human"},
+        {mode, gradual},
+        {mode, "hybrid"},
+        {color, always},
+        {oxbow, true},
+        {plts, ["cfg.splt"]},
+        {plt, "extra_cfg.splt"}
+    ]),
+    ?assertEqual(human, maps:get(format, RebarConfig)),
+    ?assertEqual(hybrid, maps:get(mode, RebarConfig)),
+    ?assertEqual(always, maps:get(color, RebarConfig)),
+    ?assertEqual(true, maps:get(oxbow, RebarConfig)),
+    ?assertEqual(["cfg.splt", "extra_cfg.splt"], maps:get(plts, RebarConfig)),
+
+    ?assert(is_list(spectra_prv:format_error({warnings_found, 4}))),
+    ?assert(is_list(spectra_prv:format_error(some_failure))),
+    case code:ensure_loaded(rebar_state) of
+        {module, rebar_state} ->
+            State0 = case erlang:function_exported(rebar_state, new, 0) of
+                true -> rebar_state:new();
+                false ->
+                    case erlang:function_exported(rebar_state, new, 1) of
+                        true -> rebar_state:new([]);
+                        false -> rebar_state:new([], [], ".")
+                    end
+            end,
+            ?assertMatch({ok, _}, spectra_prv:init(State0)),
+            ?assertMatch({ok, _}, spectra_prv:do(State0));
+        _ ->
+            ?assertEqual({ok, dummy_state}, spectra_prv:init(dummy_state))
+    end.
