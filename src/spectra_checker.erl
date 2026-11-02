@@ -39,7 +39,7 @@ check_module(Summary, Plt) ->
 
 %% @doc Analyzes a `#module_summary{}` using the configured mode (`hybrid`, `gradual`, `discrepancy`).
 -spec check_module(#module_summary{}, #spectra_plt{}, map()) -> [#spectra_warning{}].
-check_module(#module_summary{functions = Funcs} = Summary, Plt, Opts) ->
+check_module(#module_summary{file = File, functions = Funcs} = Summary, Plt, Opts) ->
     Mode = maps:get(mode, Opts, hybrid),
     ContractWarnings = lists:flatmap(
         fun({_MFA, Contract}) ->
@@ -51,7 +51,16 @@ check_module(#module_summary{functions = Funcs} = Summary, Plt, Opts) ->
         true -> spectra_oxbow:check_module(Summary, Opts);
         false -> []
     end,
-    lists:usort(ContractWarnings ++ OxbowWarnings).
+    AllWarns = lists:usort(ContractWarnings ++ OxbowWarnings),
+    attach_file_to_warnings(AllWarns, File).
+
+attach_file_to_warnings(Warns, undefined) ->
+    Warns;
+attach_file_to_warnings(Warns, File) ->
+    [case W#spectra_warning.file of
+        undefined -> W#spectra_warning{file = File};
+        _ -> W
+     end || W <- Warns].
 
 check_contract(Contract, Plt, Mode) ->
     DiscrepancyWarnings =
@@ -297,7 +306,8 @@ format_human(#spectra_warning{
     actual = Actual,
     expected = Expected,
     callee = Callee,
-    arg_idx = ArgIdx
+    arg_idx = ArgIdx,
+    file = File
 }, Color) ->
     CleanMod = spectra_type:clean_module(Mod),
     Lang = case atom_to_binary(Mod, utf8) of
@@ -316,7 +326,13 @@ format_human(#spectra_warning{
     Tag = colorize("[" ++ KindStr ++ "]", KindColor, Color),
     Loc = colorize(CleanMod ++ ":" ++ atom_to_list(Fun) ++ "/" ++ integer_to_list(Arity), "\e[1m", Color),
     LineStr = colorize("(line " ++ integer_to_list(Line) ++ ")", "\e[2m", Color),
-    Header = [Tag, " ", Loc, " ", LineStr],
+    FileLoc = case File of
+        undefined -> [];
+        _ ->
+            FilePathStr = File ++ ":" ++ integer_to_list(Line),
+            ["\n  ", colorize(FilePathStr, "\e[2m\e[90m", Color)]
+    end,
+    Header = [Tag, " ", Loc, " ", LineStr, FileLoc],
 
     Details = case {Declared, Actual, Expected} of
         {Decl, Act, undefined} when Decl =/= undefined, Act =/= undefined ->
@@ -358,7 +374,8 @@ format_oneline(#spectra_warning{
     actual = Actual,
     expected = Expected,
     callee = Callee,
-    arg_idx = ArgIdx
+    arg_idx = ArgIdx,
+    file = File
 }, Color) ->
     CleanMod = spectra_type:clean_module(Mod),
     Lang = case atom_to_binary(Mod, utf8) of
@@ -366,7 +383,11 @@ format_oneline(#spectra_warning{
         _ -> erlang
     end,
     Tag = colorize("[" ++ atom_to_list(Kind) ++ "]", "\e[1m", Color),
-    Loc = io_lib:format("~s:~B: ~s ~s:~s/~B", [CleanMod, Line, Tag, CleanMod, atom_to_list(Fun), Arity]),
+    SourcePrefix = case File of
+        undefined -> CleanMod;
+        _ -> File
+    end,
+    Loc = io_lib:format("~s:~B: ~s ~s:~s/~B", [SourcePrefix, Line, Tag, CleanMod, atom_to_list(Fun), Arity]),
     Desc = case {Declared, Actual, Expected} of
         {Decl, Act, undefined} when Decl =/= undefined, Act =/= undefined ->
             io_lib:format("declared ~s is incompatible with inferred ~s", [
@@ -398,7 +419,8 @@ encode_warning_json(#spectra_warning{
     actual = Actual,
     expected = Expected,
     callee = Callee,
-    arg_idx = ArgIdx
+    arg_idx = ArgIdx,
+    file = File
 }) ->
     CleanMod = spectra_type:clean_module(Mod),
     Lang = case atom_to_binary(Mod, utf8) of <<"Elixir.", _/binary>> -> elixir; _ -> erlang end,
@@ -411,6 +433,10 @@ encode_warning_json(#spectra_warning{
         <<"    \"line\": ">>, integer_to_binary(Line), <<",\n">>,
         <<"    \"message\": \"">>, json_escape(clean_message_text(Msg)), <<"\"">>
     ],
+    ExtraFile = case File of
+        undefined -> [];
+        _ -> [<<",\n    \"file\": \"">>, json_escape(File), <<"\"">>]
+    end,
     ExtraDeclared = case Declared of
         undefined -> [];
         _ -> [<<",\n    \"declared\": \"">>, json_escape(spectra_type:format(Declared, #{lang => Lang})), <<"\"">>]
@@ -436,7 +462,7 @@ encode_warning_json(#spectra_warning{
             ];
         _ -> []
     end,
-    iolist_to_binary([Base, ExtraDeclared, ExtraActual, ExtraExpected, ExtraArgIdx, ExtraCallee, <<"\n  }">>]).
+    iolist_to_binary([Base, ExtraFile, ExtraDeclared, ExtraActual, ExtraExpected, ExtraArgIdx, ExtraCallee, <<"\n  }">>]).
 
 clean_message_text(Msg) when is_binary(Msg) ->
     binary:replace(Msg, <<"Elixir.">>, <<>>, [global]);

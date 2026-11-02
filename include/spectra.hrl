@@ -26,7 +26,8 @@
     actual = undefined :: undefined | spectra_type:stype(),
     expected = undefined :: undefined | spectra_type:stype(),
     callee = undefined :: undefined | mfa_key(),
-    arg_idx = undefined :: undefined | pos_integer()
+    arg_idx = undefined :: undefined | pos_integer(),
+    file = undefined :: undefined | string()
 }).
 
 -type call_site() :: {non_neg_integer(), mfa_key(), [spectra_type:stype()]}.
@@ -52,7 +53,8 @@
     exports = [] :: [{atom(), arity()}],
     export_types = [] :: [{atom(), arity()}],
     types = #{} :: #{type_key() => #type_decl{}},
-    functions = #{} :: #{mfa_key() => #func_contract{}}
+    functions = #{} :: #{mfa_key() => #func_contract{}},
+    file = undefined :: undefined | string()
 }).
 
 -record(spectra_plt, {

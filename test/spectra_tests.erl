@@ -137,7 +137,8 @@ warning_formats_human_oneline_json_and_color_test() ->
         callee = {'Elixir.Dymmer.Trace', trace, 3},
         arg_idx = 2,
         expected = pos_integer,
-        actual = integer
+        actual = integer,
+        file = "/Users/manuel/dymmer/lib/trace.ex"
     },
     W2 = #spectra_warning{
         kind = gradual_mismatch,
@@ -152,6 +153,7 @@ warning_formats_human_oneline_json_and_color_test() ->
     HumanNoColor = spectra_checker:format_warnings([W1, W2], #{format => human, color => never}),
     ?assertNot(binary:match(HumanNoColor, <<"\e[">>) =/= nomatch),
     ?assert(binary:match(HumanNoColor, <<"Dymmer.Trace:trace/3 (line 53)">>) =/= nomatch),
+    ?assert(binary:match(HumanNoColor, <<"/Users/manuel/dymmer/lib/trace.ex:53">>) =/= nomatch),
     ?assert(binary:match(HumanNoColor, <<"Expected:  pos_integer()">>) =/= nomatch),
     ?assert(binary:match(HumanNoColor, <<"Actual:    integer()">>) =/= nomatch),
     ?assert(binary:match(HumanNoColor, <<"Declared:  :ok | :error">>) =/= nomatch),
@@ -159,16 +161,18 @@ warning_formats_human_oneline_json_and_color_test() ->
     %% Human with color
     HumanColor = spectra_checker:format_warnings([W1], #{format => human, color => always}),
     ?assert(binary:match(HumanColor, <<"\e[">>) =/= nomatch),
+    ?assert(binary:match(HumanColor, <<"\e[2m\e[90m/Users/manuel/dymmer/lib/trace.ex:53\e[0m">>) =/= nomatch),
 
     %% Oneline
     OneLine = spectra_checker:format_warnings([W1, W2], #{format => oneline, color => never}),
-    ?assert(binary:match(OneLine, <<"Dymmer.Trace:53: [gradual_mismatch] Dymmer.Trace:trace/3:">>) =/= nomatch),
+    ?assert(binary:match(OneLine, <<"/Users/manuel/dymmer/lib/trace.ex:53: [gradual_mismatch] Dymmer.Trace:trace/3:">>) =/= nomatch),
     ?assert(binary:match(OneLine, <<"DymmerWeb.Api:39: [gradual_mismatch] DymmerWeb.Api:create/2:">>) =/= nomatch),
 
     %% JSON
     JsonBin = spectra_checker:format_warnings([W1, W2], #{format => json}),
     ?assert(binary:match(JsonBin, <<"\"kind\": \"gradual_mismatch\"">>) =/= nomatch),
     ?assert(binary:match(JsonBin, <<"\"module\": \"Dymmer.Trace\"">>) =/= nomatch),
+    ?assert(binary:match(JsonBin, <<"\"file\": \"/Users/manuel/dymmer/lib/trace.ex\"">>) =/= nomatch),
     ?assert(binary:match(JsonBin, <<"\"expected\": \"pos_integer()\"">>) =/= nomatch),
     ?assert(binary:match(JsonBin, <<"\"actual\": \"integer()\"">>) =/= nomatch),
 

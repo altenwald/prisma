@@ -33,26 +33,45 @@ normalize_input(Path) when is_list(Path) ->
     Path.
 
 extract_chunks(Beam, Module, Md5) ->
-    ChunkNames = [exports, attributes, debug_info],
+    ChunkNames = [exports, attributes, compile_info, debug_info],
     case beam_lib:chunks(Beam, ChunkNames, [allow_missing_chunks]) of
         {ok, {Module, Chunks}} ->
             Exports = proplists:get_value(exports, Chunks, []),
             Attrs = normalize_chunks_val(proplists:get_value(attributes, Chunks, [])),
+            CompileInfo = normalize_chunks_val(proplists:get_value(compile_info, Chunks, [])),
             Dbgi = proplists:get_value(debug_info, Chunks, missing_chunk),
             Lang = detect_language(Module, Dbgi),
             Vsn = proplists:get_value(vsn, Attrs, []),
             ExportTypes = lists:append(proplists:get_all_values(export_type, Attrs)),
+            SourceFile = extract_source_file(CompileInfo, Dbgi),
             BaseSummary = #module_summary{
                 module = Module,
                 language = Lang,
                 vsn = Vsn,
                 beam_md5 = Md5,
                 exports = Exports,
-                export_types = ExportTypes
+                export_types = ExportTypes,
+                file = SourceFile
             },
             enrich_from_debug_info(Beam, Module, Dbgi, Exports, BaseSummary);
         {error, beam_lib, Reason} ->
             {error, Reason}
+    end.
+
+extract_source_file(CompileInfo, Dbgi) ->
+    case proplists:get_value(source, CompileInfo) of
+        Src when is_list(Src), Src =/= "" ->
+            filename:absname(Src);
+        SrcBin when is_binary(SrcBin), SrcBin =/= <<>> ->
+            filename:absname(unicode:characters_to_list(SrcBin));
+        _ ->
+            case Dbgi of
+                {debug_info_v1, elixir_erl, {elixir_v1, #{file := FileBin}, _}}
+                  when is_binary(FileBin), FileBin =/= <<>> ->
+                    filename:absname(unicode:characters_to_list(FileBin));
+                _ ->
+                    undefined
+            end
     end.
 
 normalize_chunks_val(missing_chunk) -> [];
@@ -139,10 +158,20 @@ parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types 
     ),
     WithSpecs = merge_specs_into_funcs(Mod, ExportSet, Specs, InitialFuncs),
     InferredFuncs = spectra_infer:infer_module_functions(Mod, ClausesByMFA, WithSpecs),
+    ResolvedFile = case Summary#module_summary.file of
+        undefined ->
+            case [FPath || {attribute, _Anno, file, {FPath, _Line}} <- Forms, is_list(FPath), FPath =/= ""] of
+                [FoundPath | _] -> filename:absname(FoundPath);
+                [] -> undefined
+            end;
+        Existing ->
+            Existing
+    end,
     Summary#module_summary{
         export_types = AllExpTypes,
         types = MarkedTypes,
-        functions = InferredFuncs
+        functions = InferredFuncs,
+        file = ResolvedFile
     }.
 
 merge_specs_into_funcs(Mod, ExportSet, Specs, Funcs) ->

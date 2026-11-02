@@ -115,15 +115,37 @@ decode(_) ->
 
 upgrade_plt(#spectra_plt{modules = Mods} = Plt) ->
     NewMods = maps:map(
-        fun(_M, #module_summary{functions = Funcs} = Summary) when is_map(Funcs) ->
-            NewFuncs = maps:map(fun(_MFA, FC) -> upgrade_func_contract(FC) end, Funcs),
-            Summary#module_summary{functions = NewFuncs};
-           (_M, Summary) ->
-            Summary
+        fun(_M, Summary0) ->
+            Summary = upgrade_module_summary(Summary0),
+            Funcs = Summary#module_summary.functions,
+            case is_map(Funcs) of
+                true ->
+                    NewFuncs = maps:map(fun(_MFA, FC) -> upgrade_func_contract(FC) end, Funcs),
+                    Summary#module_summary{functions = NewFuncs};
+                false ->
+                    Summary
+            end
         end,
         Mods
     ),
     Plt#spectra_plt{modules = NewMods}.
+
+upgrade_module_summary(#module_summary{} = MS) ->
+    MS;
+upgrade_module_summary({module_summary, Mod, Lang, Vsn, Md5, Exports, ExpTypes, Types, Funcs}) ->
+    #module_summary{
+        module = Mod,
+        language = Lang,
+        vsn = Vsn,
+        beam_md5 = Md5,
+        exports = Exports,
+        export_types = ExpTypes,
+        types = Types,
+        functions = Funcs,
+        file = undefined
+    };
+upgrade_module_summary(Other) ->
+    Other.
 
 upgrade_func_contract(#func_contract{} = FC) ->
     FC;
