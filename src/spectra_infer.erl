@@ -515,8 +515,20 @@ infer_binop(MFA, Anno, Op, LAst, LType, RAst, RType, Env0, Warns, Sites)
             Env1 = constrain_ast_var(LAst, integer, constrain_ast_var(RAst, integer, Env0)),
             {integer, Env1, Warns, Sites}
     end;
+%% `andalso` / `orelse` short-circuit: only the left operand has to be a boolean, and the result is the right operand
+%% (any term) when the left one does not decide: `A andalso B` is `false | B`, `A orelse B` is `true | B`.
+infer_binop(MFA, Anno, Op, LAst, LType, _RAst, RType, Env0, Warns, Sites)
+  when Op =:= 'andalso'; Op =:= 'orelse' ->
+    case spectra_type:meet(LType, boolean) of
+        none when LType =/= none ->
+            Msg = iolist_to_binary(io_lib:format("Boolean operator '~s' will fail (~p, ~p)", [Op, LType, RType])),
+            {none, Env0, [make_warning(discrepancy, MFA, Anno, Msg) | Warns], Sites};
+        _ ->
+            Env1 = constrain_ast_var(LAst, boolean, Env0),
+            {short_circuit_type(Op, LType, RType), Env1, Warns, Sites}
+    end;
 infer_binop(MFA, Anno, Op, LAst, LType, RAst, RType, Env0, Warns, Sites)
-  when Op =:= 'and'; Op =:= 'or'; Op =:= 'xor'; Op =:= 'andalso'; Op =:= 'orelse' ->
+  when Op =:= 'and'; Op =:= 'or'; Op =:= 'xor' ->
     LM = spectra_type:meet(LType, boolean),
     RM = spectra_type:meet(RType, boolean),
     case (LM =:= none andalso LType =/= none) orelse (RM =:= none andalso RType =/= none) of
@@ -756,6 +768,16 @@ check_call_site(CallerMFA, Line, {CM, CF, CA}, ZipArgs) ->
         ZipArgs
     ),
     lists:reverse(Warns).
+
+%% The value of `L andalso R` / `L orelse R` given what L may be.
+short_circuit_type(Op, LType, RType) ->
+    {Deciding, Passes} = case Op of
+        'andalso' -> {{atom_lit, false}, {atom_lit, true}};
+        'orelse' -> {{atom_lit, true}, {atom_lit, false}}
+    end,
+    Decides = spectra_type:meet(LType, Deciding) =/= none,
+    RightRuns = spectra_type:meet(LType, Passes) =/= none,
+    spectra_type:normalize_union([T || {true, T} <- [{Decides, Deciding}, {RightRuns, RType}]]).
 
 %% Return types that depend on the argument: tl([1 | 2]) is 2, not a list.
 bif_return_type(tl, [ArgType], _Static) ->

@@ -404,3 +404,45 @@ cons_chain_does_not_nest_test() ->
 unknown_tail_is_not_assumed_to_be_a_list_test() ->
     %% [H | T] with T unknown: T may be anything, so a clause that needs an integer tail is reachable
     ?assertEqual([], cell_warnings("f(T) ->\n    case [1 | T] of\n        [H | N] when is_integer(N) -> H + N;\n        _ -> 0\n    end.\n")).
+
+%% `andalso` / `orelse`: only the left operand has to be a boolean; the result is the right operand when the left one
+%% does not decide. (They used to be read as `and` / `or`, so a non-boolean right operand "failed".)
+
+short_circuit_warnings(Src) ->
+    {ok, Ws} = spectra:analyze_beams([improper_sample(Src)], #{mode => discrepancy, oxbow => false}),
+    [{K, L} || #spectra_warning{kind = K, line = L} <- Ws].
+
+andalso_orelse_accept_a_non_boolean_right_operand_test() ->
+    ?assertEqual([], short_circuit_warnings("f(X) -> X > 0 orelse {false, \"negative\"}.\n")),
+    ?assertEqual([], short_circuit_warnings("f(B) -> B andalso 1.\n")),
+    ?assertEqual([], short_circuit_warnings("f(B) ->\n    case B andalso 0 of\n        false -> 0;\n        N when is_integer(N) -> N\n    end.\n")),
+    %% with a literal `true` on the left the `false` clause really is dead
+    ?assertMatch([{dead_code, 5}], short_circuit_warnings("f(_) ->\n    case true andalso 0 of\n        false -> 0;\n        N when is_integer(N) -> N\n    end.\n")),
+    ?assertEqual([], short_circuit_warnings("f(B) ->\n    case B orelse {false, 3} of\n        true -> 1;\n        {false, N} -> N\n    end.\n")).
+
+andalso_orelse_result_is_the_right_operand_or_the_deciding_boolean_test() ->
+    AndRet = inferred_return("f(B) -> B andalso 1."),
+    ?assert(spectra_oracle:member(false, AndRet)),
+    ?assert(spectra_oracle:member(1, AndRet)),
+    ?assertNot(spectra_oracle:member(true, AndRet)),
+    ?assertNot(spectra_oracle:member(2, AndRet)),
+    OrRet = inferred_return("f(B) -> B orelse {false, 3}."),
+    ?assert(spectra_oracle:member(true, OrRet)),
+    ?assert(spectra_oracle:member({false, 3}, OrRet)),
+    ?assertNot(spectra_oracle:member(false, OrRet)),
+    %% both operands boolean: still a boolean
+    ?assertEqual(boolean, inferred_return("f(A) when is_boolean(A) -> A andalso (A =:= true).")).
+
+andalso_orelse_with_a_known_left_operand_test() ->
+    ?assertEqual({int_lit, 0}, inferred_return("f(_) -> true andalso 0.")),
+    ?assertEqual({atom_lit, false}, inferred_return("f(_) -> false andalso 0.")),
+    ?assertEqual({atom_lit, true}, inferred_return("f(_) -> true orelse 0.")),
+    ?assertEqual({int_lit, 0}, inferred_return("f(_) -> false orelse 0.")).
+
+andalso_orelse_still_need_a_boolean_on_the_left_test() ->
+    ?assertMatch([{discrepancy, 5}], short_circuit_warnings("f(_) ->\n    ok,\n    1 andalso true.\n")),
+    ?assertMatch([{discrepancy, 5}], short_circuit_warnings("f(_) ->\n    ok,\n    foo orelse true.\n")).
+
+and_or_xor_stay_strict_test() ->
+    ?assertMatch([{discrepancy, 5}], short_circuit_warnings("f(_) ->\n    ok,\n    true and 0.\n")),
+    ?assertMatch([{discrepancy, 5}], short_circuit_warnings("f(_) ->\n    ok,\n    false or foo.\n")).

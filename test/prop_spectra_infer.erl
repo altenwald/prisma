@@ -17,23 +17,16 @@
 -define(TAGS, [int, bool, atom, pair, cell, list]).
 -define(RUNS, 25).
 
--export([known_bug_inference_and_warnings_agree_with_execution/0]).
-
 %% -------------------------------------------------------------------------
 %% Program generator
 %% -------------------------------------------------------------------------
 
-%% Ex lists what the generator leaves out because it is already known to break Spectra:
-%%   nonboolean_operands  `andalso`/`orelse` whose right operand is not a boolean
-%% The Env carries it as {ex, Ex}; variables are {Name :: string(), Tag}.
-program(Ex) ->
-    ?LET(Tags, [tag(Ex), tag(Ex)],
-         ?LET(Body, body([{ex, Ex}, {"A", lists:nth(1, Tags)}, {"B", lists:nth(2, Tags)}]),
+program() ->
+    ?LET(Tags, [tag(), tag()],
+         ?LET(Body, body([{"A", lists:nth(1, Tags)}, {"B", lists:nth(2, Tags)}]),
               {render(Body), Tags})).
 
-tag(_Ex) -> oneof(?TAGS).
-
-excluded(What, Env) -> lists:member(What, proplists:get_value(ex, Env, [])).
+tag() -> oneof(?TAGS).
 
 render({Stmts, Last}) ->
     lists:flatten(["-module(MODNAME).\n-export([f/2]).\nf(A, B) ->\n", string:join(Stmts, ",\n"),
@@ -64,9 +57,8 @@ stmt(V, K, Env) ->
     CellCase = ?LET(C, expr(cell, Env, 1),
                     {fmt("    ~s = case ~s of\n        [H~s | T~s] when is_integer(T~s) -> H~s + T~s\n    end",
                          [V, C, S, S, S, S, S]), int}),
-    oneof(case excluded(nonboolean_operands, Env) of true -> []; false -> NonBoolean end ++
-          [CellCase] ++ [
-        ?LET(T, tag(proplists:get_value(ex, Env)), ?LET(E, expr(T, Env, 2), {line(V, E), T})),
+    oneof(NonBoolean ++ [CellCase] ++ [
+        ?LET(T, tag(), ?LET(E, expr(T, Env, 2), {line(V, E), T})),
         ?LET({I, X, Y}, {expr(int, Env, 1), expr(int, Env, 1), expr(int, Env, 1)},
              {fmt("    ~s = case ~s of\n        0 -> ~s;\n        _ -> ~s\n    end", [V, I, X, Y]), int}),
         ?LET(L, expr(list, Env, 1),
@@ -197,18 +189,8 @@ run_all(Mod, [Args | Rest], Dom, Ret, Claims) ->
 %% Property
 %% -------------------------------------------------------------------------
 
-%% KNOWN BUG, disabled on purpose (not named prop_*): with nothing excluded the property fails, and shrinks to
-%%   case true andalso 0 of false -> 0; N when is_integer(N) -> N end       ("andalso will fail": it runs)
-%% Rename to prop_* when fixed (see bench/repro/).
-known_bug_inference_and_warnings_agree_with_execution() ->
-    property([]).
-
-%% Everything else: any failure here is a new finding.
-prop_inference_and_warnings_agree_with_execution_without_known_bugs() ->
-    property([nonboolean_operands]).
-
-property(Ex) ->
-    ?FORALL({Src, Tags}, program(Ex),
+prop_inference_and_warnings_agree_with_execution() ->
+    ?FORALL({Src, Tags}, program(),
         ?FORALL(Samples, samples(Tags),
             begin
                 R = check(Src, Samples),

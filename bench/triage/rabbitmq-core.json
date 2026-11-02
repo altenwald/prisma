@@ -31,11 +31,13 @@
  },
  "rabbit_auth_backend_authn_state:credentials_valid:62:discrepancy": {
   "verdict": "false_positive",
-  "cause": "andalso_orelse"
+  "cause": "andalso_orelse",
+  "status": "fixed: andalso/orelse short-circuit semantics"
  },
  "mc_compat:death_hops:380:dead_code": {
   "verdict": "false_positive",
-  "cause": "andalso_orelse"
+  "cause": "andalso_orelse",
+  "status": "fixed: andalso/orelse short-circuit semantics"
  },
  "rabbit_amqp_util:has_capability:62:dead_code": {
   "verdict": "debatable",
@@ -72,5 +74,5 @@
  "rabbit_ff_controller:state_after_virtual_reset:601:discrepancy": {
   "verdict": "pending"
  },
- "_note_fixed": "The 37 rabbit_fifo* warnings (improper cells) are gone since the improper-cells fix: 51 -> 14 warnings on deps/rabbit, no new ones. Only 5 of them are listed individually above."
+ "_note_fixed": "The 37 rabbit_fifo* warnings (improper cells) are gone since the improper-cells fix: 51 -> 14 warnings on deps/rabbit, no new ones. Only 5 of them are listed individually above. The two andalso/orelse warnings are gone as well: 14 -> 12."
 }

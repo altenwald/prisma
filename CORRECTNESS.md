@@ -37,7 +37,8 @@ minimal reproduction in [`bench/repro/`](bench/repro/README.md).
 
 So **at least 41 of 51 were false positives and none of the 51 is a confirmed real defect**. After the improper-cells fix
 (37 warnings, all of `rabbit_fifo*`) the same run gives **14**, with none new: the two `andalso`/`orelse` ones, the overloaded
-specs, the 5 that the declared `-spec` rules out and the 5 not looked at yet.
+specs, the 5 that the declared `-spec` rules out and the 5 not looked at yet. Then the `andalso`/`orelse` fix took the two of
+that cause: **12 left**, none new.
 
 ## Property-based tests: type algebra (PropEr)
 
@@ -82,7 +83,7 @@ in the first session, each in a few lines (all in [`bench/repro/`](bench/repro/R
 
 | Shrunk program | What Spectra says | Truth |
 | :--- | :--- | :--- |
-| `case true andalso 0 of false -> 0; N when is_integer(N) -> N end` | "`andalso` will fail", "guard cannot succeed" | returns `0` (open) |
+| `case true andalso 0 of false -> 0; N when is_integer(N) -> N end` | "`andalso` will fail", "guard cannot succeed" | returns `0` (**fixed**) |
 | `case [0 \| 0] of [H \| T] when is_integer(T) -> H + T end` | inferred return type `none` | returns `0` (**fixed**) |
 | `f() -> -1.` and `case f() of -1 -> ok end` | `f/0` returns `1`; "no clause can match" | returns `-1` |
 
@@ -91,11 +92,19 @@ literal was inferred as its absolute value**. It is **fixed** (`negate_type/1` i
 `test/spectra_infer_tests.erl`) and the generator now produces negative literals. Measured on RabbitMQ (`rabbit`, discrepancy
 mode) the fix changes nothing: the same 51 warnings before and after, so none of them came from this bug.
 
-The full property (`known_bug_inference_and_warnings_agree_with_execution`) still fails because of the open one (`andalso`/`orelse`
-with a non-boolean right operand) and is disabled under a name PropEr does not run. The same generator with that construct left out
-(`prop_inference_and_warnings_agree_with_execution_without_known_bugs`) passes **1500 programs x 25 runs**, now including improper
-cells and `hd`/`tl`, so nothing else in this fragment has been refuted yet.
-The fragment is small: no maps, records, funs, `try`, binaries, calls between modules or specs.
+All three are fixed, and the property is now the plain `prop_inference_and_warnings_agree_with_execution`: it passes **1500
+programs x 25 runs** with no construct left out. Run against the sources from before the last fix it fails in 7 cases, so it is
+not passing because it went blind. The fragment is small: no maps, records, funs, `try`, binaries, calls between modules or specs.
+
+## `andalso` / `orelse`: the fix
+
+Only the **left** operand of `andalso` / `orelse` has to be a boolean; the value is the right operand (any term) when the left one
+does not decide. Spectra read them as `and` / `or`: it reported "will fail" when the right operand was not a boolean, narrowed the
+right operand's variable to `boolean` (also wrong), and typed the result as `boolean`. Now `A andalso B` is `false | B`, `A orelse B`
+is `true | B` (narrowed by what A may be: `true andalso 0` is `0`, and a literal `true` on the left makes a `false ->` clause
+really dead, which is reported), and the left operand is still checked. `and`, `or` and `xor` stay strict.
+
+Measured on RabbitMQ (`rabbit`, discrepancy mode): **14 -> 12 warnings, exactly the two expected, none new.**
 
 ## Improper cells: the fix and what it costs
 
