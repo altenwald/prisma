@@ -41,68 +41,15 @@ Spectra introduces the portable, binary **`.splt`** format:
 
 ---
 
-## 🚀 Installation & Building
+## 🛠️ Usage
 
-Spectra is built with **Rebar3**:
-
-```bash
-git clone https://github.com/altenwald/spectra.git
-cd spectra
-rebar3 compile
-rebar3 eunit
-rebar3 escriptize
-```
-
-The resulting standalone executable will be located at:
-```bash
-./_build/default/bin/spectra
-```
+Spectra is designed to integrate seamlessly into both **Erlang** (via Rebar3) and **Elixir** (via Mix) workflows, as well as running as a standalone command-line executable.
 
 ---
 
-## 🛠️ Usage
+### 1. Rebar3 Plugin (Erlang)
 
-### Running Spectra CLI
-
-Check the current project (automatically detects `rebar.lock` or `mix.lock` and isolates application code from dependencies):
-
-```bash
-spectra check
-```
-
-#### Output Formats
-
-```bash
-# Pretty multiline output with ANSI colors (default)
-spectra check --format human
-
-# Compact one-line format for IDEs and linters
-spectra check --format oneline
-
-# Structured JSON output for CI pipelines
-spectra check --format json
-```
-
-#### Color Control
-
-```bash
-# Explicitly disable colors
-spectra check --no-color
-
-# Or use the standard NO_COLOR environment variable
-NO_COLOR=1 spectra check
-```
-
-#### Analyzing Specific Paths or Custom SPLTs
-
-```bash
-# Analyze specific ebin directories against a custom SPLT
-spectra check --splt /path/to/project.splt _build/default/lib/*/ebin
-```
-
-### Running as a Rebar3 Plugin (Erlang)
-
-Add Spectra to your `rebar.config` as a project plugin:
+Add Spectra to your `rebar.config` under `project_plugins`:
 
 ```erlang
 {project_plugins, [
@@ -110,26 +57,60 @@ Add Spectra to your `rebar.config` as a project plugin:
 ]}.
 ```
 
-Run analysis:
-
-```bash
-rebar3 spectra
-rebar3 spectra --format oneline
-rebar3 spectra --format json
-```
-
-Optional project-level defaults in `rebar.config`:
+Or reference the Git repository directly:
 
 ```erlang
-{spectra, [
-    {mode, hybrid},      %% hybrid | gradual | discrepancy
-    {format, human},     %% human | oneline | json
-    {oxbow, true},       %% detect dead functions and ignored parameters
-    {color, auto}        %% auto | always | never
+{project_plugins, [
+    {spectra, {git, "https://github.com/altenwald/spectra.git", {branch, "main"}}}
 ]}.
 ```
 
-### Running as a Mix Dependency (Elixir)
+#### Running Analysis
+
+Run `rebar3 spectra` inside your project:
+
+```bash
+# Basic check (automatically compiles and analyzes project apps against locked .splt deps)
+rebar3 spectra
+
+# Output format: human (default), oneline (for editor linters), or json (for CI)
+rebar3 spectra --format oneline
+rebar3 spectra --format json
+
+# Analysis mode: hybrid (default), gradual, or discrepancy
+rebar3 spectra --mode gradual
+rebar3 spectra --mode discrepancy
+
+# Color control
+rebar3 spectra --no-color
+rebar3 spectra --color
+
+# Oxbow code detection (unused private functions and ignored parameters)
+rebar3 spectra --no-oxbow
+```
+
+#### Project Configuration (`rebar.config`)
+
+You can set project-wide defaults under the `{spectra, [...]}` key in `rebar.config`. CLI arguments override these settings:
+
+```erlang
+{spectra, [
+    {mode, hybrid},         %% hybrid | gradual | discrepancy
+    {format, human},        %% human | oneline | json
+    {oxbow, true},          %% true | false (detect dead functions and ignored parameters)
+    {color, auto},          %% auto | always | never
+    {plts, ["custom.splt"]} %% optional extra .splt files to include
+]}.
+```
+
+#### Exit Codes
+
+- `0`: Analysis succeeded with 0 warnings.
+- `1`: Type discrepancies, gradual contract mismatches, or oxbow code were detected.
+
+---
+
+### 2. Mix Task (Elixir)
 
 Add Spectra to your `mix.exs` dependencies:
 
@@ -141,28 +122,101 @@ def deps do
 end
 ```
 
-Run analysis:
+Or reference the Git repository:
 
-```bash
-mix spectra
-mix spectra --format oneline
-mix spectra --format json
+```elixir
+def deps do
+  [
+    {:spectra, github: "altenwald/spectra", only: [:dev, :test], runtime: false}
+  ]
+end
 ```
 
-Optional project-level defaults in `mix.exs`:
+#### Running Analysis
+
+Run `mix spectra` inside your Elixir project:
+
+```bash
+# Basic check (automatically ensures compilation and analyzes your app)
+mix spectra
+
+# Output format: human (default), oneline (for editor diagnostics), or json (for CI tools)
+mix spectra --format oneline
+mix spectra --format json
+
+# Analysis mode: hybrid (default), gradual, or discrepancy
+mix spectra --mode gradual
+
+# Color control
+mix spectra --no-color
+mix spectra --color
+
+# Oxbow code detection
+mix spectra --no-oxbow
+
+# Target specific Mix environment (defaults to dev or $MIX_ENV)
+mix spectra --env test
+```
+
+#### Project Configuration (`mix.exs`)
+
+Configure project-level defaults directly in `mix.exs`:
 
 ```elixir
 def project do
   [
-    ...,
+    app: :my_app,
+    version: "0.1.0",
     spectra: [
-      mode: :hybrid,     # :hybrid | :gradual | :discrepancy
-      format: :human,    # :human | :oneline | :json
-      oxbow: true,       # detect dead functions and ignored parameters
-      color: :auto       # :auto | :always | :never
-    ]
+      mode: :hybrid,        # :hybrid | :gradual | :discrepancy
+      format: :human,       # :human | :oneline | :json
+      oxbow: true,          # true | false
+      color: :auto,         # :auto | :always | :never
+      plts: []              # optional extra .splt paths
+    ],
+    deps: deps()
   ]
 end
+```
+
+#### Built-in Task Documentation
+
+Spectra integrates with Mix's help system. View options directly in your terminal:
+
+```bash
+mix help spectra
+```
+
+---
+
+### 3. Standalone CLI Executable
+
+You can also build and install Spectra as a standalone escript:
+
+```bash
+git clone https://github.com/altenwald/spectra.git
+cd spectra
+rebar3 escriptize
+./_build/default/bin/spectra check
+```
+
+#### CLI Options
+
+```bash
+# Check current directory (auto-detects rebar.lock or mix.lock)
+spectra check
+
+# Formats
+spectra check --format human
+spectra check --format oneline
+spectra check --format json
+
+# Color control (also respects standard NO_COLOR environment variable)
+spectra check --no-color
+NO_COLOR=1 spectra check
+
+# Analyze specific BEAM directories against a custom SPLT
+spectra check --splt /path/to/project.splt _build/default/lib/*/ebin
 ```
 
 ---
