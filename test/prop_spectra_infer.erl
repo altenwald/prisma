@@ -25,14 +25,20 @@
 
 program() ->
     ?LET(Callee, callee(),
-         ?LET(Tags, [tag(), tag()],
+         ?LET({Tags, Rec}, {[tag(), tag()], boolean()},
               ?LET(Body, body([{callee, Callee}, {"A", lists:nth(1, Tags)}, {"B", lists:nth(2, Tags)}]),
-                   {render(Body), render_callee(Callee), Tags}))).
+                   {render(Body, Rec), render_callee(Callee), Tags, Rec}))).
 
 tag() -> oneof(?TAGS).
 
-render({Stmts, Last}) ->
-    lists:flatten(["-module(MODNAME).\n-export([f/2]).\nf(A, B) ->\n", string:join(Stmts, ",\n"),
+%% With Rec the second argument is taken out of a record in the head, `#r{v = B}`: the variables of a record pattern are
+%% not in the inference environment, which is where the environment joins of guards go wrong.
+render({Stmts, Last}, Rec) ->
+    {Decl, Head} = case Rec of
+        true -> {"-record(r, {v}).\n", "f(A, #r{v = B})"};
+        false -> {"", "f(A, B)"}
+    end,
+    lists:flatten(["-module(MODNAME).\n-export([f/2]).\n", Decl, Head, " ->\n", string:join(Stmts, ",\n"),
                    ",\n    ", Last, ".\n"]).
 
 %% The module the generated code calls: g/1 or g/2 with an overloaded -spec, one clause per vector of argument types. Its
@@ -99,7 +105,23 @@ stmt(V, K, Env) ->
     end,
     FloatEq = ?LET({F, X, Y}, {expr(float, Env, 1), expr(int, Env, 1), expr(int, Env, 1)},
                    {fmt("    ~s = if\n        ~s == 0 -> ~s;\n        true -> ~s\n    end", [V, F, X, Y]), int}),
-    oneof(NonBoolean ++ CallStmts ++ [CellCase, FloatEq] ++ [
+    VarNames = [N || {N, T} <- Env, is_list(N), is_atom(T)],
+    IntVars = [N || {N, int} <- Env, is_list(N)],
+    CompareFloat = ?LET({F, X, Y, Z}, {expr(float, Env, 1), expr(int, Env, 1), expr(int, Env, 1), expr(int, Env, 1)},
+                        {fmt("    ~s = if\n        ~s < 0 -> ~s;\n        ~s > 0 -> ~s;\n        true -> ~s\n    end",
+                             [V, F, X, F, Y, Z]), int}),
+    %% X > 0 is true of every non-number, X < 0 of negative numbers only; X is any variable, whatever its type
+    CompareAny = ?LET(X, elements(VarNames),
+                      {fmt("    ~s = if\n        ~s > 0 -> 1;\n        ~s < 0 -> 2;\n        true -> 3\n    end", [V, X, X]), int}),
+    OrelseGuard = case IntVars of
+        [_, _ | _] ->
+            [?LET({X, Y}, ?SUCHTHAT({P, Q}, {elements(IntVars), elements(IntVars)}, P =/= Q),
+                  {fmt("    ~s = if\n        ~s == 0 orelse ~s == 0 -> case ~s of\n            5 -> 1;\n            _ -> 2\n        end;\n        true -> 0\n    end",
+                       [V, X, Y, Y]), int})];
+        _ ->
+            []
+    end,
+    oneof(NonBoolean ++ CallStmts ++ OrelseGuard ++ [CellCase, FloatEq, CompareFloat, CompareAny] ++ [
         ?LET(T, tag(), ?LET(E, expr(T, Env, 2), {line(V, E), T})),
         ?LET({I, X, Y}, {expr(int, Env, 1), expr(int, Env, 1), expr(int, Env, 1)},
              {fmt("    ~s = case ~s of\n        0 -> ~s;\n        _ -> ~s\n    end", [V, I, X, Y]), int}),
@@ -165,7 +187,8 @@ value(cell) -> ?LET({X, Y}, {range(-3, 5), range(-3, 5)}, [X | Y]);
 value(list) -> resize(3, list(range(-3, 5)));
 value(float) -> oneof([0.0, 0.5, 1.0, -1.5, 2.0]).
 
-samples([T1, T2]) -> vector(?RUNS, [value(T1), value(T2)]).
+samples([T1, T2], Rec) ->
+    vector(?RUNS, [value(T1), ?LET(V2, value(T2), case Rec of true -> {r, V2}; false -> V2 end)]).
 
 fmt(F, A) -> lists:flatten(io_lib:format(F, A)).
 
@@ -253,8 +276,8 @@ run_all(Mod, [Args | Rest], Dom, Ret, Claims) ->
 %% -------------------------------------------------------------------------
 
 prop_inference_and_warnings_agree_with_execution() ->
-    ?FORALL({Src, CalleeSrc, Tags}, program(),
-        ?FORALL(Samples, samples(Tags),
+    ?FORALL({Src, CalleeSrc, Tags, Rec}, program(),
+        ?FORALL(Samples, samples(Tags, Rec),
             begin
                 R = check(Src, CalleeSrc, Samples),
                 ?WHENFAIL(io:format("~n~s~n~s~n~p~n", [Src, CalleeSrc, R]), R =:= ok)

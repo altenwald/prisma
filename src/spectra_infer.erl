@@ -299,12 +299,9 @@ apply_guard_test({op, _, 'and', L, R}, Env0) ->
     apply_guard_test({op, 0, 'andalso', L, R}, Env0);
 apply_guard_test({op, _, 'orelse', L, R}, Env0) ->
     apply_guard_disjunction([[L], [R]], Env0);
-apply_guard_test({op, _, '>', {var, _, V}, {integer, _, 0}}, Env) ->
-    refine_var(V, pos_integer, Env);
-apply_guard_test({op, _, '>=', {var, _, V}, {integer, _, 0}}, Env) ->
-    refine_var(V, non_neg_integer, Env);
-apply_guard_test({op, _, '<', {var, _, V}, {integer, _, 0}}, Env) ->
-    refine_var(V, neg_integer, Env);
+apply_guard_test({op, _, Op, {var, _, V}, {integer, _, 0}}, Env)
+  when Op =:= '>'; Op =:= '>='; Op =:= '<' ->
+    refine_compare_zero(V, Op, Env);
 apply_guard_test({op, _, '==', {var, _, V}, {integer, _, I}}, Env) ->
     %% `==` compares numbers by value: X == 0 also holds for 0.0
     refine_var(V, {union, [{int_lit, I}, float]}, Env);
@@ -315,6 +312,24 @@ apply_guard_test({atom, _, false}, _Env) ->
     unreachable;
 apply_guard_test(_, Env) ->
     {ok, Env}.
+
+%% `V > 0`, `V >= 0`, `V < 0`. Floats qualify as well as integers, and, in the term order (numbers < atoms < ... <
+%% lists), every non-number is greater than 0: so `>` and `>=` say nothing about V unless it is known to be a number, and
+%% `<` is only true of negative numbers.
+refine_compare_zero(V, Op, Env) ->
+    Prev = maps:get(V, Env, any),
+    KnownNumber = case Prev of
+        any -> false;
+        {var, _} -> false;
+        _ -> spectra_type:consistent_subtype(Prev, number)
+    end,
+    Type = case Op of
+        '<' -> {union, [neg_integer, float]};
+        '>' when KnownNumber -> {union, [pos_integer, float]};
+        '>=' when KnownNumber -> {union, [non_neg_integer, float]};
+        _ -> any
+    end,
+    refine_var(V, Type, Env).
 
 apply_guard_bif(GuardName, [{var, _, V}], Env) ->
     case guard_type(GuardName) of
@@ -349,22 +364,18 @@ refine_var(V, Type, Env) ->
         M -> {ok, Env#{V => M}}
     end.
 
+%% The environment after several alternatives: a variable keeps a type only if every alternative constrains it (one that
+%% does not leaves it unconstrained, which is `any`, not nothing).
 join_envs([First | Rest]) ->
-    lists:foldl(
-        fun(E, Acc) ->
-            maps:fold(
-                fun(K, V, MAcc) ->
-                    case maps:find(K, MAcc) of
-                        {ok, Prev} -> MAcc#{K => spectra_type:join(Prev, V)};
-                        error -> MAcc#{K => V}
-                    end
-                end,
-                Acc,
-                E
-            )
+    maps:fold(
+        fun(K, V, Acc) ->
+            case lists:all(fun(E) -> maps:is_key(K, E) end, Rest) of
+                true -> Acc#{K => lists:foldl(fun(E, T) -> spectra_type:join(T, maps:get(K, E)) end, V, Rest)};
+                false -> Acc
+            end
         end,
-        First,
-        Rest
+        #{},
+        First
     ).
 
 infer_body(_Mod, _MFA, [], Env, _AllContracts, Warns, Sites) ->

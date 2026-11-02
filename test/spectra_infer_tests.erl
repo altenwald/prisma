@@ -493,3 +493,35 @@ float_equals_integer_in_a_guard_test() ->
 exact_equality_still_separates_float_and_integer_test() ->
     %% `=:=` between a float and an integer can never be true: this one really is dead
     ?assertMatch([{dead_code, 6}], short_circuit_warnings("f(X) ->\n    T = X / 2,\n    if\n        T =:= 0 -> zero;\n        true -> other\n    end.\n")).
+
+%% Comparing with 0: `X > 0` holds for 0.5 and for any non-number (term order: numbers < atoms < ...), `X < 0` only for
+%% negative numbers. The guard used to make X an integer. And the environments of an `orelse` guard are joined: a
+%% variable constrained in only one branch is unconstrained afterwards.
+
+plain_warnings(Src) ->
+    Text = "-module(cmp_sample).\n" ++ Src,
+    {ok, Toks, _} = erl_scan:string(Text),
+    {ok, cmp_sample, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+    {ok, Ws} = spectra:analyze_beams([Beam], #{mode => discrepancy, oxbow => false}),
+    [{K, L} || #spectra_warning{kind = K, line = L} <- Ws].
+
+comparison_with_zero_keeps_floats_test() ->
+    ?assertEqual([], plain_warnings("-export([f/1]).\nf(X) when is_float(X) ->\n    case X - 1 of\n        Neg when Neg < 0 -> a;\n        Pos when Pos > 0 -> b;\n        _ -> c\n    end.\n")),
+    ?assertEqual([], plain_warnings("-export([f/1]).\nf(P) when is_float(P), P >= 0, P =< 1 -> P;\nf(_) -> other.\n")).
+
+comparison_with_zero_accepts_non_numbers_test() ->
+    %% every term that is not a number is greater than 0
+    ?assertEqual([], plain_warnings("-export([g/0]).\nf(X) when X > 0 -> pos;\nf(_) -> other.\ng() -> f(a).\n")),
+    ?assertEqual([], plain_warnings("-export([g/0]).\nf(X) when X >= 0 -> pos;\nf(_) -> other.\ng() -> f(foo).\n")).
+
+comparison_with_zero_still_refines_numbers_test() ->
+    %% an integer cannot be both positive and negative
+    ?assertMatch([{dead_code, 3} | _], plain_warnings("-export([f/1]).\nf(N) when is_integer(N), N > 0, N < 0 -> x;\nf(_) -> y.\n")).
+
+orelse_guard_joins_environments_test() ->
+    %% Range comes out of a record pattern: it is not in the environment, and constrained in only one branch
+    Src = "-export([f/2]).\n-record(st, {range}).\n"
+          "f(P, #st{range = Range}) when P == undefined orelse Range == undefined orelse P == 1 ->\n"
+          "    case Range of\n        undefined -> a;\n        {_, _} -> b\n    end;\n"
+          "f(_, _) -> c.\n",
+    ?assertEqual([], plain_warnings(Src)).
