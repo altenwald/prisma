@@ -6,3 +6,6 @@
 *.tar
 /doc/
 /deps/
+/bench/corpus/
+/bench/results/
+/erl_crash.dump

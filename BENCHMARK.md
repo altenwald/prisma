@@ -126,3 +126,47 @@ In continuous integration (CI) environments running clean, non-cached containers
 1. **Sub-Second Feedback Loop**: For individual applications containing hundreds of modules (such as `rabbit` with 245 modules), Spectra delivers complete results in **856 milliseconds**, enabling true save-time editor feedback compared to Dialyzer's ~9 seconds.
 2. **CPU Efficiency**: Dialyzer expended **75.6 seconds of cumulative core time** on the 440-module suite due to recursive fixpoint refinements over whole-program control-flow graphs. Spectra completed equivalent success and gradual verification in **4.0 seconds of CPU time** (an 18.7× reduction in compute overhead).
 3. **Memory Footprint**: Spectra capped its memory utilization at **441 MiB** during the 440-module analysis, whereas Dialyzer scaled up to **1,286.8 MiB (~1.3 GB)**, making Spectra significantly safer for memory-constrained CI runners and containerized developer workstations.
+
+---
+
+## 🧾 Warnings produced (what each tool actually reported)
+
+Speed only means something if the outputs are comparable. Same corpus as above, rebuilt from the pinned commit
+(`bench/corpus/rabbitmq`; this build has 234 modules in `rabbit`, 440 in the seven applications). Raw output and the
+normalized JSON are produced by `bench/adapters.py` (see `bench/README.md`).
+
+| Corpus | Spectra | Dialyzer (`--no_check_plt`, erts/kernel/stdlib PLT) | xref |
+| :--- | :--- | :--- | :--- |
+| `rabbit` (234 mods) | **246**: 115 contract, 80 unused, 33 dead code, 18 discrepancy | **0 type discrepancies**: 39 "callback info not available" notes + 1 unknown-functions list | 0 undefined calls, 0 unused locals |
+| 7 apps (440 mods) | **515**: 311 contract, 103 unused, 66 dead code, 35 discrepancy | **0 type discrepancies**: 3 notes + 1 unknown-functions list (335 functions) | 7 undefined calls, 0 unused locals |
+
+Reading: RabbitMQ runs Dialyzer in its own CI, so near-zero discrepancies is the expected result, and Spectra reporting
+hundreds on the same code means that **most of those warnings are either findings Dialyzer does not look for (spec
+contracts) or false positives**. Until they are triaged (`bench/triage/`, `../CORRECTNESS.md`) the speed advantage says
+nothing about quality. Two false positives are already confirmed against the source:
+
+1. `rabbit_feature_flags:is_enabled/2` is specified with overloaded clauses (`(.., blocking) -> ..; (.., non_blocking) -> ..`)
+   and Spectra expects only the first one: every `is_enabled(Flag, non_blocking)` call is reported as "will fail".
+2. `?MSG(Index, Header)` expands to `[Index | Header]`, an improper list whose tail is an integer or a map. Spectra types the
+   cell as `[any()]`, so the calls and clauses that handle the tail are reported as "will fail" / "cannot match"
+   (`rabbit_fifo*` family).
+
+Dialyzer was run without the PLT of the dependencies, as in the benchmarks above; a run with a full PLT is still pending.
+
+## 📦 `.splt` cache: cold vs warm
+
+`spectra build-plt` over the six dependencies of `rabbit` (206 modules) and `spectra check` over `rabbit/ebin`
+(single runs on the same machine, `/usr/bin/time -l`; hyperfine runs are pending):
+
+| Step | Wall | Peak RSS | Warnings |
+| :--- | :---: | :---: | :---: |
+| `build-plt` of the 6 dependency apps (cold, once per version) | 3.9 s | 331 MiB | n/a (2.3 MB file) |
+| `check rabbit` **without** `--plt` | 1.2 – 1.4 s | 360 – 480 MiB | 246 |
+| `check rabbit` **with** the dependency `.splt` | 1.9 – 2.8 s | 585 MiB | 291 |
+
+The cache is not free: loading a 2.3 MB `.splt` adds roughly 0.6 – 1.4 s and about 110 MiB, and it changes the result
+(+45 warnings: 14 discrepancy and 31 contract; presumably calls into the dependencies, not yet checked one by one). The "0.00 s cold start" in the table above
+is therefore only true when dependencies are not analysed at all.
+
+Also observed once: `spectra check` over the 100 modules of OTP `stdlib` took 3 min 34 s (207 s user CPU), far from the
+sub-second figures above. Not yet reproduced with hyperfine or split by module.

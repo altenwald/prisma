@@ -1,0 +1,72 @@
+{
+ "_doc": "Manual verdicts for Spectra warnings on rabbitmq-server 5dacb85, deps/rabbit. key = module:function:line:kind. verdict: real | false_positive | debatable.",
+ "rabbit_khepri:get_effective_topic_binding_projection_version:1888:discrepancy": {
+  "verdict": "false_positive",
+  "cause": "overloaded -spec clauses: only the first clause is used (rabbit_feature_flags:is_enabled/2, blocking | non_blocking)"
+ },
+ "rabbit_khepri:get_effective_topic_binding_projection_version:1894:discrepancy": {
+  "verdict": "false_positive",
+  "cause": "same as above"
+ },
+ "rabbit_fifo_v7:chunk_disk_msgs:2082:discrepancy": {
+  "verdict": "false_positive",
+  "cause": "?MSG(I, H) is [I | H]; improper list typed as [any()], tail lost"
+ },
+ "rabbit_fifo_v3:chunk_disk_msgs:2009:discrepancy": {
+  "verdict": "false_positive",
+  "cause": "same as above"
+ },
+ "rabbit_fifo:get_header:2497:dead_code": {
+  "verdict": "false_positive",
+  "cause": "same as above: clause pattern ?TUPLE(Size, Expiry) = [Size | Expiry]"
+ },
+ "_causes": {
+  "improper_list": "[H|T] used as a pair; tail typed as list. repro: bench/repro/improper_list_and_andalso.erl b/1. Assigned to all rabbit_fifo* warnings (37) without checking each line by hand.",
+  "andalso_orelse": "right operand of andalso/orelse is any term. repro: orelse_non_boolean.erl, improper_list_and_andalso.erl d/0",
+  "overloaded_spec": "only the first clause of an overloaded -spec is used. repro: overloaded_spec_*.erl",
+  "spec_excludes_clause": "clause or guard ruled out by the declared -spec: debatable (defensive code)"
+ },
+ "rabbit_auth_backend_authn_state:credentials_valid:62:discrepancy": {
+  "verdict": "false_positive",
+  "cause": "andalso_orelse"
+ },
+ "mc_compat:death_hops:380:dead_code": {
+  "verdict": "false_positive",
+  "cause": "andalso_orelse"
+ },
+ "rabbit_amqp_util:has_capability:62:dead_code": {
+  "verdict": "debatable",
+  "cause": "spec_excludes_clause"
+ },
+ "rabbit_definitions:import_parsed:204:dead_code": {
+  "verdict": "debatable",
+  "cause": "spec_excludes_clause"
+ },
+ "rabbit_definitions:import_parsed_with_hashing:240:dead_code": {
+  "verdict": "debatable",
+  "cause": "spec_excludes_clause"
+ },
+ "rabbit_vhost_limit:is_over_connection_limit:102:dead_code": {
+  "verdict": "debatable",
+  "cause": "spec_excludes_clause"
+ },
+ "rabbit_vhost_limit:would_exceed_queue_limit:125:dead_code": {
+  "verdict": "debatable",
+  "cause": "spec_excludes_clause"
+ },
+ "rabbit_variable_queue:update_rate:709:dead_code": {
+  "verdict": "pending"
+ },
+ "rabbit_peer_discovery:select_node_to_join:902:dead_code": {
+  "verdict": "pending"
+ },
+ "rabbit_fifo_index:append:66:dead_code": {
+  "verdict": "pending"
+ },
+ "rabbit_feature_flags:get_stability:795:discrepancy": {
+  "verdict": "pending"
+ },
+ "rabbit_ff_controller:state_after_virtual_reset:601:discrepancy": {
+  "verdict": "pending"
+ }
+}
