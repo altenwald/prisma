@@ -305,6 +305,9 @@ apply_guard_test({op, _, '>=', {var, _, V}, {integer, _, 0}}, Env) ->
     refine_var(V, non_neg_integer, Env);
 apply_guard_test({op, _, '<', {var, _, V}, {integer, _, 0}}, Env) ->
     refine_var(V, neg_integer, Env);
+apply_guard_test({op, _, '==', {var, _, V}, {integer, _, I}}, Env) ->
+    %% `==` compares numbers by value: X == 0 also holds for 0.0
+    refine_var(V, {union, [{int_lit, I}, float]}, Env);
 apply_guard_test({op, _, Op, {var, _, V}, Lit}, Env)
   when Op =:= '=:='; Op =:= '==' ->
     refine_var(V, literal_or_any(Lit), Env);

@@ -2,11 +2,13 @@
  "_doc": "Manual verdicts for Spectra warnings on rabbitmq-server 5dacb85, deps/rabbit. key = module:function:line:kind. verdict: real | false_positive | debatable.",
  "rabbit_khepri:get_effective_topic_binding_projection_version:1888:discrepancy": {
   "verdict": "false_positive",
-  "cause": "overloaded -spec clauses: only the first clause is used (rabbit_feature_flags:is_enabled/2, blocking | non_blocking)"
+  "cause": "overloaded -spec clauses: only the first clause is used (rabbit_feature_flags:is_enabled/2, blocking | non_blocking)",
+  "status": "fixed: overloaded -spec as whole vectors"
  },
  "rabbit_khepri:get_effective_topic_binding_projection_version:1894:discrepancy": {
   "verdict": "false_positive",
-  "cause": "same as above"
+  "cause": "same as above",
+  "status": "fixed: overloaded -spec as whole vectors"
  },
  "rabbit_fifo_v7:chunk_disk_msgs:2082:discrepancy": {
   "verdict": "false_positive",
@@ -60,19 +62,27 @@
   "cause": "spec_excludes_clause"
  },
  "rabbit_variable_queue:update_rate:709:dead_code": {
-  "verdict": "pending"
+  "verdict": "false_positive",
+  "cause": "float_equals_integer: == compares by value, 0.0 == 0",
+  "status": "fixed"
  },
  "rabbit_peer_discovery:select_node_to_join:902:dead_code": {
-  "verdict": "pending"
+  "verdict": "debatable",
+  "cause": "spec_excludes_clause"
  },
  "rabbit_fifo_index:append:66:dead_code": {
-  "verdict": "pending"
+  "verdict": "debatable",
+  "cause": "spec_excludes_clause"
  },
  "rabbit_feature_flags:get_stability:795:discrepancy": {
-  "verdict": "pending"
+  "verdict": "false_positive",
+  "cause": "overloaded_spec",
+  "status": "fixed: overloaded -spec as whole vectors"
  },
  "rabbit_ff_controller:state_after_virtual_reset:601:discrepancy": {
-  "verdict": "pending"
+  "verdict": "false_positive",
+  "cause": "overloaded_spec",
+  "status": "fixed: overloaded -spec as whole vectors"
  },
- "_note_fixed": "The 37 rabbit_fifo* warnings (improper cells) are gone since the improper-cells fix: 51 -> 14 warnings on deps/rabbit, no new ones. Only 5 of them are listed individually above. The two andalso/orelse warnings are gone as well: 14 -> 12."
+ "_note_fixed": "The 37 rabbit_fifo* warnings (improper cells) are gone since the improper-cells fix: 51 -> 14 warnings on deps/rabbit, no new ones. Only 5 of them are listed individually above. The two andalso/orelse warnings are gone as well: 14 -> 12. Overloaded specs: 12 -> 8. Float ==: 8 -> 7. The 7 left are all spec_excludes_clause (debatable)."
 }

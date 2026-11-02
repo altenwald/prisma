@@ -102,9 +102,10 @@ collect_discrepancies(#func_contract{mfa = {CallerMod, _, _} = CallerMFA, local_
 check_remote_discrepancy_call({CallerMod, _, _} = CallerMFA, Line, {CalleeMod, _, _} = CalleeMFA, ActualArgs, Plt) ->
     case spectra_plt:lookup_mfa(CalleeMFA, Plt) of
         {ok, #func_contract{declared_specs = Specs, inferred_type = Inferred}} ->
-            case resolve_expected_args(CallerMod, CalleeMod, Specs, Inferred, Plt) of
-                {ok, ExpectedArgs} when length(ExpectedArgs) =:= length(ActualArgs) ->
-                    spectra_infer:check_call_site(CallerMFA, Line, CalleeMFA, lists:zip(ActualArgs, ExpectedArgs));
+            case resolve_expected_arg_vectors(CallerMod, CalleeMod, Specs, Inferred, Plt) of
+                {ok, Vectors} ->
+                    check_vectors(Vectors, ActualArgs,
+                                  fun(Zipped) -> spectra_infer:check_call_site(CallerMFA, Line, CalleeMFA, Zipped) end);
                 _ ->
                     []
             end;
@@ -117,9 +118,10 @@ verify_gradual_calls(#func_contract{mfa = {CallerMod, _, _} = CallerMFA, call_si
         fun({Line, {CalleeMod, _, _} = CalleeMFA, ActualArgs}) ->
             case spectra_plt:lookup_mfa(CalleeMFA, Plt) of
                 {ok, #func_contract{declared_specs = [ _ | _ ] = Specs, inferred_type = Inferred}} ->
-                    case resolve_expected_args(CallerMod, CalleeMod, Specs, Inferred, Plt) of
-                        {ok, ExpectedArgs} when length(ExpectedArgs) =:= length(ActualArgs) ->
-                            check_gradual_args(CallerMFA, Line, CalleeMFA, lists:zip(ActualArgs, ExpectedArgs));
+                    case resolve_expected_arg_vectors(CallerMod, CalleeMod, Specs, Inferred, Plt) of
+                        {ok, Vectors} ->
+                            check_vectors(Vectors, ActualArgs,
+                                          fun(Zipped) -> check_gradual_args(CallerMFA, Line, CalleeMFA, Zipped) end);
                         _ ->
                             []
                     end;
@@ -166,24 +168,46 @@ classify_gradual_failure({opaque, _, _, _, _}, _) -> opacity_violation;
 classify_gradual_failure(_, {opaque, _, _, _, _}) -> opacity_violation;
 classify_gradual_failure(_, _) -> gradual_mismatch.
 
-resolve_expected_args(CallerMod, CalleeMod, [SpecClause | _], _Inferred, Plt) ->
-    case spectra_type:unfold_bounded_fun(SpecClause) of
-        {fun_type, SpecArgs, _Ret} ->
-            Resolved = [
-                case spectra_plt:resolve_type(CallerMod, CalleeMod, A, Plt) of
-                    {ok, R} -> R;
-                    _ -> A
-                end
-                || A <- SpecArgs
-            ],
-            {ok, Resolved};
-        _ ->
-            error
+%% The argument types a call may use: one vector per clause of an overloaded -spec (or the inferred ones when there is no
+%% spec). A call is acceptable when ANY vector accepts it as a whole, so clauses are never mixed position by position.
+resolve_expected_arg_vectors(CallerMod, CalleeMod, [_ | _] = SpecClauses, _Inferred, Plt) ->
+    Vectors = lists:filtermap(
+        fun(SpecClause) ->
+            case spectra_type:unfold_bounded_fun(SpecClause) of
+                {fun_type, SpecArgs, _Ret} ->
+                    {true, [
+                        case spectra_plt:resolve_type(CallerMod, CalleeMod, A, Plt) of
+                            {ok, R} -> R;
+                            _ -> A
+                        end
+                        || A <- SpecArgs
+                    ]};
+                _ ->
+                    false
+            end
+        end,
+        SpecClauses
+    ),
+    case Vectors of
+        [] -> error;
+        _ -> {ok, Vectors}
     end;
-resolve_expected_args(_CallerMod, _CalleeMod, [], {fun_type, InferredArgs, _Ret}, _Plt) ->
-    {ok, InferredArgs};
-resolve_expected_args(_, _, _, _, _) ->
+resolve_expected_arg_vectors(_CallerMod, _CalleeMod, [], {fun_type, InferredArgs, _Ret}, _Plt) ->
+    {ok, [InferredArgs]};
+resolve_expected_arg_vectors(_, _, _, _, _) ->
     error.
+
+%% No warnings if some vector accepts the call; otherwise the warnings against the first vector.
+check_vectors(Vectors, ActualArgs, Check) ->
+    Results = [Check(lists:zip(ActualArgs, V)) || V <- Vectors, length(V) =:= length(ActualArgs)],
+    case lists:any(fun(Warnings) -> Warnings =:= [] end, Results) of
+        true -> [];
+        false ->
+            case Results of
+                [First | _] -> First;
+                [] -> []
+            end
+    end.
 
 verify_gradual_spec(_MFA, [], _Inferred, _Line, _Plt) ->
     [];

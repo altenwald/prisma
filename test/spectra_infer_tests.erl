@@ -446,3 +446,50 @@ andalso_orelse_still_need_a_boolean_on_the_left_test() ->
 and_or_xor_stay_strict_test() ->
     ?assertMatch([{discrepancy, 5}], short_circuit_warnings("f(_) ->\n    ok,\n    true and 0.\n")),
     ?assertMatch([{discrepancy, 5}], short_circuit_warnings("f(_) ->\n    ok,\n    false or foo.\n")).
+
+%% Overloaded -spec across modules: a call is fine when SOME clause accepts it, taking each clause as one whole
+%% vector of arguments (it used to look at the first clause only).
+
+two_module_warnings(CallerSrc, CalleeSrc, Mode) ->
+    Compile = fun(Name, Src) ->
+        {ok, Toks, _} = erl_scan:string("-module(" ++ Name ++ ").\n" ++ Src),
+        {ok, _, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+        Beam
+    end,
+    {ok, Ws} = spectra:analyze_beams([Compile("ov_caller", CallerSrc), Compile("ov_callee", CalleeSrc)],
+                                     #{mode => Mode, oxbow => false}),
+    [{K, L} || #spectra_warning{kind = K, line = L} <- Ws].
+
+overloaded_callee() ->
+    "-export([g/1, h/2]).\n"
+    "-spec g(blocking) -> ok; (non_blocking) -> ok.\n"
+    "g(_) -> ok.\n"
+    "-spec h(integer(), boolean()) -> ok; (atom(), integer()) -> ok.\n"
+    "h(_, _) -> ok.\n".
+
+overloaded_spec_accepts_any_clause_test() ->
+    Caller = "-export([f/0]).\nf() ->\n    ov_callee:g(non_blocking),\n    ov_callee:g(blocking),\n    ov_callee:h(1, true),\n    ov_callee:h(a, 1).\n",
+    ?assertEqual([], two_module_warnings(Caller, overloaded_callee(), discrepancy)),
+    ?assertEqual([], two_module_warnings(Caller, overloaded_callee(), gradual)).
+
+overloaded_spec_clauses_are_whole_vectors_test() ->
+    %% (1, 1) mixes the first position of one clause with the second of the other: no clause accepts it
+    Caller = "-export([f/0]).\nf() ->\n    ov_callee:h(1, 1).\n",
+    ?assertMatch([{discrepancy, 4}], two_module_warnings(Caller, overloaded_callee(), discrepancy)),
+    ?assertMatch([{_, 4}], two_module_warnings(Caller, overloaded_callee(), gradual)).
+
+overloaded_spec_still_rejects_what_no_clause_accepts_test() ->
+    Caller = "-export([f/0]).\nf() ->\n    ov_callee:g(neither).\n",
+    ?assertMatch([{discrepancy, 4}], two_module_warnings(Caller, overloaded_callee(), discrepancy)),
+    ?assertMatch([{_, 4}], two_module_warnings(Caller, overloaded_callee(), gradual)).
+
+%% `==` compares numbers by value (0.0 == 0), `=:=` does not: a float can satisfy `X == 0` but never `X =:= 0`.
+
+float_equals_integer_in_a_guard_test() ->
+    ?assertEqual([], short_circuit_warnings("f(X) ->\n    T = X / 2,\n    if\n        T == 0 -> zero;\n        true -> other\n    end.\n")),
+    ?assertEqual([], short_circuit_warnings("f(N) when is_integer(N), N == 0 -> zero;\nf(_) -> other.\n")),
+    ?assertEqual([], short_circuit_warnings("f(N) when is_float(N), N == 0 -> zero;\nf(_) -> other.\n")).
+
+exact_equality_still_separates_float_and_integer_test() ->
+    %% `=:=` between a float and an integer can never be true: this one really is dead
+    ?assertMatch([{dead_code, 6}], short_circuit_warnings("f(X) ->\n    T = X / 2,\n    if\n        T =:= 0 -> zero;\n        true -> other\n    end.\n")).

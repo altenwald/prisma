@@ -14,7 +14,9 @@
 -include_lib("proper/include/proper.hrl").
 -include("spectra.hrl").
 
--define(TAGS, [int, bool, atom, pair, cell, list]).
+-define(TAGS, [int, bool, atom, pair, cell, list, float]).
+%% what the generated callee module accepts (its -spec is overloaded over these)
+-define(CALLEE_TAGS, [int, bool, atom, pair, list]).
 -define(RUNS, 25).
 
 %% -------------------------------------------------------------------------
@@ -22,15 +24,45 @@
 %% -------------------------------------------------------------------------
 
 program() ->
-    ?LET(Tags, [tag(), tag()],
-         ?LET(Body, body([{"A", lists:nth(1, Tags)}, {"B", lists:nth(2, Tags)}]),
-              {render(Body), Tags})).
+    ?LET(Callee, callee(),
+         ?LET(Tags, [tag(), tag()],
+              ?LET(Body, body([{callee, Callee}, {"A", lists:nth(1, Tags)}, {"B", lists:nth(2, Tags)}]),
+                   {render(Body), render_callee(Callee), Tags}))).
 
 tag() -> oneof(?TAGS).
 
 render({Stmts, Last}) ->
     lists:flatten(["-module(MODNAME).\n-export([f/2]).\nf(A, B) ->\n", string:join(Stmts, ",\n"),
                    ",\n    ", Last, ".\n"]).
+
+%% The module the generated code calls: g/1 or g/2 with an overloaded -spec, one clause per vector of argument types. Its
+%% guards are exclusive per type and its clauses return their own number, so an argument outside every vector crashes
+%% (function_clause) and a call inside one runs: a warning on a call that ran is refuted by the run, not by the spec.
+callee() ->
+    ?LET(Arity, oneof([1, 2]),
+         ?LET(Vecs, resize(3, non_empty(list(vector(Arity, oneof(?CALLEE_TAGS))))),
+              {Arity, lists:usort(Vecs)})).
+
+render_callee({Arity, Vecs}) ->
+    Vars = [fmt("X~b", [I]) || I <- lists:seq(1, Arity)],
+    Spec = string:join([fmt("(~s) -> integer()", [string:join([spec_type(T) || T <- Vec], ", ")]) || Vec <- Vecs], "; "),
+    Clauses = [fmt("g(~s) when ~s -> ~b",
+                   [string:join(Vars, ", "), string:join([guard(T, V) || {T, V} <- lists:zip(Vec, Vars)], ", "), K])
+               || {K, Vec} <- lists:zip(lists:seq(1, length(Vecs)), Vecs)],
+    lists:flatten(["-module(CALLEE).\n-export([g/", integer_to_list(Arity), "]).\n-spec g", Spec, ".\n",
+                   string:join(Clauses, ";\n"), ".\n"]).
+
+spec_type(int) -> "integer()";
+spec_type(bool) -> "boolean()";
+spec_type(atom) -> "a | b | c";
+spec_type(pair) -> "{integer(), integer()}";
+spec_type(list) -> "[integer()]".
+
+guard(int, V) -> fmt("is_integer(~s)", [V]);
+guard(bool, V) -> fmt("is_boolean(~s)", [V]);
+guard(atom, V) -> fmt("(~s =:= a orelse ~s =:= b orelse ~s =:= c)", [V, V, V]);
+guard(pair, V) -> fmt("(is_tuple(~s) andalso tuple_size(~s) =:= 2)", [V, V]);
+guard(list, V) -> fmt("is_list(~s)", [V]).
 
 body(Env) ->
     ?LET(N, range(1, 4), body(N, Env, 1, [])).
@@ -57,7 +89,17 @@ stmt(V, K, Env) ->
     CellCase = ?LET(C, expr(cell, Env, 1),
                     {fmt("    ~s = case ~s of\n        [H~s | T~s] when is_integer(T~s) -> H~s + T~s\n    end",
                          [V, C, S, S, S, S, S]), int}),
-    oneof(NonBoolean ++ [CellCase] ++ [
+    CallStmts = case lists:keyfind(callee, 1, Env) of
+        {callee, {Arity, Vecs}} ->
+            [?LET(ArgTags, frequency([{4, oneof(Vecs)}, {1, vector(Arity, oneof(?CALLEE_TAGS))}]),
+                  ?LET(Args, [expr(T, Env, 1) || T <- ArgTags],
+                       {fmt("    ~s = CALLEE:g(~s)", [V, string:join(Args, ", ")]), int}))];
+        false ->
+            []
+    end,
+    FloatEq = ?LET({F, X, Y}, {expr(float, Env, 1), expr(int, Env, 1), expr(int, Env, 1)},
+                   {fmt("    ~s = if\n        ~s == 0 -> ~s;\n        true -> ~s\n    end", [V, F, X, Y]), int}),
+    oneof(NonBoolean ++ CallStmts ++ [CellCase, FloatEq] ++ [
         ?LET(T, tag(), ?LET(E, expr(T, Env, 2), {line(V, E), T})),
         ?LET({I, X, Y}, {expr(int, Env, 1), expr(int, Env, 1), expr(int, Env, 1)},
              {fmt("    ~s = case ~s of\n        0 -> ~s;\n        _ -> ~s\n    end", [V, I, X, Y]), int}),
@@ -83,7 +125,8 @@ leaf(bool, _) -> oneof(["true", "false"]);
 leaf(atom, _) -> oneof(["a", "b", "c"]);
 leaf(pair, Env) -> ?LET({X, Y}, {lowest(Env, 5), lowest(Env, 5)}, fmt("{(~b), (~b)}", [X, Y]));
 leaf(cell, Env) -> ?LET({X, Y}, {lowest(Env, 5), lowest(Env, 5)}, fmt("[(~b) | (~b)]", [X, Y]));
-leaf(list, _) -> oneof(["[]", "[1, 2]"]).
+leaf(list, _) -> oneof(["[]", "[1, 2]"]);
+leaf(float, _) -> oneof(["0.0", "1.5", "2.0"]).
 
 lowest(_Env, Hi) -> range(-3, Hi).
 
@@ -102,6 +145,8 @@ compound(bool, Env, D) ->
         ?LET({X, Y}, {expr(bool, Env, D - 1), expr(bool, Env, D - 1)}, fmt("(~s orelse ~s)", [X, Y]))
     ]);
 compound(atom, Env, _D) -> leaf(atom, Env);
+compound(float, Env, D) ->
+    ?LET({X, Y}, {expr(int, Env, D - 1), expr(int, Env, D - 1)}, fmt("(~s / ~s)", [X, Y]));
 compound(pair, Env, D) ->
     ?LET({X, Y}, {expr(int, Env, D - 1), expr(int, Env, D - 1)}, fmt("{~s, ~s}", [X, Y]));
 compound(cell, Env, D) ->
@@ -117,7 +162,8 @@ value(bool) -> boolean();
 value(atom) -> oneof([a, b, c]);
 value(pair) -> {range(-3, 5), range(-3, 5)};
 value(cell) -> ?LET({X, Y}, {range(-3, 5), range(-3, 5)}, [X | Y]);
-value(list) -> resize(3, list(range(-3, 5))).
+value(list) -> resize(3, list(range(-3, 5)));
+value(float) -> oneof([0.0, 0.5, 1.0, -1.5, 2.0]).
 
 samples([T1, T2]) -> vector(?RUNS, [value(T1), value(T2)]).
 
@@ -138,20 +184,34 @@ split([{dot, _} = D | Rest], Acc, Forms) ->
 split([T | Rest], Acc, Forms) -> split(Rest, [T | Acc], Forms).
 
 %% ok | {refuted, Reason}
-check(Src0, Samples) ->
+check(Src0, CalleeSrc0, Samples) ->
     Name = "pm" ++ integer_to_list(erlang:unique_integer([positive])),
-    Src = lists:flatten(string:replace(Src0, "MODNAME", Name, all)),
-    {ok, Mod, Beam} = compile:forms([{attribute, 1, file, {Name ++ ".erl", 1}} | forms(Src)], [debug_info, binary]),
+    CalleeName = Name ++ "_c",
+    Replace = fun(Text) ->
+        lists:flatten(string:replace(lists:flatten(string:replace(Text, "MODNAME", Name, all)), "CALLEE", CalleeName, all))
+    end,
+    Src = Replace(Src0),
+    CalleeSrc = Replace(CalleeSrc0),
+    Compile = fun(N, Text) ->
+        {ok, M, B} = compile:forms([{attribute, 1, file, {N ++ ".erl", 1}} | forms(Text)], [debug_info, binary]),
+        {M, B}
+    end,
+    {Mod, Beam} = Compile(Name, Src),
+    {CalleeMod, CalleeBeam} = Compile(CalleeName, CalleeSrc),
     Dir = filename:absname(filename:join(["_build", "test", "prop_infer"])),
     File = filename:join(Dir, Name ++ ".beam"),
+    CalleeFile = filename:join(Dir, CalleeName ++ ".beam"),
     ok = filelib:ensure_dir(File),
     ok = file:write_file(File, Beam),
+    ok = file:write_file(CalleeFile, CalleeBeam),
+    {module, CalleeMod} = code:load_abs(filename:rootname(CalleeFile)),
     try
         {ok, Plt} = spectra_plt:from_beams([Beam]),
         #module_summary{functions = Funcs} = maps:get(Mod, Plt#spectra_plt.modules),
         {fun_type, Dom, Ret} = (maps:get({Mod, f, 2}, Funcs))#func_contract.inferred_type,
-        {ok, Warnings} = spectra:analyze_beams([Beam], #{mode => discrepancy, oxbow => false}),
-        Claims = [W || #spectra_warning{kind = K} = W <- Warnings, K =:= discrepancy orelse K =:= dead_code],
+        {ok, Warnings} = spectra:analyze_beams([Beam, CalleeBeam], #{mode => discrepancy, oxbow => false}),
+        Claims = [W || #spectra_warning{kind = K, mfa = {WMod, _, _}} = W <- Warnings, WMod =:= Mod,
+                       K =:= discrepancy orelse K =:= dead_code],
         _ = cover:start(),
         {ok, Mod} = cover:compile_beam(File),
         run_all(Mod, Samples, Dom, Ret, Claims)
@@ -159,7 +219,10 @@ check(Src0, Samples) ->
         _ = cover:stop(),
         code:purge(Mod),
         code:delete(Mod),
-        file:delete(File)
+        code:purge(CalleeMod),
+        code:delete(CalleeMod),
+        file:delete(File),
+        file:delete(CalleeFile)
     end.
 
 run_all(_Mod, [], _Dom, _Ret, _Claims) -> ok;
@@ -190,9 +253,9 @@ run_all(Mod, [Args | Rest], Dom, Ret, Claims) ->
 %% -------------------------------------------------------------------------
 
 prop_inference_and_warnings_agree_with_execution() ->
-    ?FORALL({Src, Tags}, program(),
+    ?FORALL({Src, CalleeSrc, Tags}, program(),
         ?FORALL(Samples, samples(Tags),
             begin
-                R = check(Src, Samples),
-                ?WHENFAIL(io:format("~n~s~n~p~n", [Src, R]), R =:= ok)
+                R = check(Src, CalleeSrc, Samples),
+                ?WHENFAIL(io:format("~n~s~n~s~n~p~n", [Src, CalleeSrc, R]), R =:= ok)
             end)).

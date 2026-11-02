@@ -32,13 +32,15 @@ minimal reproduction in [`bench/repro/`](bench/repro/README.md).
 | `[H \| T]` used as a pair (`?MSG(Index, Header)` in `rabbit_fifo*`): the tail is typed as a list | 37 (`rabbit_fifo`, `_v3`, `_v7`, `_v8`) | false positive, reproduced. **Fixed**: 51 -> 14 warnings, none new (see below) |
 | `orelse` / `andalso` with a non-boolean right operand | 2 (`rabbit_auth_backend_authn_state`, `mc_compat`) | **false positive**, reproduced |
 | Overloaded `-spec` (`(.., blocking) -> ..; (.., non_blocking) -> ..`): only the first clause counts | 2 (`rabbit_khepri`), maybe 2 more | **false positive**, reproduced |
-| Clause or guard that the declared `-spec` rules out (`rabbit_amqp_util`, `rabbit_definitions` x2, `rabbit_vhost_limit` x2) | 5 | **debatable**: true against the contract (defensive code), Dialyzer is silent |
-| Not looked at yet (`rabbit_variable_queue`, `rabbit_peer_discovery`, `rabbit_fifo_index`, `rabbit_feature_flags`, `rabbit_ff_controller`) | 5 | pending |
+| Clause or guard that the declared `-spec` rules out (`rabbit_amqp_util`, `rabbit_definitions` x2, `rabbit_vhost_limit` x2, `rabbit_fifo_index`, `rabbit_peer_discovery`) | 7 | **debatable**: true against the contract (defensive code), Dialyzer is silent. All that is left in `rabbit` |
+| `Time == 0` with `Time` a float (`rabbit_variable_queue:update_rate/4`): `==` compares by value, `0.0 == 0` | 1 | false positive, found while triaging. **Fixed**: 8 -> 7, none new |
 
 So **at least 41 of 51 were false positives and none of the 51 is a confirmed real defect**. After the improper-cells fix
 (37 warnings, all of `rabbit_fifo*`) the same run gives **14**, with none new: the two `andalso`/`orelse` ones, the overloaded
 specs, the 5 that the declared `-spec` rules out and the 5 not looked at yet. Then the `andalso`/`orelse` fix took the two of
-that cause: **12 left**, none new.
+that cause (**12 left**), the overloaded-spec fix took four (**8**) and the float `==` fix one more: **7 left, all of them clauses
+that the declared `-spec` rules out, none new in any step**. On the 440 modules of the seven applications the same run went from
+101 to **49**; those have not been triaged.
 
 ## Property-based tests: type algebra (PropEr)
 
@@ -95,6 +97,33 @@ mode) the fix changes nothing: the same 51 warnings before and after, so none of
 All three are fixed, and the property is now the plain `prop_inference_and_warnings_agree_with_execution`: it passes **1500
 programs x 25 runs** with no construct left out. Run against the sources from before the last fix it fails in 7 cases, so it is
 not passing because it went blind. The fragment is small: no maps, records, funs, `try`, binaries, calls between modules or specs.
+
+## Overloaded `-spec` across modules: the fix
+
+A call to a function with an overloaded `-spec` (`-spec f(a) -> ok; (b) -> ok.`) was checked against the **first clause only**, so
+`f(b)` from another module was reported as "will fail" (`rabbit_feature_flags:is_enabled(Flag, non_blocking)`). Calls inside a
+module were already fine, because their argument types are seeded with the union of the clauses.
+
+Now each clause is one whole vector of argument types, and a call is accepted if **some** vector accepts all its arguments
+(`spectra_checker:check_vectors/3`, for discrepancy and gradual checks alike). Not a per-position union: with `(integer(), boolean())`
+and `(atom(), integer())`, the call `h(1, 1)` mixes the two clauses and is still reported (unit test). Measured on RabbitMQ:
+**12 -> 8 warnings**, the four expected, none new.
+
+### The generator now has callers, callees and specs
+
+`prop_spectra_infer` generates a second module per program: `g/1` or `g/2` with an overloaded `-spec` (up to three clauses over
+integers, booleans, atoms, pairs and lists), guards exclusive per type, each clause returning its own number. The caller module
+calls it, 80% of the time with arguments of a clause of the spec and 20% with any types (those crash at run time, and a run that
+crashes refutes nothing). Warnings are only taken from the caller module. Run against the checker from before the fix it fails in
+**6 tests**, shrunk to a callee with two clauses and a call that fits the second.
+
+### The generator also had a gap: floats
+
+Triaging the last warning of `rabbit_variable_queue` found a bug the properties had not: `X == 0` with a float is true for `0.0`
+(`==` compares numbers by value; `=:=` does not), and Spectra reported the guard as unreachable. The generator had no `/`, no floats and no
+`==` in guards. It has them now, and with the fix reverted it finds the bug in 388 tests. `X =:= 0` on a float stays reported
+(it really is dead), also covered by a unit test. The lesson is the usual one for generators: **a property is only as good as what it can
+generate**, so every real finding that it missed becomes a new production in the generator.
 
 ## `andalso` / `orelse`: the fix
 
