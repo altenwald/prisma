@@ -32,15 +32,34 @@ minimal reproduction in [`bench/repro/`](bench/repro/README.md).
 | `[H \| T]` used as a pair (`?MSG(Index, Header)` in `rabbit_fifo*`): the tail is typed as a list | 37 (`rabbit_fifo`, `_v3`, `_v7`, `_v8`) | false positive, reproduced. **Fixed**: 51 -> 14 warnings, none new (see below) |
 | `orelse` / `andalso` with a non-boolean right operand | 2 (`rabbit_auth_backend_authn_state`, `mc_compat`) | **false positive**, reproduced |
 | Overloaded `-spec` (`(.., blocking) -> ..; (.., non_blocking) -> ..`): only the first clause counts | 2 (`rabbit_khepri`), maybe 2 more | **false positive**, reproduced |
-| Clause or guard that the declared `-spec` rules out (`rabbit_amqp_util`, `rabbit_definitions` x2, `rabbit_vhost_limit` x2, `rabbit_fifo_index`, `rabbit_peer_discovery`) | 7 | **debatable**: true against the contract (defensive code), Dialyzer is silent. All that is left in `rabbit` |
+| Clause or guard that the declared `-spec` rules out: `rabbit_amqp_util`, `rabbit_definitions` x2, `rabbit_fifo_index`, `rabbit_peer_discovery` | 5 | **true positive: the spec is wrong, the code is right** (details below) |
+| Same, but dead by construction: `rabbit_vhost_limit` x2 | 2 | **true positive, intentional**: `get_limit/2` only returns `{ok, N}` for `N >= 0`, the code says "extra defensive" |
 | `Time == 0` with `Time` a float (`rabbit_variable_queue:update_rate/4`): `==` compares by value, `0.0 == 0` | 1 | false positive, found while triaging. **Fixed**: 8 -> 7, none new |
 
-So **at least 41 of 51 were false positives and none of the 51 is a confirmed real defect**. After the improper-cells fix
+So **44 of the 51 were false positives and 7 were true** (below). None of the 51 is a bug in the code; five point at wrong `-spec`s. After the improper-cells fix
 (37 warnings, all of `rabbit_fifo*`) the same run gives **14**, with none new: the two `andalso`/`orelse` ones, the overloaded
 specs, the 5 that the declared `-spec` rules out and the 5 not looked at yet. Then the `andalso`/`orelse` fix took the two of
-that cause (**12 left**), the overloaded-spec fix took four (**8**) and the float `==` fix one more: **7 left, all of them clauses
-that the declared `-spec` rules out, none new in any step**. On the 440 modules of the seven applications the same run went from
+that cause (**12 left**), the overloaded-spec fix took four (**8**) and the float `==` fix one more: **7 left, all of them true, none new in any step**. On the 440 modules of the seven applications the same run went from
 101 to **49**; those have not been triaged.
+
+## The last 7 warnings of `rabbit`: all true
+
+Each one was read against the source, its callers and its docs.
+
+| Warning | What is true | Verdict |
+| :--- | :--- | :--- |
+| `rabbit_amqp_util:has_capability/2`, clause `(_, undefined)` | its only caller passes `desired_capabilities` of the AMQP `open` frame, a record field that is `undefined` when the peer omits it; the spec only allows `{array, symbol, [...]}` | **wrong spec** (the clause runs) |
+| `rabbit_fifo_index:append/2`, clause `(undefined, _)` | `rabbit_fifo_v3:convert_msg/1` builds messages with a dummy index `undefined` (`$empty_msg`, `$prefix_msg`) and `take_next_msg/1` passes it to `append/2`; the spec says `integer()`, the sibling `delete/2` already says `integer() \| undefined` | **wrong spec** (the clause runs) |
+| `rabbit_peer_discovery:select_node_to_join/1`, clause `([])` | `query_node_props/1` drops unavailable nodes; when the backend already selected a node (`NodeAlreadySelected`) and it is down, `CanUse` is `true` and `[]` is passed; the spec says `nonempty_list(...)` | **wrong spec** (the clause runs) |
+| `rabbit_definitions:import_parsed/2` and `import_parsed_with_hashing/2`, clause `when is_list(Body0)` | the arity-1 siblings say `#{any() => any()} \| list()`, the arity-2 specs say `#{any() => any() \| list()}` (a map of lists); the code accepts a list in both | **wrong spec**, most likely a typo; nobody in the corpus passes a list to the arity-2 versions (exported API) |
+| `rabbit_vhost_limit:is_over_connection_limit/1` and `would_exceed_queue_limit/2`, clause `{ok, Limit} when Limit < 0` | `get_limit/2` turns negatives into `undefined` and returns `{ok, N}` only for `N >= 0` | **dead on purpose**, the comments say so; not a bug |
+
+The five spec defects are also confirmed by Dialyzer, but only with `-Woverspecs`/`-Wunderspecs` (they report, for example,
+`has_capability` as "a subtype of the success typing `(_, 'undefined' | {'array', 'symbol', [any()]})`"), and there they are buried
+in **942 spec-difference warnings** for the same `rabbit` ebin. Dialyzer's default warnings give none of them. Spectra reports exactly
+the cases where a spec contradicts a *clause*, 7 out of those 942, and none of the 7 is noise. That is a different kind of
+finding from the false positives above: **the first real results of Spectra on this code base are wrong specs**, low severity,
+which nobody would find without it (or without reading 942 lines).
 
 ## Property-based tests: type algebra (PropEr)
 

@@ -42,24 +42,32 @@
   "status": "fixed: andalso/orelse short-circuit semantics"
  },
  "rabbit_amqp_util:has_capability:62:dead_code": {
-  "verdict": "debatable",
-  "cause": "spec_excludes_clause"
+  "verdict": "true_positive",
+  "kind": "wrong_spec",
+  "evidence": "spec wrong: desired_capabilities of the AMQP open frame is undefined when omitted (rabbit_amqp_reader:533)",
+  "dialyzer": "only with -Woverspecs/-Wunderspecs"
  },
  "rabbit_definitions:import_parsed:204:dead_code": {
-  "verdict": "debatable",
-  "cause": "spec_excludes_clause"
+  "verdict": "true_positive",
+  "kind": "wrong_spec",
+  "evidence": "spec wrong, likely typo: arity-1 siblings accept list(), arity-2 specs say a map of lists; code accepts a list",
+  "dialyzer": "only with -Woverspecs/-Wunderspecs"
  },
  "rabbit_definitions:import_parsed_with_hashing:240:dead_code": {
-  "verdict": "debatable",
-  "cause": "spec_excludes_clause"
+  "verdict": "true_positive",
+  "kind": "wrong_spec",
+  "evidence": "spec wrong, likely typo: same as import_parsed/2",
+  "dialyzer": "only with -Woverspecs/-Wunderspecs"
  },
  "rabbit_vhost_limit:is_over_connection_limit:102:dead_code": {
-  "verdict": "debatable",
-  "cause": "spec_excludes_clause"
+  "verdict": "true_positive",
+  "kind": "dead_by_design",
+  "evidence": "get_limit/2 returns {ok, N} only for N >= 0; the comment says 'extra defensive'"
  },
  "rabbit_vhost_limit:would_exceed_queue_limit:125:dead_code": {
-  "verdict": "debatable",
-  "cause": "spec_excludes_clause"
+  "verdict": "true_positive",
+  "kind": "dead_by_design",
+  "evidence": "get_limit/2 returns {ok, N} only for N >= 0; the comment says 'extra defensive'"
  },
  "rabbit_variable_queue:update_rate:709:dead_code": {
   "verdict": "false_positive",
@@ -67,12 +75,16 @@
   "status": "fixed"
  },
  "rabbit_peer_discovery:select_node_to_join:902:dead_code": {
-  "verdict": "debatable",
-  "cause": "spec_excludes_clause"
+  "verdict": "true_positive",
+  "kind": "wrong_spec",
+  "evidence": "spec wrong: query_node_props/1 drops unavailable nodes, a backend-selected node that is down gives [] with CanUse = true",
+  "dialyzer": "only with -Woverspecs/-Wunderspecs"
  },
  "rabbit_fifo_index:append:66:dead_code": {
-  "verdict": "debatable",
-  "cause": "spec_excludes_clause"
+  "verdict": "true_positive",
+  "kind": "wrong_spec",
+  "evidence": "spec wrong: rabbit_fifo_v3:convert_msg/1 builds ?MSG(undefined, _) and take_next_msg/1 passes it to append/2",
+  "dialyzer": "only with -Woverspecs/-Wunderspecs"
  },
  "rabbit_feature_flags:get_stability:795:discrepancy": {
   "verdict": "false_positive",
@@ -84,5 +96,5 @@
   "cause": "overloaded_spec",
   "status": "fixed: overloaded -spec as whole vectors"
  },
- "_note_fixed": "The 37 rabbit_fifo* warnings (improper cells) are gone since the improper-cells fix: 51 -> 14 warnings on deps/rabbit, no new ones. Only 5 of them are listed individually above. The two andalso/orelse warnings are gone as well: 14 -> 12. Overloaded specs: 12 -> 8. Float ==: 8 -> 7. The 7 left are all spec_excludes_clause (debatable)."
+ "_note_fixed": "The 37 rabbit_fifo* warnings (improper cells) are gone since the improper-cells fix: 51 -> 14 warnings on deps/rabbit, no new ones. Only 5 of them are listed individually above. The two andalso/orelse warnings are gone as well: 14 -> 12. Overloaded specs: 12 -> 8. Float ==: 8 -> 7. The 7 left are all spec_excludes_clause (debatable). Final state of deps/rabbit: 7 warnings, all true positives (5 wrong specs, 2 intentionally dead clauses), 0 false positives."
 }
