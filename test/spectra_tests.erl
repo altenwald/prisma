@@ -1,0 +1,129 @@
+-module(spectra_tests).
+
+-include_lib("eunit/include/eunit.hrl").
+-include("spectra.hrl").
+
+extract_and_portable_plt_test() ->
+    ?assertEqual(<<"0.1.0">>, spectra:version()),
+    BeamFile = code:where_is_file("spectra.beam"),
+    ?assert(is_list(BeamFile)),
+    EbinDir = filename:dirname(BeamFile),
+
+    {ok, Summary} = spectra_abstract:extract_beam(list_to_binary(BeamFile)),
+    ?assertEqual(spectra, Summary#module_summary.module),
+    ?assertEqual(erlang, Summary#module_summary.language),
+    ?assertMatch({error, _}, spectra_abstract:extract_beam("/nonexistent/file.beam")),
+
+    EmptyPlt = spectra_plt:new(),
+    ?assertEqual([], spectra_plt:modules(EmptyPlt)),
+    ?assertEqual(EmptyPlt, spectra_plt:merge([])),
+
+    {ok, DirPlt} = spectra_plt:from_dir(EbinDir),
+    ?assert( lists:member(spectra, spectra_plt:modules(DirPlt)) ),
+
+    {ok, BeamsPlt} = spectra_plt:from_beams([BeamFile]),
+    ?assertEqual([spectra], spectra_plt:modules(BeamsPlt)),
+    ?assertMatch({error, {beam_extract_failed, _, _}}, spectra_plt:from_beams(["/bad.beam", BeamFile])),
+
+    TmpPltFile = "/tmp/spectra_dev/test_out.splt",
+    {ok, BuiltPlt} = spectra:build_plt([EbinDir], TmpPltFile),
+    ?assert(lists:member(spectra, spectra_plt:modules(BuiltPlt))),
+    ?assertMatch({ok, []}, spectra:analyze_dirs([EbinDir], #{plts => [TmpPltFile]})),
+    ?assertMatch({ok, []}, spectra:analyze_dirs([BeamFile])),
+    file:delete(TmpPltFile),
+
+    ?assertMatch({error, _}, spectra_plt:load("/nonexistent.splt")),
+    ?assertEqual({error, invalid_plt_magic}, spectra_plt:decode(<<"bad">>)),
+    BadRecordBin = <<?SPECTRA_PLT_MAGIC, (term_to_binary({not_a_plt}))/binary>>,
+    ?assertEqual({error, invalid_plt_record}, spectra_plt:decode(BadRecordBin)).
+
+elixir_module_detection_test() ->
+    MixBeam = code:where_is_file("Elixir.Mix.Tasks.Spectra.beam"),
+    ?assert(is_list(MixBeam)),
+    {ok, Summary} = spectra_abstract:extract_beam(MixBeam),
+    ?assertEqual('Elixir.Mix.Tasks.Spectra', Summary#module_summary.module),
+    ?assertEqual(elixir, Summary#module_summary.language),
+    ?assertEqual(elixir, spectra_abstract:detect_language(foo, {debug_info_v1, elixir_erl, none})),
+    ?assertEqual(erlang, spectra_abstract:detect_language(foo, missing_chunk)).
+
+gradual_spec_and_checker_compatibility_test() ->
+    Forms = [
+        {attribute, 1, module, sample_specs},
+        {attribute, 2, export, [
+            {broken, 0},
+            {valid_bounded, 1},
+            {ret_float, 0},
+            {ret_range, 0},
+            {ret_list, 0},
+            {ret_nonempty_list, 0},
+            {ret_map, 0},
+            {ret_tuple, 0},
+            {ret_union, 0}
+        ]},
+        {attribute, 3, spec, {{broken, 0}, [
+            {type, 3, 'fun', [{type, 3, product, []}, {type, 3, integer, []}]}
+        ]}},
+        {attribute, 4, spec, {{valid_bounded, 1}, [
+            {type, 4, bounded_fun, [
+                {type, 4, 'fun', [{type, 4, product, [{var, 4, 'R'}]}, {var, 4, 'R'}]},
+                [{type, 4, constraint, [{atom, 4, is_subtype}, [{var, 4, 'R'}, {type, 4, pos_integer, []}]]}]
+            ]}
+        ]}},
+        {attribute, 5, spec, {{ret_float, 0}, [
+            {type, 5, 'fun', [{type, 5, product, []}, {type, 5, number, []}]}
+        ]}},
+        {attribute, 6, spec, {{ret_range, 0}, [
+            {type, 6, 'fun', [{type, 6, product, []}, {type, 6, range, [{integer, 6, 1}, {integer, 6, 10}]}]}
+        ]}},
+        {attribute, 7, spec, {{ret_list, 0}, [
+            {type, 7, 'fun', [{type, 7, product, []}, {type, 7, list, [{type, 7, integer, []}]}]}
+        ]}},
+        {attribute, 8, spec, {{ret_nonempty_list, 0}, [
+            {type, 8, 'fun', [{type, 8, product, []}, {type, 8, list, [{type, 8, integer, []}]}]}
+        ]}},
+        {attribute, 9, spec, {{ret_map, 0}, [
+            {type, 9, 'fun', [{type, 9, product, []}, {type, 9, map, any}]}
+        ]}},
+        {attribute, 10, spec, {{ret_tuple, 0}, [
+            {type, 10, 'fun', [{type, 10, product, []}, {type, 10, tuple, [{atom, 10, ok}, {type, 10, boolean, []}]}]}
+        ]}},
+        {attribute, 11, spec, {{ret_union, 0}, [
+            {type, 11, 'fun', [{type, 11, product, []}, {type, 11, union, [{atom, 11, ok}, {atom, 11, error}]}]}
+        ]}},
+        {function, 12, broken, 0, [
+            {clause, 12, [], [], [{atom, 12, not_an_integer}]}
+        ]},
+        {function, 13, valid_bounded, 1, [
+            {clause, 13, [{var, 13, '_X'}], [], [{integer, 13, 10}]}
+        ]},
+        {function, 14, ret_float, 0, [
+            {clause, 14, [], [], [{float, 14, 3.14}]}
+        ]},
+        {function, 15, ret_range, 0, [
+            {clause, 15, [], [], [{integer, 15, 5}]}
+        ]},
+        {function, 16, ret_list, 0, [
+            {clause, 16, [], [], [{nil, 16}]}
+        ]},
+        {function, 17, ret_nonempty_list, 0, [
+            {clause, 17, [], [], [{cons, 17, {integer, 17, 1}, {nil, 17}}]}
+        ]},
+        {function, 18, ret_map, 0, [
+            {clause, 18, [], [], [{map, 18, []}]}
+        ]},
+        {function, 19, ret_tuple, 0, [
+            {clause, 19, [], [], [{tuple, 19, [{atom, 19, ok}, {atom, 19, true}]}]}
+        ]},
+        {function, 20, ret_union, 0, [
+            {clause, 20, [], [], [{atom, 20, ok}]}
+        ]}
+    ],
+    {ok, sample_specs, BeamBin} = compile:forms(Forms, [debug_info]),
+    {ok, Warnings} = spectra:analyze_beams([BeamBin], #{}),
+    ?assertMatch([#spectra_warning{kind = gradual_mismatch, mfa = {sample_specs, broken, 0}}], Warnings),
+    Formatted = spectra_checker:format_warning(hd(Warnings)),
+    ?assert(is_binary(Formatted)),
+
+    {ok, Summary} = spectra_abstract:extract_beam(BeamBin),
+    ?assertEqual([], spectra_checker:check_module(Summary, spectra_plt:new(), #{mode => discrepancy})),
+    ?assertMatch([_], spectra_checker:check_module(Summary, spectra_plt:new())).

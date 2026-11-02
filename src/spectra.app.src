@@ -1,0 +1,17 @@
+{application, spectra, [
+    {description, "Hybrid Success & Gradual Type Analyzer with Modular PLTs for Erlang and Elixir"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {applications, [
+        kernel,
+        stdlib,
+        compiler,
+        syntax_tools
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, [
+        {"GitHub", "https://github.com/altenwald/spectra"}
+    ]}
+]}.
