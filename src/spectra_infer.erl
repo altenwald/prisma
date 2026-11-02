@@ -89,13 +89,19 @@ infer_clause(Mod, MFA, {clause, Anno, PatArgs, Guards, Body}, AllContracts) ->
     SeedArgs = seed_arg_types(MFA, length(PatArgs), AllContracts),
     case bind_patterns(PatArgs, SeedArgs, #{}) of
         unreachable ->
-            Warn = make_warning(dead_code, MFA, Anno, <<"Function clause pattern cannot match">>),
-            {unreachable, [Warn]};
+            ClauseWarns = case is_generated_function(MFA) of
+                true -> [];
+                false -> [make_warning(dead_code, MFA, Anno, <<"Function clause pattern cannot match">>)]
+            end,
+            {unreachable, ClauseWarns};
         {ok, PatTypes, Env0} ->
             case apply_guard_disjunction(Guards, Env0) of
                 unreachable ->
-                    Warn = make_warning(dead_code, MFA, Anno, <<"Function clause guard cannot succeed">>),
-                    {unreachable, [Warn]};
+                    GuardWarns = case is_generated_function(MFA) of
+                        true -> [];
+                        false -> [make_warning(dead_code, MFA, Anno, <<"Function clause guard cannot succeed">>)]
+                    end,
+                    {unreachable, GuardWarns};
                 {ok, Env1} ->
                     {RetType, EnvFinal, Warns, Sites} = infer_body(Mod, MFA, Body, Env1, AllContracts, [], []),
                     RefinedArgs = [refine_pat_type(P, T, EnvFinal) || {P, T} <- lists:zip(PatArgs, PatTypes)],
@@ -568,13 +574,19 @@ infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0) 
             end,
             case PatResult of
                 {none, _} when ScrutType =/= none ->
-                    W = make_warning(dead_code, MFA, CAnno, <<"Clause pattern cannot match scrutinee type">>),
-                    {RetsAcc, EnvsAcc, [W | WAcc], SAcc};
+                    PWarns = case is_generated_function(MFA) of
+                        true -> [];
+                        false -> [make_warning(dead_code, MFA, CAnno, <<"Clause pattern cannot match scrutinee type">>)]
+                    end,
+                    {RetsAcc, EnvsAcc, PWarns ++ WAcc, SAcc};
                 {_Matched, CEnv0} ->
                     case apply_guard_disjunction(CGuards, CEnv0) of
                         unreachable ->
-                            W = make_warning(dead_code, MFA, CAnno, <<"Clause guard cannot succeed">>),
-                            {RetsAcc, EnvsAcc, [W | WAcc], SAcc};
+                            GWarns = case is_generated_function(MFA) of
+                                true -> [];
+                                false -> [make_warning(dead_code, MFA, CAnno, <<"Clause guard cannot succeed">>)]
+                            end,
+                            {RetsAcc, EnvsAcc, GWarns ++ WAcc, SAcc};
                         {ok, CEnv1} ->
                             {CRet, CEnv2, WNext, SNext} = infer_body(Mod, MFA, CBody, CEnv1, Contracts, WAcc, SAcc),
                             {[CRet | RetsAcc], [CEnv2 | EnvsAcc], WNext, SNext}
@@ -716,6 +728,14 @@ make_warning(Kind, MFA, Anno, Msg) ->
         line = erl_anno:line(Anno),
         message = Msg
     }.
+
+is_generated_function({_Mod, Fun, _Arity}) when is_atom(Fun) ->
+    case atom_to_binary(Fun, utf8) of
+        <<"__", _/binary>> -> true;
+        _ -> false
+    end;
+is_generated_function(_) ->
+    false.
 
 seed_arg_types(MFA, Arity, AllContracts) ->
     case maps:find(MFA, AllContracts) of

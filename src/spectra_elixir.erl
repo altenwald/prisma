@@ -99,11 +99,15 @@ translate_body(SingleExpr) ->
 translate_pattern({'_', Meta, Ctx}) when is_atom(Ctx) ->
     {var, meta_anno(Meta), '_'};
 translate_pattern({VarName, Meta, Ctx}) when is_atom(VarName), is_atom(Ctx) ->
-    {var, meta_anno(Meta), elixir_var(VarName, Ctx)};
+    {var, meta_anno(Meta), elixir_var(VarName, Meta, Ctx)};
 translate_pattern({'^', _Meta, [Inner]}) ->
     translate_pattern(Inner);
 translate_pattern({'=', Meta, [P1, P2]}) ->
     {match, meta_anno(Meta), translate_pattern(P1), translate_pattern(P2)};
+translate_pattern({'%', Meta, [{'_', _, _}, {'%{}', _, Pairs}]}) when is_list(Pairs) ->
+    Anno = meta_anno(Meta),
+    TagField = {map_field_exact, Anno, {atom, Anno, '__struct__'}, {var, Anno, '_'}},
+    {map, Anno, [TagField | translate_map_pat_pairs(Anno, Pairs)]};
 translate_pattern({'%', Meta, [StructModAst, {'%{}', _, Pairs}]}) when is_list(Pairs) ->
     Anno = meta_anno(Meta),
     StructMod = unwrap_atom(StructModAst),
@@ -201,9 +205,9 @@ translate_expr({{'.', _, [erlang, Op]}, Meta, [Arg]}) ->
             Anno = meta_anno(Meta),
             {call, Anno, {remote, Anno, {atom, Anno, erlang}, {atom, Anno, Op}}, [translate_expr(Arg)]}
     end;
-translate_expr({{'.', _, [{FunVar, _, Ctx}]}, Meta, Args}) when is_atom(FunVar), is_atom(Ctx), is_list(Args) ->
+translate_expr({{'.', _, [{FunVar, FunMeta, Ctx}]}, Meta, Args}) when is_atom(FunVar), is_atom(Ctx), is_list(Args) ->
     Anno = meta_anno(Meta),
-    {call, Anno, {var, Anno, elixir_var(FunVar, Ctx)}, [translate_expr(A) || A <- Args]};
+    {call, Anno, {var, Anno, elixir_var(FunVar, FunMeta, Ctx)}, [translate_expr(A) || A <- Args]};
 translate_expr({{'.', _, [Target]}, Meta, Args}) when is_list(Args) ->
     Anno = meta_anno(Meta),
     {call, Anno, translate_expr(Target), [translate_expr(A) || A <- Args]};
@@ -217,16 +221,16 @@ translate_expr({fn, Meta, Clauses}) when is_list(Clauses) ->
     Anno = meta_anno(Meta),
     ErlClauses = [translate_case_clause(C) || C <- Clauses],
     {'fun', Anno, {clauses, ErlClauses}};
-translate_expr({'&', Meta, [{Fun, _, Ctx}]}) when is_atom(Fun), is_atom(Ctx) ->
+translate_expr({'&', Meta, [{Fun, FunMeta, Ctx}]}) when is_atom(Fun), is_atom(Ctx) ->
     Anno = meta_anno(Meta),
-    {var, Anno, elixir_var(Fun, Ctx)};
+    {var, Anno, elixir_var(Fun, FunMeta, Ctx)};
 translate_expr({'&', Meta, [{{'.', _, [Mod, Fun]}, _, []}, Arity]}) when is_integer(Arity) ->
     Anno = meta_anno(Meta),
     {'fun', Anno, {function, translate_expr(Mod), {atom, Anno, Fun}, {integer, Anno, Arity}}};
 translate_expr({'_', Meta, Ctx}) when is_atom(Ctx) ->
     {var, meta_anno(Meta), '_'};
 translate_expr({VarName, Meta, Ctx}) when is_atom(VarName), is_atom(Ctx) ->
-    {var, meta_anno(Meta), elixir_var(VarName, Ctx)};
+    {var, meta_anno(Meta), elixir_var(VarName, Meta, Ctx)};
 translate_expr({FunAtom, Meta, Args}) when is_atom(FunAtom), is_list(Args) ->
     Anno = meta_anno(Meta),
     {call, Anno, {atom, Anno, FunAtom}, [translate_expr(A) || A <- Args]};
@@ -314,11 +318,22 @@ unwrap_atom({'__aliases__', _, Parts}) when is_list(Parts) ->
     binary_to_atom(iolist_to_binary(lists:join(<<".">>, [<<"Elixir">> | ModBins])), utf8);
 unwrap_atom(_) -> 'Elixir.Any'.
 
-elixir_var(VarName, nil) ->
-    VarName;
-elixir_var(VarName, Ctx) when is_atom(Ctx) ->
+elixir_var(VarName, Meta, Ctx) ->
+    VerSuffix = case is_list(Meta) of
+        true ->
+            case proplists:get_value(version, Meta) of
+                Ver when is_integer(Ver) -> <<"@", (integer_to_binary(Ver))/binary>>;
+                _ -> <<>>
+            end;
+        false ->
+            <<>>
+    end,
+    CtxSuffix = case Ctx of
+        nil -> <<>>;
+        _ when is_atom(Ctx) -> <<"@", (atom_to_binary(Ctx, utf8))/binary>>
+    end,
     binary_to_atom(
-        <<(atom_to_binary(VarName, utf8))/binary, "@", (atom_to_binary(Ctx, utf8))/binary>>,
+        <<(atom_to_binary(VarName, utf8))/binary, VerSuffix/binary, CtxSuffix/binary>>,
         utf8
     ).
 

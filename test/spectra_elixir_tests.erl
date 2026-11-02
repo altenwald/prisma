@@ -239,3 +239,70 @@ elixir_struct_update_and_complex_clauses_test() ->
         exports = [{update_response, 2}]
     }),
     ?assert(maps:is_key({Mod, update_response, 2}, Summary#module_summary.functions)).
+
+elixir_ssa_versioning_and_wildcard_struct_test() ->
+    Mod = 'Elixir.Sample.Ssa',
+    Definitions = [
+        %% def complete(state, result) do state = %{state | refreshing: nil}; state end
+        {{complete, 2}, def, [{line, 10}], [
+            {[{line, 10}],
+             [
+                 {state, [{version, 0}, {line, 10}], nil},
+                 {result, [{version, 1}, {line, 10}], nil}
+             ],
+             [],
+             {'__block__', [{line, 11}], [
+                 {'=', [{line, 11}], [
+                     {state, [{version, 2}, {line, 11}], nil},
+                     {'%{}', [{line, 11}], [
+                         {'|', [{line, 11}], [
+                             {state, [{version, 0}, {line, 11}], nil},
+                             [{refreshing, nil}]
+                         ]}
+                     ]}
+                 ]},
+                 {state, [{version, 2}, {line, 12}], nil}
+             ]}}
+        ]},
+        %% def handle_any_struct(%_{} = item), do: item
+        {{handle_any_struct, 1}, def, [{line, 20}], [
+            {[{line, 20}],
+             [
+                 {'=', [{line, 20}], [
+                     {'%', [{line, 20}], [{'_', [{line, 20}], nil}, {'%{}', [{line, 20}], []}]},
+                     {item, [{version, 0}, {line, 20}], nil}
+                 ]}
+             ],
+             [],
+             {item, [{version, 0}, {line, 20}], nil}}
+        ]},
+        %% def __mix_recompile__?(), do: case false do false -> true; true -> false end
+        {{'__mix_recompile__?', 0}, def, [{line, 30}], [
+            {[{line, 30}], [], [],
+             {'case', [{line, 30}], [
+                 false,
+                 [{do, [
+                     {'->', [{line, 30}], [[false], true]},
+                     {'->', [{line, 30}], [[true], false]}
+                 ]}]
+             ]}}
+        ]}
+    ],
+    Dbgi = {debug_info_v1, elixir_erl, {elixir_v1, #{
+        module => Mod,
+        struct => nil,
+        definitions => Definitions
+    }, []}},
+    Exports = [{complete, 2}, {handle_any_struct, 1}, {'__mix_recompile__?', 0}],
+    Summary = spectra_elixir:from_elixir_dbgi(Mod, Dbgi, Exports, #module_summary{
+        module = Mod,
+        language = elixir,
+        exports = Exports
+    }),
+    Plt = (spectra_plt:new())#spectra_plt{modules = #{Mod => Summary}},
+    Warnings = spectra_checker:check_module(Summary, Plt, #{mode => hybrid}),
+    ?assertEqual([], Warnings),
+    {ok, CompleteContract} = spectra_plt:lookup_mfa({Mod, complete, 2}, Plt),
+    ?assertMatch({fun_type, [any, any], _}, CompleteContract#func_contract.inferred_type),
+    {ok, AnyStructContract} = spectra_plt:lookup_mfa({Mod, handle_any_struct, 1}, Plt),
+    ?assertMatch({fun_type, [{map, [{exact, {atom_lit, '__struct__'}, any}]}], _}, AnyStructContract#func_contract.inferred_type).
