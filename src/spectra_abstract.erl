@@ -8,7 +8,8 @@
 
 -export([
     extract_beam/1,
-    detect_language/2
+    detect_language/2,
+    parse_abstract_forms/3
 ]).
 
 %% @doc Extracts a `#module_summary{}` from a BEAM file path or binary.
@@ -49,7 +50,7 @@ extract_chunks(Beam, Module, Md5) ->
                 exports = Exports,
                 export_types = ExportTypes
             },
-            enrich_from_debug_info(Beam, Dbgi, Exports, BaseSummary);
+            enrich_from_debug_info(Beam, Module, Dbgi, Exports, BaseSummary);
         {error, beam_lib, Reason} ->
             {error, Reason}
     end.
@@ -72,14 +73,17 @@ detect_language(Module, Dbgi) ->
             end
     end.
 
-enrich_from_debug_info(Beam, Dbgi, Exports, Summary) ->
+enrich_from_debug_info(Beam, Module, Dbgi, Exports, Summary) ->
     case beam_lib:chunks(Beam, [abstract_code]) of
         {ok, {_Mod, [{abstract_code, {raw_abstract_v1, Forms}}]}} ->
             {ok, parse_abstract_forms(Forms, Exports, Summary)};
         _ ->
-            {ok, parse_fallback_dbgi(Dbgi, Exports, Summary)}
+            {ok, spectra_elixir:from_elixir_dbgi(Module, Dbgi, Exports, Summary)}
     end.
 
+%% @doc Populates a `#module_summary{}` from Erlang Abstract Format forms.
+-spec parse_abstract_forms([term()], [{atom(), arity()}], #module_summary{}) ->
+    #module_summary{}.
 parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types = AttrExpTypes} = Summary) ->
     ExportSet = maps:from_list([{FA, true} || FA <- Exports]),
     {RawTypes, FormExpTypes, Specs, InitialFuncs, ClausesByMFA} = lists:foldl(
@@ -135,16 +139,6 @@ parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types 
         types = MarkedTypes,
         functions = InferredFuncs
     }.
-
-parse_fallback_dbgi({debug_info_v1, elixir_erl, {elixir_v1, _Map, SpecsForms}}, Exports, Summary)
-  when is_list(SpecsForms) ->
-    parse_abstract_forms(SpecsForms, Exports, Summary);
-parse_fallback_dbgi(_, Exports, #module_summary{module = Mod} = Summary) ->
-    Funcs = maps:from_list([
-        {{Mod, F, A}, #func_contract{mfa = {Mod, F, A}, exported = true}}
-        || {F, A} <- Exports
-    ]),
-    Summary#module_summary{functions = Funcs}.
 
 merge_specs_into_funcs(Mod, ExportSet, Specs, Funcs) ->
     maps:fold(

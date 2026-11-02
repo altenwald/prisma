@@ -587,7 +587,7 @@ expand_remote(CallerMod, TargetMod, Name, Args, LookupFun, Visited) ->
                                     Error
                             end;
                         error ->
-                            {error, {undefined_type, Key}}
+                            builtin_remote_type(TargetMod, Name, ExpArgs, Key)
                     end
             end;
         Error ->
@@ -708,3 +708,36 @@ collapse_booleans(Types) ->
         false ->
             Types
     end.
+
+builtin_remote_type('Elixir.String', t, [], _Key) -> {ok, {binary, 0, 8}};
+builtin_remote_type('Elixir.String', grapheme, [], _Key) -> {ok, {binary, 0, 8}};
+builtin_remote_type('Elixir.String', codepoint, [], _Key) -> {ok, {binary, 0, 8}};
+builtin_remote_type('Elixir.Keyword', t, [], _Key) -> {ok, {list, {tuple, [atom, any]}}};
+builtin_remote_type('Elixir.Keyword', t, [ValType], _Key) -> {ok, {list, {tuple, [atom, ValType]}}};
+builtin_remote_type('Elixir.Enum', t, [], _Key) -> {ok, any};
+builtin_remote_type('Elixir.Range', t, [], _Key) ->
+    {ok, {map, [
+        {exact, {atom_lit, '__struct__'}, {atom_lit, 'Elixir.Range'}},
+        {exact, {atom_lit, first}, integer},
+        {exact, {atom_lit, last}, integer},
+        {exact, {atom_lit, step}, integer}
+    ]}};
+builtin_remote_type('Elixir.Range', t, [First, Last], _Key) ->
+    {ok, {map, [
+        {exact, {atom_lit, '__struct__'}, {atom_lit, 'Elixir.Range'}},
+        {exact, {atom_lit, first}, First},
+        {exact, {atom_lit, last}, Last},
+        {exact, {atom_lit, step}, integer}
+    ]}};
+builtin_remote_type('Elixir.MapSet', t, [], _Key) ->
+    {ok, {map, [
+        {exact, {atom_lit, '__struct__'}, {atom_lit, 'Elixir.MapSet'}},
+        {assoc, any, any}
+    ]}};
+builtin_remote_type('Elixir.MapSet', t, [ValType], _Key) ->
+    {ok, {map, [
+        {exact, {atom_lit, '__struct__'}, {atom_lit, 'Elixir.MapSet'}},
+        {assoc, any, ValType}
+    ]}};
+builtin_remote_type(_Mod, _Name, _Args, Key) ->
+    {error, {undefined_type, Key}}.
