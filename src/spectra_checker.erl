@@ -164,18 +164,30 @@ resolve_expected_args(_, _, _, _, _) ->
 
 verify_gradual_spec(_MFA, [], _Inferred, _Line, _Plt) ->
     [];
-verify_gradual_spec({Mod, _, _} = MFA, [SpecClause | _], {fun_type, _InferredArgs, InferredRet}, Line, Plt) ->
-    case extract_spec_return(Mod, SpecClause, Plt) of
-        {ok, DeclaredRet} ->
-            case spectra_type:consistent_subtype(InferredRet, DeclaredRet) of
+verify_gradual_spec({Mod, _, _} = MFA, [_ | _] = SpecClauses, {fun_type, _InferredArgs, InferredRet}, Line, Plt) ->
+    DeclaredReturns = lists:filtermap(
+        fun(Clause) ->
+            case extract_spec_return(Mod, Clause, Plt) of
+                {ok, Ret} -> {true, Ret};
+                error -> false
+            end
+        end,
+        SpecClauses
+    ),
+    case DeclaredReturns of
+        [] ->
+            [];
+        _ ->
+            DeclaredUnion = spectra_type:normalize_union(DeclaredReturns),
+            case spectra_type:consistent_subtype(InferredRet, DeclaredUnion) of
                 true ->
                     [];
                 false ->
-                    Kind = classify_gradual_failure(InferredRet, DeclaredRet),
+                    Kind = classify_gradual_failure(InferredRet, DeclaredUnion),
                     Msg = iolist_to_binary(
                         io_lib:format(
                             "Gradual spec mismatch: declared return type ~p is incompatible with inferred return type ~p",
-                            [DeclaredRet, InferredRet]
+                            [DeclaredUnion, InferredRet]
                         )
                     ),
                     [#spectra_warning{
@@ -184,9 +196,7 @@ verify_gradual_spec({Mod, _, _} = MFA, [SpecClause | _], {fun_type, _InferredArg
                         line = Line,
                         message = Msg
                     }]
-            end;
-        error ->
-            []
+            end
     end;
 verify_gradual_spec(_MFA, _Specs, _Inferred, _Line, _Plt) ->
     [].
