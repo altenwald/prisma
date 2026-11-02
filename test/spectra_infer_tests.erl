@@ -346,3 +346,61 @@ negate_type_test_() ->
             end
         )
     ].
+
+%% Improper list cells: `[H | T]` whose tail is not a list is not a proper list.
+
+improper_sample(Src) ->
+    Text = "-module(cell_sample).\n-export([f/1]).\n" ++ Src,
+    {ok, Toks, _} = erl_scan:string(Text),
+    {ok, cell_sample, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+    Beam.
+
+cell_warnings(Src) ->
+    {ok, Ws} = spectra:analyze_beams([improper_sample(Src)], #{mode => discrepancy, oxbow => false}),
+    [{K, L} || #spectra_warning{kind = K, line = L} <- Ws].
+
+cell_with_integer_tail_is_not_a_proper_list_test() ->
+    Ret = inferred_return("f(_) -> [1 | 2]."),
+    ?assertNot(spectra_oracle:member([1 | 2], {list, any}) andalso spectra_oracle:member(Ret, {list, any})),
+    ?assert(spectra_oracle:member([1 | 2], Ret)),
+    ?assertNot(spectra_oracle:member(foo, Ret)).
+
+cell_with_list_tail_stays_a_proper_list_test() ->
+    ?assertEqual({nonempty_list, {int_lit, 1}}, inferred_return("f(_) -> [1 | [1]].")),
+    ?assertMatch({nonempty_list, _}, inferred_return("f(_) -> [1, 2, 3].")).
+
+pattern_on_improper_cell_is_reachable_test() ->
+    ?assertEqual([], cell_warnings("f(_) ->\n    case [0 | 0] of\n        [H | T] when is_integer(T) -> H + T\n    end.\n")),
+    ?assertEqual([], cell_warnings("f(C) ->\n    case C of\n        [H | T] when is_integer(T) -> H + T;\n        _ -> 0\n    end.\n")).
+
+tail_of_unknown_term_is_unknown_test() ->
+    %% tl/1 of an unknown term may be anything: passing it where an integer is needed is not a failure
+    ?assertEqual([], cell_warnings("f(C) -> g(tl(C)).\ng(N) when is_integer(N) -> N.\n")),
+    ?assertEqual([], cell_warnings("f(C) -> tl(C) + 1.\n")).
+
+type_algebra_improper_vs_list_test_() ->
+    Impr = {improper_list, integer, integer},
+    [
+        ?_assertEqual(nil, spectra_type:meet(Impr, nil)),
+        ?_assertEqual(nil, spectra_type:meet(nil, Impr)),
+        ?_assertEqual({list, integer}, spectra_type:meet(Impr, {list, integer})),
+        ?_assertEqual({list, integer}, spectra_type:meet({list, integer}, Impr)),
+        ?_assertNotEqual(none, spectra_type:meet(Impr, {nonempty_list, integer})),
+        ?_assertEqual(nil, spectra_type:meet(Impr, {list, atom})),
+        ?_assertEqual(none, spectra_type:meet(Impr, {nonempty_list, atom})),
+        ?_assert(spectra_type:consistent_subtype({list, integer}, Impr)),
+        ?_assert(spectra_type:consistent_subtype({nonempty_list, integer}, Impr)),
+        ?_assertNot(spectra_type:consistent_subtype(Impr, {list, integer})),
+        ?_assert(spectra_type:consistent_subtype({improper_list, integer, any}, {list, integer}))
+    ].
+
+cons_chain_does_not_nest_test() ->
+    %% [1, 2, 3 | T] with an unknown T is one maybe-improper list, not improper lists inside improper lists
+    ?assertMatch({improper_list, _, any}, inferred_return("f(T) -> [1, 2, 3 | T].")),
+    {improper_list, Elem, any} = inferred_return("f(T) -> [1, 2, 3 | T]."),
+    ?assertNot(is_tuple(Elem) andalso element(1, Elem) =:= improper_list),
+    ?assert(spectra_oracle:member(1, Elem) andalso spectra_oracle:member(3, Elem)).
+
+unknown_tail_is_not_assumed_to_be_a_list_test() ->
+    %% [H | T] with T unknown: T may be anything, so a clause that needs an integer tail is reachable
+    ?assertEqual([], cell_warnings("f(T) ->\n    case [1 | T] of\n        [H | N] when is_integer(N) -> H + N;\n        _ -> 0\n    end.\n")).

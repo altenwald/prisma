@@ -25,15 +25,13 @@
 
 %% Ex lists what the generator leaves out because it is already known to break Spectra:
 %%   nonboolean_operands  `andalso`/`orelse` whose right operand is not a boolean
-%%   improper_cells       `[H | T]` used as a pair whose tail is not a list
 %% The Env carries it as {ex, Ex}; variables are {Name :: string(), Tag}.
 program(Ex) ->
     ?LET(Tags, [tag(Ex), tag(Ex)],
          ?LET(Body, body([{ex, Ex}, {"A", lists:nth(1, Tags)}, {"B", lists:nth(2, Tags)}]),
               {render(Body), Tags})).
 
-tag(Ex) ->
-    oneof(case lists:member(improper_cells, Ex) of true -> ?TAGS -- [cell]; false -> ?TAGS end).
+tag(_Ex) -> oneof(?TAGS).
 
 excluded(What, Env) -> lists:member(What, proplists:get_value(ex, Env, [])).
 
@@ -67,7 +65,7 @@ stmt(V, K, Env) ->
                     {fmt("    ~s = case ~s of\n        [H~s | T~s] when is_integer(T~s) -> H~s + T~s\n    end",
                          [V, C, S, S, S, S, S]), int}),
     oneof(case excluded(nonboolean_operands, Env) of true -> []; false -> NonBoolean end ++
-          case excluded(improper_cells, Env) of true -> []; false -> [CellCase] end ++ [
+          [CellCase] ++ [
         ?LET(T, tag(proplists:get_value(ex, Env)), ?LET(E, expr(T, Env, 2), {line(V, E), T})),
         ?LET({I, X, Y}, {expr(int, Env, 1), expr(int, Env, 1), expr(int, Env, 1)},
              {fmt("    ~s = case ~s of\n        0 -> ~s;\n        _ -> ~s\n    end", [V, I, X, Y]), int}),
@@ -101,12 +99,10 @@ compound(int, Env, D) ->
     oneof([
         ?LET({X, Y}, {expr(int, Env, D - 1), expr(int, Env, D - 1)}, fmt("(~s + ~s)", [X, Y])),
         ?LET(P, expr(pair, Env, D - 1), fmt("element(1, ~s)", [P])),
-        ?LET(L, expr(list, Env, D - 1), fmt("length(~s)", [L]))
-    ] ++ case excluded(improper_cells, Env) of
-             true -> [];
-             false -> [?LET(C, expr(cell, Env, D - 1), fmt("hd(~s)", [C])),
-                       ?LET(C, expr(cell, Env, D - 1), fmt("tl(~s)", [C]))]
-         end);
+        ?LET(L, expr(list, Env, D - 1), fmt("length(~s)", [L])),
+        ?LET(C, expr(cell, Env, D - 1), fmt("hd(~s)", [C])),
+        ?LET(C, expr(cell, Env, D - 1), fmt("tl(~s)", [C]))
+    ]);
 compound(bool, Env, D) ->
     oneof([
         ?LET({X, Y}, {expr(int, Env, D - 1), expr(int, Env, D - 1)}, fmt("(~s > ~s)", [X, Y])),
@@ -201,16 +197,15 @@ run_all(Mod, [Args | Rest], Dom, Ret, Claims) ->
 %% Property
 %% -------------------------------------------------------------------------
 
-%% KNOWN BUGS, disabled on purpose (not named prop_*): with nothing excluded the property fails, and shrinks to
+%% KNOWN BUG, disabled on purpose (not named prop_*): with nothing excluded the property fails, and shrinks to
 %%   case true andalso 0 of false -> 0; N when is_integer(N) -> N end       ("andalso will fail": it runs)
-%%   case [0 | 0] of [H | T] when is_integer(T) -> H + T end                 (inferred return type `none`)
 %% Rename to prop_* when fixed (see bench/repro/).
 known_bug_inference_and_warnings_agree_with_execution() ->
     property([]).
 
 %% Everything else: any failure here is a new finding.
 prop_inference_and_warnings_agree_with_execution_without_known_bugs() ->
-    property([nonboolean_operands, improper_cells]).
+    property([nonboolean_operands]).
 
 property(Ex) ->
     ?FORALL({Src, Tags}, program(Ex),

@@ -179,10 +179,15 @@ bind_pattern({cons, _, H, T}, Expected, Env0) ->
             case bind_pattern(H, ElemExpected, Env0) of
                 {none, Env1} -> {none, Env1};
                 {HT, Env1} ->
-                    case bind_pattern(T, {list, any}, Env1) of
+                    TailExpected = list_tail_type(Expected),
+                    case bind_pattern(T, TailExpected, Env1) of
                         {none, Env2} -> {none, Env2};
-                        {_TT, Env2} ->
-                            {spectra_type:meet({nonempty_list, HT}, Expected), Env2}
+                        {TT, Env2} ->
+                            Cell = case proper_tail(TT) of
+                                true -> {nonempty_list, HT};
+                                false -> {improper_list, HT, TT}
+                            end,
+                            {spectra_type:meet(Cell, Expected), Env2}
                     end
             end
     end;
@@ -228,6 +233,16 @@ extract_list_elem({improper_list, E, _}) -> E;
 extract_list_elem({union, Members}) ->
     spectra_type:normalize_union([extract_list_elem(M) || M <- Members]);
 extract_list_elem(_) -> none.
+
+%% The type of Tail in [H | Tail] when the whole cell has the given type. An unknown cell has an unknown tail (it may
+%% be any term), and a maybe-improper list has either another cell, [] or its improper tail.
+list_tail_type(any) -> any;
+list_tail_type({list, E}) -> {list, E};
+list_tail_type({nonempty_list, E}) -> {list, E};
+list_tail_type({improper_list, _, T} = Improper) -> spectra_type:normalize_union([Improper, T]);
+list_tail_type({union, Members}) -> spectra_type:normalize_union([list_tail_type(M) || M <- Members]);
+list_tail_type(_) -> none.
+
 
 extract_tuple_elems(Arity, any) ->
     lists:duplicate(Arity, any);
@@ -397,11 +412,7 @@ infer_expr(Mod, MFA, {cons, _, H, T}, Env0, Contracts, Warns0, Sites0) ->
         true ->
             {none, Env2, Warns2, Sites2};
         false ->
-            ElemJoin = case extract_list_elem(TType) of
-                none -> HType;
-                TailElem -> spectra_type:join(HType, TailElem)
-            end,
-            {{nonempty_list, ElemJoin}, Env2, Warns2, Sites2}
+            {cons_type(HType, TType), Env2, Warns2, Sites2}
     end;
 infer_expr(Mod, MFA, {map, _, Fields}, Env0, Contracts, Warns0, Sites0) ->
     {MapFields, Env1, Warns1, Sites1} = infer_map_fields(Mod, MFA, Fields, Env0, Contracts, Warns0, Sites0, []),
@@ -555,6 +566,32 @@ infer_unop(MFA, Anno, Op, ArgAst, ArgType, Env0, Warns, Sites)
 infer_unop(_MFA, _Anno, _Op, _ArgAst, _ArgType, Env, Warns, Sites) ->
     {any, Env, Warns, Sites}.
 
+%% [H | T] is a proper list only when T is known to be one. Anything else (an integer, a map, or an unknown term,
+%% which may be one of those) can end the chain in a non-list, as in [Index | Header]: a maybe-improper list.
+cons_type(HType, {union, Members}) ->
+    spectra_type:normalize_union([cons_type(HType, M) || M <- Members]);
+cons_type(HType, {improper_list, TailElem, TailEnd}) ->
+    %% [H | improper_list(E, T)] is improper_list(H or E, T): the chain does not nest, however many cells are consed
+    {improper_list, spectra_type:join(HType, TailElem), TailEnd};
+cons_type(HType, TType) ->
+    case proper_tail(TType) of
+        true ->
+            ElemJoin = case extract_list_elem(TType) of
+                none -> HType;
+                TailElem -> spectra_type:join(HType, TailElem)
+            end,
+            {nonempty_list, ElemJoin};
+        false ->
+            {improper_list, HType, TType}
+    end.
+
+%% Is every value of the type a proper list? `any` and type variables are not known to be.
+proper_tail(nil) -> true;
+proper_tail({list, _}) -> true;
+proper_tail({nonempty_list, _}) -> true;
+proper_tail({union, Members}) -> lists:all(fun proper_tail/1, Members);
+proper_tail(_) -> false.
+
 %% The type of `-X` when X has the given numeric type (anything not modelled is just `number`).
 -spec negate_type(spectra_type:stype()) -> spectra_type:stype().
 negate_type(none) -> none;
@@ -641,7 +678,8 @@ infer_call(Mod, CallerMFA, Anno, Target, ArgAsts, ArgTypes, Env0, Contracts, War
         {ok, {erlang, Bif, Arity} = CalleeMFA} ->
             Sites1 = [{Line, CalleeMFA, ArgTypes} | Sites0],
             case bif_signature(Bif, Arity) of
-                {ok, ExpectedArgs, RetType} ->
+                {ok, ExpectedArgs, RetType0} ->
+                    RetType = bif_return_type(Bif, ArgTypes, RetType0),
                     apply_callee_signature(CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, ExpectedArgs, RetType, Env0, Warns0, Sites1);
                 error ->
                     {any, Env0, Warns0, Sites1}
@@ -719,13 +757,23 @@ check_call_site(CallerMFA, Line, {CM, CF, CA}, ZipArgs) ->
     ),
     lists:reverse(Warns).
 
+%% Return types that depend on the argument: tl([1 | 2]) is 2, not a list.
+bif_return_type(tl, [ArgType], _Static) ->
+    case list_tail_type(ArgType) of
+        none -> {list, any};
+        Tail -> Tail
+    end;
+bif_return_type(_Bif, _ArgTypes, Static) ->
+    Static.
+
 bif_signature(length, 1) -> {ok, [{list, any}], non_neg_integer};
 bif_signature(byte_size, 1) -> {ok, [{binary, 0, 1}], non_neg_integer};
 bif_signature(bit_size, 1) -> {ok, [{binary, 0, 1}], non_neg_integer};
 bif_signature(tuple_size, 1) -> {ok, [any_tuple], non_neg_integer};
 bif_signature(map_size, 1) -> {ok, [any_map], non_neg_integer};
-bif_signature(hd, 1) -> {ok, [{nonempty_list, any}], any};
-bif_signature(tl, 1) -> {ok, [{nonempty_list, any}], {list, any}};
+%% hd/1 and tl/1 take any non-empty list, proper or not; the type has no "non-empty improper list", so [] is let through.
+bif_signature(hd, 1) -> {ok, [{improper_list, any, any}], any};
+bif_signature(tl, 1) -> {ok, [{improper_list, any, any}], {list, any}};
 bif_signature(abs, 1) -> {ok, [number], number};
 bif_signature(trunc, 1) -> {ok, [number], integer};
 bif_signature(round, 1) -> {ok, [number], integer};

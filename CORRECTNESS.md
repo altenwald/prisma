@@ -29,14 +29,15 @@ minimal reproduction in [`bench/repro/`](bench/repro/README.md).
 
 | Cause | Warnings | Verdict |
 | :--- | :---: | :--- |
-| `[H \| T]` used as a pair (`?MSG(Index, Header)` in `rabbit_fifo*`): the tail is typed as a list | 37 (`rabbit_fifo`, `_v3`, `_v7`, `_v8`) | **false positive**: reproduced; individual lines not all checked by hand |
+| `[H \| T]` used as a pair (`?MSG(Index, Header)` in `rabbit_fifo*`): the tail is typed as a list | 37 (`rabbit_fifo`, `_v3`, `_v7`, `_v8`) | false positive, reproduced. **Fixed**: 51 -> 14 warnings, none new (see below) |
 | `orelse` / `andalso` with a non-boolean right operand | 2 (`rabbit_auth_backend_authn_state`, `mc_compat`) | **false positive**, reproduced |
 | Overloaded `-spec` (`(.., blocking) -> ..; (.., non_blocking) -> ..`): only the first clause counts | 2 (`rabbit_khepri`), maybe 2 more | **false positive**, reproduced |
 | Clause or guard that the declared `-spec` rules out (`rabbit_amqp_util`, `rabbit_definitions` x2, `rabbit_vhost_limit` x2) | 5 | **debatable**: true against the contract (defensive code), Dialyzer is silent |
 | Not looked at yet (`rabbit_variable_queue`, `rabbit_peer_discovery`, `rabbit_fifo_index`, `rabbit_feature_flags`, `rabbit_ff_controller`) | 5 | pending |
 
-So **at least 41 of 51 are false positives and none of the 51 is a confirmed real defect**. Spectra's promise of zero false
-positives does not hold on this code yet, and the three causes above are good first candidates for regression tests.
+So **at least 41 of 51 were false positives and none of the 51 is a confirmed real defect**. After the improper-cells fix
+(37 warnings, all of `rabbit_fifo*`) the same run gives **14**, with none new: the two `andalso`/`orelse` ones, the overloaded
+specs, the 5 that the declared `-spec` rules out and the 5 not looked at yet.
 
 ## Property-based tests: type algebra (PropEr)
 
@@ -53,13 +54,14 @@ Types are ground and free of `any` (maps, funs and records are not generated yet
 | `join_is_an_upper_bound` | both operands are included in their join | pass |
 | `meet_is_sound` | a value in `meet(A, B)` is in B | pass |
 | `normalize_union_keeps_members` / `_is_idempotent` | union normalization neither loses members nor changes on a second pass | pass |
-| `known_bug_meet_keeps_common_values` | a value in A and B is in `meet(A, B)` | **fails, disabled** |
+| `meet_keeps_common_values` | a value in A and B is in `meet(A, B)` | pass (was the known bug below) |
 
-The one failure is a real incompleteness: `spectra_type:meet(improper_list(integer, integer), list(integer))` is `none`
-although both contain `[]` and every proper list of integers. `none` is how the checker decides that two types are
-disjoint, so any pair of types that goes through this path can be reported as "will fail". The property is kept in the file
-under a name proper does not run, and should be renamed to `prop_*` when `meet/2` is fixed. (A first attempt to show it as a
-false positive with a two-line module did not work out: Dialyzer also rejects that `-spec`, so it is not evidence.)
+That last property used to fail, and was kept disabled under a name PropEr does not run: `meet(improper_list(integer, integer),
+list(integer))` was `none` although both contain `[]`. `none` is how the checker decides that two types are disjoint. It is fixed
+together with the improper cells (next sections). One limit remains, by design: the type language has no *non-empty* improper
+list, so the meet of `improper_list(E, T)` with a `nonempty_list` is exact only when the tail cannot itself be a list; otherwise it
+is a safe superset that also holds `[]`. The properties therefore generate `improper_list` with non-list tails (the real case:
+`[Index | Header]`), and that is documented in the generator.
 
 The false-positive causes of the RabbitMQ triage live in the inference and checker, not in the type algebra, so these
 properties do not see them. The next section does.
@@ -80,8 +82,8 @@ in the first session, each in a few lines (all in [`bench/repro/`](bench/repro/R
 
 | Shrunk program | What Spectra says | Truth |
 | :--- | :--- | :--- |
-| `case true andalso 0 of false -> 0; N when is_integer(N) -> N end` | "`andalso` will fail", "guard cannot succeed" | returns `0` |
-| `case [0 \| 0] of [H \| T] when is_integer(T) -> H + T end` | inferred return type `none` | returns `0` |
+| `case true andalso 0 of false -> 0; N when is_integer(N) -> N end` | "`andalso` will fail", "guard cannot succeed" | returns `0` (open) |
+| `case [0 \| 0] of [H \| T] when is_integer(T) -> H + T end` | inferred return type `none` | returns `0` (**fixed**) |
 | `f() -> -1.` and `case f() of -1 -> ok end` | `f/0` returns `1`; "no clause can match" | returns `-1` |
 
 The third is the most basic of the three: **`infer_unop` kept the type of the operand for unary `-`, so every negative
@@ -89,11 +91,34 @@ literal was inferred as its absolute value**. It is **fixed** (`negate_type/1` i
 `test/spectra_infer_tests.erl`) and the generator now produces negative literals. Measured on RabbitMQ (`rabbit`, discrepancy
 mode) the fix changes nothing: the same 51 warnings before and after, so none of them came from this bug.
 
-The full property (`known_bug_inference_and_warnings_agree_with_execution`) still fails because of the first two and is disabled
-under a name PropEr does not run. The same generator with those two constructs left out
-(`prop_inference_and_warnings_agree_with_execution_without_known_bugs`) passes **1000 programs x 25 runs**, so nothing else in
-this fragment (integer arithmetic, `case` on literals, tuples, lists, guards, `hd`/`length`/`element`) has been refuted yet.
+The full property (`known_bug_inference_and_warnings_agree_with_execution`) still fails because of the open one (`andalso`/`orelse`
+with a non-boolean right operand) and is disabled under a name PropEr does not run. The same generator with that construct left out
+(`prop_inference_and_warnings_agree_with_execution_without_known_bugs`) passes **1500 programs x 25 runs**, now including improper
+cells and `hd`/`tl`, so nothing else in this fragment has been refuted yet.
 The fragment is small: no maps, records, funs, `try`, binaries, calls between modules or specs.
+
+## Improper cells: the fix and what it costs
+
+Four places treated every `[H | T]` as a proper list, and PropEr found a fifth on the way. Now:
+
+- **Construction.** `[H | T]` is a proper list only when T is known to be one. A tail that is an integer, a map or *unknown* gives
+  `improper_list(H, T)` (a first version that gave unknown tails the benefit of the doubt was refuted by PropEr within seconds:
+  `case [4 | B] of [H | T] when is_integer(T) -> ...` with `B` unknown). A cons onto an improper list does not nest.
+- **Patterns.** The tail variable gets the tail type of the scrutinee (unknown if the scrutinee is), not `list(any)`.
+- **`tl/1`** returns the tail type of its argument; **`hd/1`, `tl/1`** take any non-empty list, proper or not (PropEr again: the old
+  domain `nonempty_list(any)` was refuted by `[0 | 0]`).
+- **`spectra_type`**: `meet` and subtyping between `improper_list` and `list` / `nonempty_list` / `nil` / `improper_list`.
+
+Measured on RabbitMQ (`rabbit`, discrepancy mode): **51 -> 14 warnings; the 37 that disappear are exactly the `rabbit_fifo*` ones, and none is new.**
+
+Costs and losses, so nobody finds them by surprise:
+
+- **Precision.** `hd([])` is no longer reported (the type has no "non-empty improper list" to tell it from `hd([1 | 2])`); the Erlang
+  compiler already warns about it. In exchange `tl(X) + 1` is no longer reported as `badarith`, which was a false positive.
+- **Speed.** Building the `.splt` of OTP's `compiler` application went from ~0.65 s to ~1.0 s (more unions in the types). A full
+  `spectra check` of `deps/rabbit` is unchanged (~1.2 s).
+- **Depth.** The exact meet of two improper lists with list-able tails is cut at a nesting depth of 2 (counted across the recursion),
+  then a safe superset; without the cut `compiler` took minutes.
 
 ## Not yet measured
 

@@ -7,6 +7,8 @@
 
 -include("spectra.hrl").
 
+-define(MAX_IMPROPER_MEET_DEPTH, 2).
+
 -export([
     from_abstract/1,
     from_type_attr/3,
@@ -282,6 +284,15 @@ subtype_non_numeric({nonempty_list, E1}, {list, E2}) ->
     consistent_subtype(E1, E2);
 subtype_non_numeric({list, E1}, {list, E2}) ->
     consistent_subtype(E1, E2);
+subtype_non_numeric({improper_list, E1, T1}, {list, E2}) ->
+    consistent_subtype(E1, E2) andalso consistent_subtype(T1, {list, E2});
+subtype_non_numeric({improper_list, E1, any}, {nonempty_list, E2}) ->
+    %% an unknown tail: gradual typing gives it the benefit of the doubt (a known tail would have to exclude [])
+    consistent_subtype(E1, E2);
+subtype_non_numeric({list, E1}, {improper_list, E2, _}) ->
+    consistent_subtype(E1, E2);
+subtype_non_numeric({nonempty_list, E1}, {improper_list, E2, _}) ->
+    consistent_subtype(E1, E2);
 subtype_non_numeric({improper_list, E1, T1}, {improper_list, E2, T2}) ->
     consistent_subtype(E1, E2) andalso consistent_subtype(T1, T2);
 subtype_non_numeric({tuple, _}, any_tuple) -> true;
@@ -459,6 +470,20 @@ meet_non_numeric({list, E1}, {list, E2}) ->
         none -> nil;
         M -> {list, M}
     end;
+meet_non_numeric({improper_list, _, _}, nil) -> nil;
+meet_non_numeric(nil, {improper_list, _, _}) -> nil;
+meet_non_numeric({improper_list, E1, T1}, {list, E2}) ->
+    meet_improper_with_list(E1, T1, E2, list);
+meet_non_numeric({list, E2}, {improper_list, E1, T1}) ->
+    meet_improper_with_list(E1, T1, E2, list);
+meet_non_numeric({improper_list, E1, T1}, {nonempty_list, E2}) ->
+    meet_improper_with_list(E1, T1, E2, nonempty_list);
+meet_non_numeric({nonempty_list, E2}, {improper_list, E1, T1}) ->
+    meet_improper_with_list(E1, T1, E2, nonempty_list);
+meet_non_numeric({improper_list, _, _} = I, {improper_list, any, any}) -> I;
+meet_non_numeric({improper_list, any, any}, {improper_list, _, _} = I) -> I;
+meet_non_numeric({improper_list, E1, T1}, {improper_list, E2, T2}) ->
+    meet_improper(E1, T1, E2, T2);
 meet_non_numeric(any_map, {map, _} = M) -> M;
 meet_non_numeric({map, _} = M, any_map) -> M;
 meet_non_numeric({map, F1}, {map, F2}) ->
@@ -476,6 +501,52 @@ meet_non_numeric(any_fun, {fun_any_args, _} = F) -> F;
 meet_non_numeric({fun_any_args, _} = F, any_fun) -> F;
 meet_non_numeric(_, _) ->
     none.
+
+%% maybe_improper_list(E1, T1) intersected with a proper list of E2 (or a non-empty one). The chain has to end inside a
+%% list, so the tail is T1 met with [E2]. That is exact for `list`. The type language has no non-empty improper
+%% list, so for `nonempty_list` and a tail that may itself be a list the result also holds [] (a safe superset).
+meet_improper_with_list(E1, T1, E2, Kind) ->
+    case meet(E1, E2) of
+        none ->
+            case Kind of list -> nil; nonempty_list -> none end;
+        E ->
+            case meet(T1, {list, E2}) of
+                none -> {Kind, E};
+                nil -> {Kind, E};
+                Tail -> {improper_list, E, Tail}
+            end
+    end.
+
+%% Both chains end in the same place, or one of them runs on inside the other one's tail. Exact up to a nesting
+%% depth (counted across the recursion, which goes back through meet/2); below it, a safe superset: a pair of
+%% chains nested that deep has not been seen, and the cost grows with each level.
+meet_improper(E1, T1, E2, T2) ->
+    Depth = case get(spectra_meet_improper_depth) of undefined -> 0; D -> D end,
+    case meet(E1, E2) of
+        none ->
+            nil;
+        _ when Depth >= ?MAX_IMPROPER_MEET_DEPTH ->
+            {improper_list, join(E1, E2), join(T1, T2)};
+        E ->
+            put(spectra_meet_improper_depth, Depth + 1),
+            try
+                Tails = [meet(T1, T2), meet_tail(T1, E2, T2), meet_tail(T2, E1, T1)],
+                normalize_union([improper_chain(E, T) || T <- Tails])
+            after
+                put(spectra_meet_improper_depth, Depth)
+            end
+    end.
+
+%% T met with the improper list [E | Tail] (the other chain, seen from inside this tail).
+meet_tail({improper_list, E1, T1}, E2, T2) ->
+    meet_improper(E1, T1, E2, T2);
+meet_tail({union, Members}, E, Tail) ->
+    normalize_union([meet_tail(M, E, Tail) || M <- Members]);
+meet_tail(T, E, Tail) ->
+    meet(T, {improper_list, E, Tail}).
+
+improper_chain(E, none) -> {list, E};
+improper_chain(E, Tail) -> {improper_list, E, Tail}.
 
 meet_map_fields(F1, F2) ->
     Exact1 = #{K => V || {exact, K, V} <- F1},

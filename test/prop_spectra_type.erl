@@ -7,8 +7,6 @@
 
 -include_lib("proper/include/proper.hrl").
 
--export([known_bug_meet_keeps_common_values/0]).
-
 %% -------------------------------------------------------------------------
 %% Semantic oracle (shared: test/spectra_oracle.erl)
 %% -------------------------------------------------------------------------
@@ -28,10 +26,14 @@ stype(N) ->
         {3, leaf()},
         {1, {list, Sub}},
         {1, {nonempty_list, Sub}},
-        {1, {improper_list, Sub, Sub}},
+        {1, {improper_list, Sub, non_list()}},
         {1, ?LET(Ts, resize(3, list(Sub)), {tuple, Ts})},
         {2, ?LET(Ts, resize(3, non_empty(list(Sub))), {union, Ts})}
     ]).
+
+%% Tails that cannot be lists. The type language has no non-empty improper list, so meeting an improper list whose tail
+%% may be a list with a non-empty list is only a safe superset (it also holds []), not exact.
+non_list() -> ?SUCHTHAT(L, leaf(), L =/= nil).
 
 leaf() ->
     oneof([
@@ -113,10 +115,7 @@ prop_meet_is_sound() ->
     ?FORALL({{A, V}, B}, {inhabited(), stype()},
         ?IMPLIES(member(V, spectra_type:meet(A, B)), member(V, B))).
 
-%% KNOWN BUG, disabled on purpose (not named prop_*): meet(improper_list(integer, integer), list(integer)) is `none`
-%% although both contain [] (shrunk counterexample). `none` is what the checker reads as "disjoint". Rename to
-%% prop_meet_keeps_common_values once spectra_type:meet/2 is fixed.
-known_bug_meet_keeps_common_values() ->
+prop_meet_keeps_common_values() ->
     ?FORALL({{A, V}, B}, {inhabited(), stype()},
         ?IMPLIES(member(V, B), member(V, spectra_type:meet(A, B)))).
 

@@ -10,15 +10,18 @@
  },
  "rabbit_fifo_v7:chunk_disk_msgs:2082:discrepancy": {
   "verdict": "false_positive",
-  "cause": "?MSG(I, H) is [I | H]; improper list typed as [any()], tail lost"
+  "cause": "?MSG(I, H) is [I | H]; improper list typed as [any()], tail lost",
+  "status": "fixed: improper cells (infer/cons, patterns, tl/1, meet)"
  },
  "rabbit_fifo_v3:chunk_disk_msgs:2009:discrepancy": {
   "verdict": "false_positive",
-  "cause": "same as above"
+  "cause": "same as above",
+  "status": "fixed: improper cells (infer/cons, patterns, tl/1, meet)"
  },
  "rabbit_fifo:get_header:2497:dead_code": {
   "verdict": "false_positive",
-  "cause": "same as above: clause pattern ?TUPLE(Size, Expiry) = [Size | Expiry]"
+  "cause": "same as above: clause pattern ?TUPLE(Size, Expiry) = [Size | Expiry]",
+  "status": "fixed: improper cells (infer/cons, patterns, tl/1, meet)"
  },
  "_causes": {
   "improper_list": "[H|T] used as a pair; tail typed as list. repro: bench/repro/improper_list_and_andalso.erl b/1. Assigned to all rabbit_fifo* warnings (37) without checking each line by hand.",
@@ -68,5 +71,6 @@
  },
  "rabbit_ff_controller:state_after_virtual_reset:601:discrepancy": {
   "verdict": "pending"
- }
+ },
+ "_note_fixed": "The 37 rabbit_fifo* warnings (improper cells) are gone since the improper-cells fix: 51 -> 14 warnings on deps/rabbit, no new ones. Only 5 of them are listed individually above."
 }
