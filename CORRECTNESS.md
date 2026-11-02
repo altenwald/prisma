@@ -84,11 +84,13 @@ in the first session, each in a few lines (all in [`bench/repro/`](bench/repro/R
 | `case [0 \| 0] of [H \| T] when is_integer(T) -> H + T end` | inferred return type `none` | returns `0` |
 | `f() -> -1.` and `case f() of -1 -> ok end` | `f/0` returns `1`; "no clause can match" | returns `-1` |
 
-The third is new and the most basic of the three: **`infer_unop` keeps the type of the operand for unary `-`, so every
-negative literal is inferred as its absolute value**. It also explains part of the RabbitMQ noise that the first triage could not attribute.
+The third is the most basic of the three: **`infer_unop` kept the type of the operand for unary `-`, so every negative
+literal was inferred as its absolute value**. It is **fixed** (`negate_type/1` in `src/spectra_infer.erl`, with unit tests in
+`test/spectra_infer_tests.erl`) and the generator now produces negative literals. Measured on RabbitMQ (`rabbit`, discrepancy
+mode) the fix changes nothing: the same 51 warnings before and after, so none of them came from this bug.
 
-The full property (`known_bug_inference_and_warnings_agree_with_execution`) therefore fails and is disabled under a name
-PropEr does not run. The same generator with those three constructs left out
+The full property (`known_bug_inference_and_warnings_agree_with_execution`) still fails because of the first two and is disabled
+under a name PropEr does not run. The same generator with those two constructs left out
 (`prop_inference_and_warnings_agree_with_execution_without_known_bugs`) passes **1000 programs x 25 runs**, so nothing else in
 this fragment (integer arithmetic, `case` on literals, tuples, lists, guards, `hd`/`length`/`element`) has been refuted yet.
 The fragment is small: no maps, records, funs, `try`, binaries, calls between modules or specs.

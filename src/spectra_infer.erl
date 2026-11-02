@@ -12,6 +12,10 @@
     check_call_site/4
 ]).
 
+-ifdef(TEST).
+-export([negate_type/1]).
+-endif.
+
 -define(MAX_FIXPOINT_PASSES, 4).
 
 %% @doc Runs fixpoint success-type inference across all functions in `Mod`.
@@ -541,11 +545,31 @@ infer_unop(MFA, Anno, Op, ArgAst, ArgType, Env0, Warns, Sites)
             Msg = iolist_to_binary(io_lib:format("Unary '~s' requires number, got ~p", [Op, ArgType])),
             {none, Env0, [make_warning(discrepancy, MFA, Anno, Msg) | Warns], Sites};
         M ->
-            ResType = case ArgType of any -> any; _ -> M end,
+            ResType = case {ArgType, Op} of
+                {any, _} -> any;
+                {_, '-'} -> negate_type(M);
+                {_, '+'} -> M
+            end,
             {ResType, constrain_ast_var(ArgAst, number, Env0), Warns, Sites}
     end;
 infer_unop(_MFA, _Anno, _Op, _ArgAst, _ArgType, Env, Warns, Sites) ->
     {any, Env, Warns, Sites}.
+
+%% The type of `-X` when X has the given numeric type (anything not modelled is just `number`).
+-spec negate_type(spectra_type:stype()) -> spectra_type:stype().
+negate_type(none) -> none;
+negate_type({int_lit, I}) -> {int_lit, -I};
+negate_type({int_range, Lo, Hi}) -> {int_range, negate_bound(Hi), negate_bound(Lo)};
+negate_type(pos_integer) -> neg_integer;
+negate_type(neg_integer) -> pos_integer;
+negate_type(non_neg_integer) -> {int_range, neg_inf, 0};
+negate_type({union, Members}) -> spectra_type:normalize_union([negate_type(M) || M <- Members]);
+negate_type(T) when T =:= integer; T =:= float; T =:= number -> T;
+negate_type(_) -> number.
+
+negate_bound(neg_inf) -> pos_inf;
+negate_bound(pos_inf) -> neg_inf;
+negate_bound(N) when is_integer(N) -> -N.
 
 arith_result_type(float, _) -> float;
 arith_result_type(_, float) -> float;

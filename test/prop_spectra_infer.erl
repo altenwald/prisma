@@ -26,7 +26,6 @@
 %% Ex lists what the generator leaves out because it is already known to break Spectra:
 %%   nonboolean_operands  `andalso`/`orelse` whose right operand is not a boolean
 %%   improper_cells       `[H | T]` used as a pair whose tail is not a list
-%%   negative_literals    `-1`: the inference keeps the type of the operand, so `-1` becomes `1`
 %% The Env carries it as {ex, Ex}; variables are {Name :: string(), Tag}.
 program(Ex) ->
     ?LET(Tags, [tag(Ex), tag(Ex)],
@@ -96,8 +95,7 @@ leaf(pair, Env) -> ?LET({X, Y}, {lowest(Env, 5), lowest(Env, 5)}, fmt("{(~b), (~
 leaf(cell, Env) -> ?LET({X, Y}, {lowest(Env, 5), lowest(Env, 5)}, fmt("[(~b) | (~b)]", [X, Y]));
 leaf(list, _) -> oneof(["[]", "[1, 2]"]).
 
-lowest(Env, Hi) ->
-    range(case excluded(negative_literals, Env) of true -> 0; false -> -3 end, Hi).
+lowest(_Env, Hi) -> range(-3, Hi).
 
 compound(int, Env, D) ->
     oneof([
@@ -206,14 +204,13 @@ run_all(Mod, [Args | Rest], Dom, Ret, Claims) ->
 %% KNOWN BUGS, disabled on purpose (not named prop_*): with nothing excluded the property fails, and shrinks to
 %%   case true andalso 0 of false -> 0; N when is_integer(N) -> N end       ("andalso will fail": it runs)
 %%   case [0 | 0] of [H | T] when is_integer(T) -> H + T end                 (inferred return type `none`)
-%%   f() -> -1.                                                               (inferred return type `1`)
 %% Rename to prop_* when fixed (see bench/repro/).
 known_bug_inference_and_warnings_agree_with_execution() ->
     property([]).
 
 %% Everything else: any failure here is a new finding.
 prop_inference_and_warnings_agree_with_execution_without_known_bugs() ->
-    property([nonboolean_operands, improper_cells, negative_literals]).
+    property([nonboolean_operands, improper_cells]).
 
 property(Ex) ->
     ?FORALL({Src, Tags}, program(Ex),

@@ -286,3 +286,63 @@ additional_patterns_guards_and_bifs_test() ->
     {ok, Summary} = spectra_abstract:extract_beam(BeamBin),
     FailsContract = maps:get({extra_infer, always_fails, 0}, Summary#module_summary.functions),
     ?assertEqual({fun_type, [], none}, FailsContract#func_contract.inferred_type).
+
+%% Unary minus must negate the type of its operand (it used to keep the operand's type, so `-1` was inferred as `1`).
+
+inferred_return(Src) ->
+    Text = "-module(unop_sample).\n-export([f/1]).\n" ++ Src,
+    {ok, Toks, _} = erl_scan:string(Text),
+    Forms = split_forms(Toks, [], []),
+    {ok, unop_sample, Beam} = compile:forms(Forms, [debug_info, binary]),
+    {ok, Plt} = spectra_plt:from_beams([Beam]),
+    #module_summary{functions = Funcs} = maps:get(unop_sample, Plt#spectra_plt.modules),
+    {fun_type, _Args, Ret} = (maps:get({unop_sample, f, 1}, Funcs))#func_contract.inferred_type,
+    Ret.
+
+split_forms([], [], Acc) -> lists:reverse(Acc);
+split_forms([{dot, _} = Dot | Rest], Cur, Acc) ->
+    {ok, Form} = erl_parse:parse_form(lists:reverse([Dot | Cur])),
+    split_forms(Rest, [], [Form | Acc]);
+split_forms([Tok | Rest], Cur, Acc) -> split_forms(Rest, [Tok | Cur], Acc).
+
+unary_minus_negates_literals_test() ->
+    ?assertEqual({int_lit, -1}, inferred_return("f(_) -> -1.")),
+    ?assertEqual({int_lit, 1}, inferred_return("f(_) -> - -1.")),
+    ?assertEqual({int_lit, 0}, inferred_return("f(_) -> -0.")),
+    ?assertEqual(float, inferred_return("f(_) -> -1.5.")),
+    ?assertEqual({int_lit, 3}, inferred_return("f(_) -> +3.")).
+
+unary_minus_on_each_branch_test() ->
+    Ret = inferred_return("f(B) -> case B of true -> -1; false -> -2 end."),
+    ?assert(spectra_oracle:member(-1, Ret)),
+    ?assert(spectra_oracle:member(-2, Ret)),
+    ?assertNot(spectra_oracle:member(1, Ret)),
+    ?assertNot(spectra_oracle:member(2, Ret)).
+
+negative_literal_clauses_are_reachable_test() ->
+    Text = "-module(unop_reach).\n-export([f/0, g/0]).\nf() -> -1.\ng() -> case f() of -1 -> ok end.\n",
+    {ok, Toks, _} = erl_scan:string(Text),
+    {ok, unop_reach, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+    ?assertEqual({ok, []}, spectra:analyze_beams([Beam], #{mode => discrepancy, oxbow => false})).
+
+negate_type_test_() ->
+    [
+        ?_assertEqual({int_lit, -5}, spectra_infer:negate_type({int_lit, 5})),
+        ?_assertEqual({int_range, -10, -2}, spectra_infer:negate_type({int_range, 2, 10})),
+        ?_assertEqual({int_range, -3, pos_inf}, spectra_infer:negate_type({int_range, neg_inf, 3})),
+        ?_assertEqual({int_range, neg_inf, 3}, spectra_infer:negate_type({int_range, -3, pos_inf})),
+        ?_assertEqual(neg_integer, spectra_infer:negate_type(pos_integer)),
+        ?_assertEqual(pos_integer, spectra_infer:negate_type(neg_integer)),
+        ?_assertEqual({int_range, neg_inf, 0}, spectra_infer:negate_type(non_neg_integer)),
+        ?_assertEqual(integer, spectra_infer:negate_type(integer)),
+        ?_assertEqual(float, spectra_infer:negate_type(float)),
+        ?_assertEqual(number, spectra_infer:negate_type(number)),
+        ?_assertEqual(none, spectra_infer:negate_type(none)),
+        ?_assertEqual(
+            [{int_lit, -2}, {int_lit, -1}],
+            begin
+                {union, Ms} = spectra_type:normalize_union([spectra_infer:negate_type(T) || T <- [{int_lit, 2}, {int_lit, 1}]]),
+                lists:sort(Ms)
+            end
+        )
+    ].
