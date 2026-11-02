@@ -8,6 +8,8 @@
     main/1,
     version/0,
     build_plt/2,
+    analyze_project/1,
+    analyze_project/2,
     analyze_dirs/1,
     analyze_dirs/2,
     analyze_beams/2,
@@ -38,6 +40,19 @@ build_plt(Inputs, OutputFile) ->
         {error, Reason} ->
             {error, Reason}
     end.
+
+%% @doc Analyzes only the project's own applications in `ProjectRoot`, caching locked dependencies as `.splt` files.
+-spec analyze_project(file:filename_all()) ->
+    {ok, [#spectra_warning{}]} | {error, term()}.
+analyze_project(ProjectRoot) ->
+    analyze_project(ProjectRoot, #{}).
+
+%% @doc Analyzes only the project's own applications in `ProjectRoot` with `Opts`.
+-spec analyze_project(file:filename_all(), map()) ->
+    {ok, [#spectra_warning{}]} | {error, term()}.
+analyze_project(ProjectRoot, Opts) ->
+    ProjectEbins = spectra_lock:discover_project_ebins(ProjectRoot, Opts),
+    analyze_dirs(ProjectEbins, Opts#{project_root => ProjectRoot}).
 
 %% @doc Analyzes all BEAM files in `Dirs`.
 -spec analyze_dirs([file:filename_all()]) ->
@@ -100,7 +115,11 @@ main(["build-plt", "--output", OutFile | Inputs]) when Inputs =/= [] ->
     end;
 main(["check" | Rest]) ->
     {Plts, Targets} = parse_check_args(Rest),
-    case analyze_dirs(Targets, #{plts => Plts, project_root => "."}) of
+    Result = case Targets of
+        [] -> analyze_project(".", #{plts => Plts});
+        _ -> analyze_dirs(Targets, #{plts => Plts, project_root => "."})
+    end,
+    case Result of
         {ok, []} ->
             io:format("Spectra: 0 warnings found.~n"),
             erlang:halt(0);
@@ -121,7 +140,7 @@ main(_) ->
         "Usage:~n"
         "  spectra version~n"
         "  spectra build-plt --output <file.splt> <ebin_or_beam...>~n"
-        "  spectra check [--plt <file.splt>...] <ebin_or_beam...>~n"
+        "  spectra check [--plt <file.splt>...] [<ebin_or_beam...>]~n"
     ),
     erlang:halt(1).
 

@@ -1,7 +1,7 @@
 %% @doc Mix task (`mix spectra`) compiled directly as a BEAM module for Elixir projects.
 %%
-%% Automatically resolves `_build/<env>/lib/*/ebin` paths and supports `--mode`,
-%% `--env`, and `--plt` flags.
+%% Automatically resolves `_build/<env>/lib/<app>/ebin` paths for the project's
+%% own applications while caching locked dependencies as `.splt` files.
 -module('Elixir.Mix.Tasks.Spectra').
 
 -export([
@@ -26,8 +26,9 @@ run(RawArgs) ->
             ok
     end,
     Opts = parse_args(RawArgs),
+    Root = maps:get(root, Opts, "."),
     Dirs = resolve_ebin_dirs(maps:get(targets, Opts, []), Opts),
-    case spectra:analyze_dirs(Dirs, Opts) of
+    case spectra:analyze_dirs(Dirs, Opts#{project_root => Root}) of
         {ok, []} ->
             io:format("Spectra: 0 warnings found.~n"),
             ok;
@@ -70,34 +71,15 @@ parse_mode("gradual") -> gradual;
 parse_mode("discrepancy") -> discrepancy;
 parse_mode(_) -> hybrid.
 
-%% @doc Resolves Mix `_build/<env>/lib/*/ebin` directories for the current project.
+%% @doc Resolves Mix `_build/<env>/lib/<app>/ebin` directories for the project's own apps.
 -spec resolve_ebin_dirs([file:filename_all()]) -> [string()].
 resolve_ebin_dirs(Targets) ->
     resolve_ebin_dirs(Targets, #{}).
 
-%% @doc Resolves Mix `_build/<env>/lib/*/ebin` directories using `Opts`.
+%% @doc Resolves Mix `_build/<env>/lib/<app>/ebin` directories using `Opts`, excluding locked dependencies.
 -spec resolve_ebin_dirs([file:filename_all()], map()) -> [string()].
 resolve_ebin_dirs([_ | _] = ExplicitTargets, _Opts) ->
     [unicode:characters_to_list(T) || T <- ExplicitTargets];
 resolve_ebin_dirs([], Opts) ->
     Root = unicode:characters_to_list(maps:get(root, Opts, ".")),
-    Env = unicode:characters_to_list(maps:get(env, Opts, "dev")),
-    case maps:is_key(root, Opts) of
-        false ->
-            case code:ensure_loaded('Elixir.Mix.Project') of
-                {module, MixProject} ->
-                    BuildPath = unicode:characters_to_list(MixProject:build_path()),
-                    filelib:wildcard(filename:join([BuildPath, "lib", "*", "ebin"]));
-                _ ->
-                    wildcard_mix_ebins(Root, Env)
-            end;
-        true ->
-            wildcard_mix_ebins(Root, Env)
-    end.
-
-wildcard_mix_ebins(Root, Env) ->
-    EnvDirs = filelib:wildcard(filename:join([Root, "_build", Env, "lib", "*", "ebin"])),
-    case EnvDirs of
-        [_ | _] -> EnvDirs;
-        [] -> filelib:wildcard(filename:join([Root, "_build", "*", "lib", "*", "ebin"]))
-    end.
+    spectra_lock:discover_project_ebins(Root, Opts).

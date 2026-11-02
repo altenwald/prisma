@@ -142,3 +142,66 @@ otp_plt_fetcher_and_mix_lock_discovery_test() ->
     ?assert(is_list(lists:flatten(spectra_prv:format_error(custom_err)))),
 
     os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache).
+
+auto_separate_deps_from_project_apps_test() ->
+    TmpProj = "/tmp/spectra_dev/tmp_auto_proj",
+    TmpCache = "/tmp/spectra_dev/tmp_auto_cache",
+    os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache),
+
+    DepEbin = filename:join([TmpProj, "_build", "dev", "lib", "noisy_dep", "ebin"]),
+    OwnEbin = filename:join([TmpProj, "_build", "dev", "lib", "own_app", "ebin"]),
+    ok = filelib:ensure_dir(filename:join(DepEbin, "dummy")),
+    ok = filelib:ensure_dir(filename:join(OwnEbin, "dummy")),
+
+    %% Dependency has an internal discrepancy (1 + bad_atom), which MUST NOT be reported
+    %% when analyzing the project, while exporting a typed function `require_int/1`.
+    DepForms = [
+        {attribute, 1, module, noisy_dep},
+        {attribute, 2, export, [{require_int, 1}, {internal_bug, 0}]},
+        {attribute, 3, spec, {{require_int, 1}, [
+            {type, 3, 'fun', [{type, 3, product, [{type, 3, integer, []}]}, {type, 3, integer, []}]}
+        ]}},
+        {function, 4, require_int, 1, [
+            {clause, 4, [{var, 4, 'X'}], [], [{op, 4, '+', {var, 4, 'X'}, {integer, 4, 1}}]}
+        ]},
+        {function, 5, internal_bug, 0, [
+            {clause, 5, [], [], [{op, 5, '+', {integer, 5, 1}, {atom, 5, dep_internal_error}}]}
+        ]}
+    ],
+    {ok, noisy_dep, DepBeam} = compile:forms(DepForms, [debug_info]),
+    ok = file:write_file(filename:join(DepEbin, "noisy_dep.beam"), DepBeam),
+
+    %% Own app has a valid call to noisy_dep:require_int(42)
+    OwnForms = [
+        {attribute, 1, module, own_app},
+        {attribute, 2, export, [{run, 0}]},
+        {function, 3, run, 0, [
+            {clause, 3, [], [], [
+                {call, 4, {remote, 4, {atom, 4, noisy_dep}, {atom, 4, require_int}}, [{integer, 4, 42}]}
+            ]}
+        ]}
+    ],
+    {ok, own_app, OwnBeam} = compile:forms(OwnForms, [debug_info]),
+    ok = file:write_file(filename:join(OwnEbin, "own_app.beam"), OwnBeam),
+
+    MixLockText = "%{\n  \"noisy_dep\": {:hex, :noisy_dep, \"0.5.0\", \"h1\", [:mix], [], \"hexpm\", \"h2\"}\n}\n",
+    ok = file:write_file(filename:join(TmpProj, "mix.lock"), MixLockText),
+
+    %% discover_project_ebins must return ONLY own_app's ebin, excluding noisy_dep
+    ProjectEbins = spectra_lock:discover_project_ebins(TmpProj, #{env => "dev"}),
+    ?assertEqual([OwnEbin], ProjectEbins),
+
+    %% analyze_project analyzes ONLY own_app against cached noisy_dep.splt -> 0 warnings!
+    {ok, Warnings} = spectra:analyze_project(TmpProj, #{cache_dir => TmpCache, env => "dev"}),
+    ?assertEqual([], Warnings),
+
+    os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache).
+
+candidate_build_ebins_default_fallback_test() ->
+    TmpProj = "/tmp/spectra_dev/tmp_fallback_proj",
+    os:cmd("rm -rf " ++ TmpProj),
+    DevEbin = filename:join([TmpProj, "_build", "dev", "lib", "my_dev_app", "ebin"]),
+    ok = filelib:ensure_dir(filename:join(DevEbin, "dummy")),
+    ?assertEqual([DevEbin], spectra_lock:discover_project_ebins(TmpProj, #{})),
+    ?assertEqual({ok, []}, spectra:analyze_project(TmpProj)),
+    os:cmd("rm -rf " ++ TmpProj).

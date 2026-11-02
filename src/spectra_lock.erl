@@ -14,7 +14,8 @@
     cache_path/3,
     otp_cache_path/2,
     ensure_otp_plt/2,
-    resolve_project_plts/2
+    resolve_project_plts/2,
+    discover_project_ebins/2
 ]).
 
 -export_type([dep_entry/0]).
@@ -284,3 +285,43 @@ is_lock_content(_) -> false.
 sort_deps(Deps) ->
     ByName = maps:from_list([{maps:get(name, D), D} || D <- Deps]),
     [maps:get(K, ByName) || K <- lists:sort(maps:keys(ByName))].
+
+%% @doc Discovers `_build/<env>/lib/<app>/ebin` directories belonging to the project itself,
+%% excluding all external dependencies listed in `rebar.lock` or `mix.lock`.
+-spec discover_project_ebins(file:filename_all(), map()) -> [string()].
+discover_project_ebins(ProjectRoot, Opts) ->
+    Root = unicode:characters_to_list(ProjectRoot),
+    Deps = discover_deps(Root),
+    DepNames = maps:from_list([{binary_to_list(Name), true} || #{name := Name} <- Deps]),
+    CandidateEbins = candidate_build_ebins(Root, Opts),
+    lists:filter(
+        fun(EbinPath) ->
+            AppDir = filename:dirname(EbinPath),
+            AppName = filename:basename(AppDir),
+            not maps:is_key(AppName, DepNames)
+        end,
+        CandidateEbins
+    ).
+
+candidate_build_ebins(Root, Opts) ->
+    case maps:find(env, Opts) of
+        {ok, Env} ->
+            EnvStr = unicode:characters_to_list(Env),
+            EnvDirs = filelib:wildcard(filename:join([Root, "_build", EnvStr, "lib", "*", "ebin"])),
+            case EnvDirs of
+                [_ | _] -> EnvDirs;
+                [] -> filelib:wildcard(filename:join([Root, "_build", "*", "lib", "*", "ebin"]))
+            end;
+        error ->
+            DefaultDirs = filelib:wildcard(filename:join([Root, "_build", "default", "lib", "*", "ebin"])),
+            case DefaultDirs of
+                [_ | _] ->
+                    DefaultDirs;
+                [] ->
+                    DevDirs = filelib:wildcard(filename:join([Root, "_build", "dev", "lib", "*", "ebin"])),
+                    case DevDirs of
+                        [_ | _] -> DevDirs;
+                        [] -> filelib:wildcard(filename:join([Root, "_build", "*", "lib", "*", "ebin"]))
+                    end
+            end
+    end.
