@@ -3,7 +3,7 @@
 How often Spectra is right, measured on real code and compared with other tools **inside the same category**.
 Speed and memory live in [`BENCHMARK.md`](BENCHMARK.md); the harness is in [`bench/`](bench/README.md).
 
-Status: first measurement (RabbitMQ). The property-based corpus (PropEr) and the seeded-fault (mutation) corpus are not written yet.
+Status: first measurement (RabbitMQ) plus the first PropEr properties (type algebra). The inference-soundness properties and the seeded-fault (mutation) corpus are not written yet.
 
 ## Like-for-like: discrepancies
 
@@ -37,6 +37,33 @@ minimal reproduction in [`bench/repro/`](bench/repro/README.md).
 
 So **at least 41 of 51 are false positives and none of the 51 is a confirmed real defect**. Spectra's promise of zero false
 positives does not hold on this code yet, and the three causes above are good first candidates for regression tests.
+
+## Property-based tests: type algebra (PropEr)
+
+`test/prop_spectra_type.erl`, run with `rebar3 as test proper -n 1000`. The oracle is semantic: `member(Term, Type)` decides
+whether a concrete term belongs to a ground type, and generators build terms of a given type, so no human triage is needed.
+Types are ground and free of `any` (maps, funs and records are not generated yet); lists include `maybe_improper_list`.
+
+| Property | Meaning | Result (1000 runs) |
+| :--- | :--- | :--- |
+| `generators_agree_with_oracle` | the generators and the oracle describe the same sets (guards the test itself) | pass |
+| `subtype_is_reflexive` | `A <~ A` | pass |
+| `subtype_is_sound` | `A <~ B` implies every value of A is a value of B | pass |
+| `widening_is_accepted` | if B contains A **by construction**, `A <~ B` holds (no false mismatch) | pass |
+| `join_is_an_upper_bound` | both operands are included in their join | pass |
+| `meet_is_sound` | a value in `meet(A, B)` is in B | pass |
+| `normalize_union_keeps_members` / `_is_idempotent` | union normalization neither loses members nor changes on a second pass | pass |
+| `known_bug_meet_keeps_common_values` | a value in A and B is in `meet(A, B)` | **fails, disabled** |
+
+The one failure is a real incompleteness: `spectra_type:meet(improper_list(integer, integer), list(integer))` is `none`
+although both contain `[]` and every proper list of integers. `none` is how the checker decides that two types are
+disjoint, so any pair of types that goes through this path can be reported as "will fail". The property is kept in the file
+under a name proper does not run, and should be renamed to `prop_*` when `meet/2` is fixed. (A first attempt to show it as a
+false positive with a two-line module did not work out: Dialyzer also rejects that `-spec`, so it is not evidence.)
+
+The three false-positive causes of the RabbitMQ triage (improper lists as pairs, non-boolean `andalso`/`orelse`, overloaded
+specs) live in the inference and checker, not in the type algebra, so these properties do not see them: the next step is the
+execution-based soundness property.
 
 ## Not yet measured
 

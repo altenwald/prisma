@@ -12,3 +12,5 @@ Measurements of Spectra on real code. Speed and memory: `../BENCHMARK.md`. Warni
 rebar3 escriptize
 python3 bench/adapters.py spectra _build/default/lib/spectra/ebin
 ```
+
+Property tests (type algebra): `rebar3 as test proper -n 1000`.
