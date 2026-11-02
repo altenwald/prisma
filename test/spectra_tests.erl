@@ -127,3 +127,59 @@ gradual_spec_and_checker_compatibility_test() ->
     {ok, Summary} = spectra_abstract:extract_beam(BeamBin),
     ?assertEqual([], spectra_checker:check_module(Summary, spectra_plt:new(), #{mode => discrepancy})),
     ?assertMatch([_], spectra_checker:check_module(Summary, spectra_plt:new())).
+
+warning_formats_human_oneline_json_and_color_test() ->
+    W1 = #spectra_warning{
+        kind = gradual_mismatch,
+        mfa = {'Elixir.Dymmer.Trace', trace, 3},
+        line = 53,
+        message = <<"Call to Dymmer.Trace:trace/3: arg #2 of type integer is not a gradual subtype of pos_integer">>,
+        callee = {'Elixir.Dymmer.Trace', trace, 3},
+        arg_idx = 2,
+        expected = pos_integer,
+        actual = integer
+    },
+    W2 = #spectra_warning{
+        kind = gradual_mismatch,
+        mfa = {'Elixir.DymmerWeb.Api', create, 2},
+        line = 39,
+        message = <<"Gradual spec mismatch">>,
+        declared = {union, [{atom_lit, ok}, {atom_lit, error}]},
+        actual = {tuple, [{atom_lit, error}, {binary, 0, 8}]}
+    },
+
+    %% Human without color
+    HumanNoColor = spectra_checker:format_warnings([W1, W2], #{format => human, color => never}),
+    ?assertNot(binary:match(HumanNoColor, <<"\e[">>) =/= nomatch),
+    ?assert(binary:match(HumanNoColor, <<"Dymmer.Trace:trace/3 (line 53)">>) =/= nomatch),
+    ?assert(binary:match(HumanNoColor, <<"Expected:  pos_integer()">>) =/= nomatch),
+    ?assert(binary:match(HumanNoColor, <<"Actual:    integer()">>) =/= nomatch),
+    ?assert(binary:match(HumanNoColor, <<"Declared:  :ok | :error">>) =/= nomatch),
+
+    %% Human with color
+    HumanColor = spectra_checker:format_warnings([W1], #{format => human, color => always}),
+    ?assert(binary:match(HumanColor, <<"\e[">>) =/= nomatch),
+
+    %% Oneline
+    OneLine = spectra_checker:format_warnings([W1, W2], #{format => oneline, color => never}),
+    ?assert(binary:match(OneLine, <<"Dymmer.Trace:53: [gradual_mismatch] Dymmer.Trace:trace/3:">>) =/= nomatch),
+    ?assert(binary:match(OneLine, <<"DymmerWeb.Api:39: [gradual_mismatch] DymmerWeb.Api:create/2:">>) =/= nomatch),
+
+    %% JSON
+    JsonBin = spectra_checker:format_warnings([W1, W2], #{format => json}),
+    ?assert(binary:match(JsonBin, <<"\"kind\": \"gradual_mismatch\"">>) =/= nomatch),
+    ?assert(binary:match(JsonBin, <<"\"module\": \"Dymmer.Trace\"">>) =/= nomatch),
+    ?assert(binary:match(JsonBin, <<"\"expected\": \"pos_integer()\"">>) =/= nomatch),
+    ?assert(binary:match(JsonBin, <<"\"actual\": \"integer()\"">>) =/= nomatch),
+
+    %% CLI check options parsing
+    ParsedOpts = spectra:parse_check_opts(["--format", "json", "--no-color", "--plt", "test.splt", "my_ebin"]),
+    ?assertEqual(json, maps:get(format, ParsedOpts)),
+    ?assertEqual(never, maps:get(color, ParsedOpts)),
+    ?assertEqual(["test.splt"], maps:get(plts, ParsedOpts)),
+    ?assertEqual(["my_ebin"], maps:get(targets, ParsedOpts)),
+
+    %% Mix task parsing
+    MixOpts = 'Elixir.Mix.Tasks.Spectra':parse_args([<<"--format">>, <<"oneline">>, <<"--no-color">>]),
+    ?assertEqual(oneline, maps:get(format, MixOpts)),
+    ?assertEqual(never, maps:get(color, MixOpts)).

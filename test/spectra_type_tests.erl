@@ -275,3 +275,36 @@ remote_opaque_and_recursive_types_in_splt_test() ->
         {error, {undefined_type, {mod_a, missing_type, 0}}},
         spectra_plt:resolve_type(mod_a, {local_type, missing_type, []}, MergedPlt)
     ).
+
+type_format_elixir_and_erlang_test() ->
+    ElixirStruct = {map, [
+        {exact, {atom_lit, '__struct__'}, {atom_lit, 'Elixir.MyApp.User'}},
+        {exact, {atom_lit, id}, {binary, 0, 8}},
+        {exact, {atom_lit, age}, pos_integer}
+    ]},
+    ?assertEqual(<<"%MyApp.User{age: pos_integer(), id: String.t()}">>, spectra_type:format(ElixirStruct, #{lang => elixir})),
+
+    ElixirMap = {map, [
+        {exact, {atom_lit, key}, {atom_lit, value}}
+    ]},
+    ?assertEqual(<<"%{key: :value}">>, spectra_type:format(ElixirMap, #{lang => elixir})),
+
+    ErlangMap = {map, [
+        {exact, {atom_lit, key}, integer}
+    ]},
+    ?assertEqual(<<"#{key := integer()}">>, spectra_type:format(ErlangMap, #{lang => erlang})),
+
+    ElixirTuple = {tuple, [{atom_lit, ok}, {int_lit, 42}]},
+    ?assertEqual(<<"{:ok, 42}">>, spectra_type:format(ElixirTuple, #{lang => elixir})),
+
+    ElixirKeyword = {list, {tuple, [{atom_lit, timeout}, non_neg_integer]}},
+    ?assertEqual(<<"[timeout: non_neg_integer()]">>, spectra_type:format(ElixirKeyword, #{lang => elixir})),
+
+    ElixirUnion = {union, [{tuple, [{atom_lit, ok}, any]}, {tuple, [{atom_lit, error}, {atom_lit, not_found}]}]},
+    ?assertEqual(<<"{:ok, term()} | {:error, :not_found}">>, spectra_type:format(ElixirUnion, #{lang => elixir})),
+
+    ElixirFun = {fun_type, [integer, {binary, 0, 8}], boolean},
+    ?assertEqual(<<"(integer(), String.t() -> boolean())">>, spectra_type:format(ElixirFun, #{lang => elixir})),
+
+    ?assertEqual("MyApp.User", spectra_type:clean_module('Elixir.MyApp.User')),
+    ?assertEqual("my_erlang_mod", spectra_type:clean_module(my_erlang_mod)).

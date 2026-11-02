@@ -17,11 +17,16 @@
     body :: spectra_type:stype()
 }).
 
--record( spectra_warning, {
+-record(spectra_warning, {
     kind :: gradual_mismatch | discrepancy | unknown_function | dead_code | opacity_violation,
     mfa :: mfa_key(),
     line = 0 :: non_neg_integer(),
-    message :: binary()
+    message :: binary(),
+    declared = undefined :: undefined | spectra_type:stype(),
+    actual = undefined :: undefined | spectra_type:stype(),
+    expected = undefined :: undefined | spectra_type:stype(),
+    callee = undefined :: undefined | mfa_key(),
+    arg_idx = undefined :: undefined | pos_integer()
 }).
 
 -type call_site() :: {non_neg_integer(), mfa_key(), [spectra_type:stype()]}.

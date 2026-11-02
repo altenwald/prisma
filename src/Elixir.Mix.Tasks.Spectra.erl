@@ -49,17 +49,20 @@ run(RawArgs) ->
     Opts = parse_args(RawArgs),
     Root = maps:get(root, Opts, "."),
     Dirs = resolve_ebin_dirs(maps:get(targets, Opts, []), Opts),
+    Format = maps:get(format, Opts, human),
     case spectra:analyze_dirs(Dirs, Opts#{project_root => Root}) of
         {ok, []} ->
-            io:format("Spectra: 0 warnings found.~n"),
+            case Format of
+                json -> io:format("[]~n");
+                _ ->
+                    UseColor = spectra_checker:should_color(Opts),
+                    Msg = spectra_checker:colorize("Spectra: 0 warnings found.", "\e[1;32m", UseColor),
+                    io:format("~ts~n", [Msg])
+            end,
             ok;
         {ok, Warnings} ->
-            lists:foreach(
-                fun(W) ->
-                    io:format("~ts~n", [spectra_checker:format_warning(W)])
-                end,
-                Warnings
-            ),
+            Formatted = spectra_checker:format_warnings(Warnings, Opts),
+            io:format("~ts~n", [Formatted]),
             erlang:halt(1);
         {error, Reason} ->
             io:format(standard_error, "Spectra error: ~p~n", [Reason]),
@@ -74,19 +77,31 @@ parse_args(RawArgs) ->
         false -> "dev";
         EnvVal -> EnvVal
     end,
-    parse_args_loop(StrArgs, #{mode => hybrid, env => DefaultEnv, plts => [], targets => []}).
+    parse_args_loop(StrArgs, #{mode => hybrid, env => DefaultEnv, plts => [], targets => [], format => human, color => auto}).
 
 parse_args_loop(["--mode", ModeStr | Rest], Acc) ->
     Mode = parse_mode(ModeStr),
     parse_args_loop(Rest, Acc#{mode => Mode});
 parse_args_loop(["--env", EnvStr | Rest], Acc) ->
     parse_args_loop(Rest, Acc#{env => EnvStr});
+parse_args_loop(["--format", Fmt | Rest], Acc) ->
+    parse_args_loop(Rest, Acc#{format => parse_format(Fmt)});
+parse_args_loop(["--no-color" | Rest], Acc) ->
+    parse_args_loop(Rest, Acc#{color => never});
+parse_args_loop(["--color" | Rest], Acc) ->
+    parse_args_loop(Rest, Acc#{color => always});
 parse_args_loop(["--plt", PltPath | Rest], #{plts := Plts} = Acc) ->
     parse_args_loop(Rest, Acc#{plts => Plts ++ [PltPath]});
 parse_args_loop([Target | Rest], #{targets := Targets} = Acc) ->
     parse_args_loop(Rest, Acc#{targets => Targets ++ [Target]});
 parse_args_loop([], Acc) ->
     Acc.
+
+parse_format("json") -> json;
+parse_format("oneline") -> oneline;
+parse_format("pretty") -> human;
+parse_format("human") -> human;
+parse_format(_) -> human.
 
 parse_mode("gradual") -> gradual;
 parse_mode("discrepancy") -> discrepancy;

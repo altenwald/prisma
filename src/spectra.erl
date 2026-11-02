@@ -13,7 +13,8 @@
     analyze_dirs/1,
     analyze_dirs/2,
     analyze_beams/2,
-    parse_check_args/1
+    parse_check_args/1,
+    parse_check_opts/1
 ]).
 
 %% @doc Rebar3 plugin entrypoint.
@@ -114,22 +115,26 @@ main(["build-plt", "--output", OutFile | Inputs]) when Inputs =/= [] ->
             erlang:halt(1)
     end;
 main(["check" | Rest]) ->
-    {Plts, Targets} = parse_check_args(Rest),
+    Opts = parse_check_opts(Rest),
+    Targets = maps:get(targets, Opts, []),
+    Format = maps:get(format, Opts, human),
     Result = case Targets of
-        [] -> analyze_project(".", #{plts => Plts});
-        _ -> analyze_dirs(Targets, #{plts => Plts, project_root => "."})
+        [] -> analyze_project(".", Opts);
+        _ -> analyze_dirs(Targets, Opts#{project_root => "."})
     end,
     case Result of
         {ok, []} ->
-            io:format("Spectra: 0 warnings found.~n"),
+            case Format of
+                json -> io:format("[]~n");
+                _ ->
+                    UseColor = spectra_checker:should_color(Opts),
+                    Msg = spectra_checker:colorize("Spectra: 0 warnings found.", "\e[1;32m", UseColor),
+                    io:format("~ts~n", [Msg])
+            end,
             erlang:halt(0);
         {ok, Warnings} ->
-            lists:foreach(
-                fun(W) ->
-                    io:format("~ts~n", [spectra_checker:format_warning(W)])
-                end,
-                Warnings
-            ),
+            Formatted = spectra_checker:format_warnings(Warnings, Opts),
+            io:format("~ts~n", [Formatted]),
             erlang:halt(1);
         {error, Reason} ->
             io:format(standard_error, "Spectra check failed: ~p~n", [Reason]),
@@ -140,21 +145,43 @@ main(_) ->
         "Usage:~n"
         "  spectra version~n"
         "  spectra build-plt --output <file.splt> <ebin_or_beam...>~n"
-        "  spectra check [--plt <file.splt>...] [<ebin_or_beam...>]~n"
+        "  spectra check [--format <human|pretty|oneline|json>] [--no-color] [--color] [--plt <file.splt>...] [<ebin_or_beam...>]~n"
     ),
     erlang:halt(1).
 
-%% @doc Parses CLI arguments for `spectra check`.
+%% @doc Parses CLI options for `spectra check` into a map.
+-spec parse_check_opts([string()]) -> map().
+parse_check_opts(Args) ->
+    parse_check_opts_loop(Args, #{plts => [], targets => [], format => human, color => auto}).
+
+parse_check_opts_loop(["--plt", PltFile | Rest], Acc) ->
+    Plts = maps:get(plts, Acc),
+    parse_check_opts_loop(Rest, Acc#{plts => [PltFile | Plts]});
+parse_check_opts_loop(["--format", Fmt | Rest], Acc) ->
+    parse_check_opts_loop(Rest, Acc#{format => parse_format(Fmt)});
+parse_check_opts_loop(["--no-color" | Rest], Acc) ->
+    parse_check_opts_loop(Rest, Acc#{color => never});
+parse_check_opts_loop(["--color" | Rest], Acc) ->
+    parse_check_opts_loop(Rest, Acc#{color => always});
+parse_check_opts_loop([Target | Rest], Acc) ->
+    Targets = maps:get(targets, Acc),
+    parse_check_opts_loop(Rest, Acc#{targets => [Target | Targets]});
+parse_check_opts_loop([], Acc) ->
+    Plts = lists:reverse(maps:get(plts, Acc)),
+    Targets = lists:reverse(maps:get(targets, Acc)),
+    Acc#{plts => Plts, targets => Targets}.
+
+parse_format("json") -> json;
+parse_format("oneline") -> oneline;
+parse_format("pretty") -> human;
+parse_format("human") -> human;
+parse_format(_) -> human.
+
+%% @doc Parses CLI arguments for `spectra check` into `{Plts, Targets}` tuple.
 -spec parse_check_args([string()]) -> {[string()], [string()]}.
 parse_check_args(Args) ->
-    parse_check_args(Args, [], []).
-
-parse_check_args(["--plt", PltFile | Rest], Plts, Targets) ->
-    parse_check_args(Rest, [PltFile | Plts], Targets);
-parse_check_args([Target | Rest], Plts, Targets) ->
-    parse_check_args(Rest, Plts, [Target | Targets]);
-parse_check_args([], Plts, Targets) ->
-    {lists:reverse(Plts), lists:reverse(Targets)}.
+    Opts = parse_check_opts(Args),
+    {maps:get(plts, Opts), maps:get(targets, Opts)}.
 
 load_plts(PltFiles) ->
     lists:foldl(

@@ -8,7 +8,12 @@
     check_module/3,
     check_plt/2,
     check_plt/3,
-    format_warning/1
+    format_warning/1,
+    format_warning/2,
+    format_warnings/1,
+    format_warnings/2,
+    should_color/1,
+    colorize/3
 ]).
 
 %% @doc Analyzes all modules in `TargetPlt` against `DepsPlt` in hybrid mode.
@@ -129,7 +134,11 @@ check_gradual_args(CallerMFA, Line, {CM, CF, CA}, ZipArgs) ->
                         kind = Kind,
                         mfa = CallerMFA,
                         line = Line,
-                        message = Msg
+                        message = Msg,
+                        callee = {CM, CF, CA},
+                        arg_idx = Idx,
+                        actual = Actual,
+                        expected = Expected
                     },
                     {[W | WAcc], Idx + 1}
             end
@@ -194,7 +203,9 @@ verify_gradual_spec({Mod, _, _} = MFA, [_ | _] = SpecClauses, {fun_type, _Inferr
                         kind = Kind,
                         mfa = MFA,
                         line = Line,
-                        message = Msg
+                        message = Msg,
+                        declared = DeclaredUnion,
+                        actual = InferredRet
                     }]
             end
     end;
@@ -212,9 +223,232 @@ extract_spec_return(Mod, SpecClause, Plt) ->
             error
     end.
 
-%% @doc Formats a `#spectra_warning{}` as a human-readable line.
+%% @doc Formats a single `#spectra_warning{}` using default options.
 -spec format_warning(#spectra_warning{}) -> binary().
-format_warning(#spectra_warning{kind = Kind, mfa = {M, F, A}, line = Line, message = Msg}) ->
-    iolist_to_binary(
-        io_lib:format("[~s] ~s:~s/~B (line ~B): ~s", [Kind, M, F, A, Line, Msg])
+format_warning(Warning) ->
+    format_warning(Warning, #{}).
+
+%% @doc Formats a `#spectra_warning{}` according to `Opts` (`human`, `oneline`, `json`, colors).
+-spec format_warning(#spectra_warning{}, map()) -> binary().
+format_warning(#spectra_warning{} = W, Opts) ->
+    Format = maps:get(format, Opts, human),
+    Color = should_color(Opts),
+    case Format of
+        json ->
+            encode_warning_json(W);
+        oneline ->
+            format_oneline(W, Color);
+        _ ->
+            format_human(W, Color)
+    end.
+
+%% @doc Formats a list of `#spectra_warning{}` with default options.
+-spec format_warnings([#spectra_warning{}]) -> binary().
+format_warnings(Warnings) ->
+    format_warnings(Warnings, #{}).
+
+%% @doc Formats a list of `#spectra_warning{}` according to `Opts`.
+-spec format_warnings([#spectra_warning{}], map()) -> binary().
+format_warnings(Warnings, Opts) ->
+    Format = maps:get(format, Opts, human),
+    case Format of
+        json ->
+            Items = [encode_warning_json(W) || W <- Warnings],
+            iolist_to_binary([<<"[\n">>, lists:join(<<",\n">>, Items), <<"\n]">>]);
+        oneline ->
+            Lines = [format_oneline(W, should_color(Opts)) || W <- Warnings],
+            iolist_to_binary(lists:join(<<"\n">>, Lines));
+        _ ->
+            Blocks = [format_human(W, should_color(Opts)) || W <- Warnings],
+            iolist_to_binary(lists:join(<<"\n\n">>, Blocks))
+    end.
+
+-spec should_color(map()) -> boolean().
+should_color(Opts) ->
+    case maps:get(color, Opts, auto) of
+        always -> true;
+        never -> false;
+        auto ->
+            case os:getenv("NO_COLOR") of
+                Val when is_list(Val), Val =/= "" -> false;
+                _ ->
+                    case io:columns() of
+                        {ok, _} -> true;
+                        _ -> false
+                    end
+            end
+    end.
+
+-spec colorize(iodata(), string(), boolean()) -> iodata().
+colorize(Text, Ansi, true) -> [Ansi, Text, "\e[0m"];
+colorize(Text, _Ansi, false) -> Text.
+
+format_human(#spectra_warning{
+    kind = Kind,
+    mfa = {Mod, Fun, Arity},
+    line = Line,
+    message = Msg,
+    declared = Declared,
+    actual = Actual,
+    expected = Expected,
+    callee = Callee,
+    arg_idx = ArgIdx
+}, Color) ->
+    CleanMod = spectra_type:clean_module(Mod),
+    Lang = case atom_to_binary(Mod, utf8) of
+        <<"Elixir.", _/binary>> -> elixir;
+        _ -> erlang
+    end,
+    KindStr = atom_to_list(Kind),
+    KindColor = case Kind of
+        discrepancy -> "\e[1;31m";       %% bold red
+        dead_code -> "\e[1;33m";         %% bold yellow
+        gradual_mismatch -> "\e[1;35m";  %% bold magenta
+        opacity_violation -> "\e[1;31m"; %% bold red
+        _ -> "\e[1;31m"
+    end,
+    Tag = colorize("[" ++ KindStr ++ "]", KindColor, Color),
+    Loc = colorize(CleanMod ++ ":" ++ atom_to_list(Fun) ++ "/" ++ integer_to_list(Arity), "\e[1m", Color),
+    LineStr = colorize("(line " ++ integer_to_list(Line) ++ ")", "\e[2m", Color),
+    Header = [Tag, " ", Loc, " ", LineStr],
+
+    Details = case {Declared, Actual, Expected} of
+        {Decl, Act, undefined} when Decl =/= undefined, Act =/= undefined ->
+            DeclStr = spectra_type:format(Decl, #{lang => Lang}),
+            ActStr = spectra_type:format(Act, #{lang => Lang}),
+            [
+                "\n  ", colorize("Declared:", "\e[1;36m", Color), "  ", DeclStr,
+                "\n  ", colorize("Inferred:", "\e[1;31m", Color), "  ", ActStr
+            ];
+        {undefined, Act, Exp} when Exp =/= undefined, Act =/= undefined ->
+            ExpStr = spectra_type:format(Exp, #{lang => Lang}),
+            ActStr = spectra_type:format(Act, #{lang => Lang}),
+            CalleeLines = case Callee of
+                {CM, CF, CA} ->
+                    CleanCM = spectra_type:clean_module(CM),
+                    TargetStr = CleanCM ++ ":" ++ atom_to_list(CF) ++ "/" ++ integer_to_list(CA),
+                    ArgStr = case ArgIdx of undefined -> ""; N -> io_lib:format(" (argument #~B)", [N]) end,
+                    ["\n  ", colorize("Call to:", "\e[1m", Color), "   ", TargetStr, ArgStr];
+                _ ->
+                    []
+            end,
+            [
+                CalleeLines,
+                "\n  ", colorize("Expected:", "\e[1;32m", Color), "  ", ExpStr,
+                "\n  ", colorize("Actual:  ", "\e[1;31m", Color), "  ", ActStr
+            ];
+        _ ->
+            CleanMsg = clean_message_text(Msg),
+            ["\n  ", CleanMsg]
+    end,
+    iolist_to_binary([Header, Details]).
+
+format_oneline(#spectra_warning{
+    kind = Kind,
+    mfa = {Mod, Fun, Arity},
+    line = Line,
+    message = Msg,
+    declared = Declared,
+    actual = Actual,
+    expected = Expected,
+    callee = Callee,
+    arg_idx = ArgIdx
+}, Color) ->
+    CleanMod = spectra_type:clean_module(Mod),
+    Lang = case atom_to_binary(Mod, utf8) of
+        <<"Elixir.", _/binary>> -> elixir;
+        _ -> erlang
+    end,
+    Tag = colorize("[" ++ atom_to_list(Kind) ++ "]", "\e[1m", Color),
+    Loc = io_lib:format("~s:~B: ~s ~s:~s/~B", [CleanMod, Line, Tag, CleanMod, atom_to_list(Fun), Arity]),
+    Desc = case {Declared, Actual, Expected} of
+        {Decl, Act, undefined} when Decl =/= undefined, Act =/= undefined ->
+            io_lib:format("declared ~s is incompatible with inferred ~s", [
+                spectra_type:format(Decl, #{lang => Lang}),
+                spectra_type:format(Act, #{lang => Lang})
+            ]);
+        {undefined, Act, Exp} when Exp =/= undefined, Act =/= undefined ->
+            Target = case Callee of
+                {CM, CF, CA} -> io_lib:format("to ~s:~s/~B ", [spectra_type:clean_module(CM), atom_to_list(CF), CA]);
+                _ -> ""
+            end,
+            ArgStr = case ArgIdx of undefined -> ""; N -> io_lib:format("arg #~B ", [N]) end,
+            io_lib:format("call ~s~sof type ~s does not match expected ~s", [
+                Target, ArgStr,
+                spectra_type:format(Act, #{lang => Lang}),
+                spectra_type:format(Exp, #{lang => Lang})
+            ]);
+        _ ->
+            clean_message_text(Msg)
+    end,
+    iolist_to_binary([Loc, ": ", Desc]).
+
+encode_warning_json(#spectra_warning{
+    kind = Kind,
+    mfa = {Mod, Fun, Arity},
+    line = Line,
+    message = Msg,
+    declared = Declared,
+    actual = Actual,
+    expected = Expected,
+    callee = Callee,
+    arg_idx = ArgIdx
+}) ->
+    CleanMod = spectra_type:clean_module(Mod),
+    Lang = case atom_to_binary(Mod, utf8) of <<"Elixir.", _/binary>> -> elixir; _ -> erlang end,
+    Base = [
+        <<"  {\n">>,
+        <<"    \"kind\": \"">>, atom_to_binary(Kind, utf8), <<"\",\n">>,
+        <<"    \"module\": \"">>, json_escape(CleanMod), <<"\",\n">>,
+        <<"    \"function\": \"">>, json_escape(atom_to_list(Fun)), <<"\",\n">>,
+        <<"    \"arity\": ">>, integer_to_binary(Arity), <<",\n">>,
+        <<"    \"line\": ">>, integer_to_binary(Line), <<",\n">>,
+        <<"    \"message\": \"">>, json_escape(clean_message_text(Msg)), <<"\"">>
+    ],
+    ExtraDeclared = case Declared of
+        undefined -> [];
+        _ -> [<<",\n    \"declared\": \"">>, json_escape(spectra_type:format(Declared, #{lang => Lang})), <<"\"">>]
+    end,
+    ExtraActual = case Actual of
+        undefined -> [];
+        _ -> [<<",\n    \"actual\": \"">>, json_escape(spectra_type:format(Actual, #{lang => Lang})), <<"\"">>]
+    end,
+    ExtraExpected = case Expected of
+        undefined -> [];
+        _ -> [<<",\n    \"expected\": \"">>, json_escape(spectra_type:format(Expected, #{lang => Lang})), <<"\"">>]
+    end,
+    ExtraArgIdx = case ArgIdx of
+        undefined -> [];
+        _ -> [<<",\n    \"arg_idx\": ">>, integer_to_binary(ArgIdx)]
+    end,
+    ExtraCallee = case Callee of
+        {CM, CF, CA} ->
+            [
+                <<",\n    \"callee\": {\"module\": \"">>, json_escape(spectra_type:clean_module(CM)),
+                <<"\", \"function\": \"">>, json_escape(atom_to_list(CF)),
+                <<"\", \"arity\": ">>, integer_to_binary(CA), <<"}">>
+            ];
+        _ -> []
+    end,
+    iolist_to_binary([Base, ExtraDeclared, ExtraActual, ExtraExpected, ExtraArgIdx, ExtraCallee, <<"\n  }">>]).
+
+clean_message_text(Msg) when is_binary(Msg) ->
+    binary:replace(Msg, <<"Elixir.">>, <<>>, [global]);
+clean_message_text(Msg) ->
+    binary:replace(iolist_to_binary(Msg), <<"Elixir.">>, <<>>, [global]).
+
+json_escape(Bin) when is_binary(Bin) ->
+    json_escape(binary_to_list(Bin));
+json_escape(Str) when is_list(Str) ->
+    lists:flatmap(
+        fun
+            ($") -> "\\\"";
+            ($\\) -> "\\\\";
+            ($\n) -> "\\n";
+            ($\r) -> "\\r";
+            ($\t) -> "\\t";
+            (C) when C < 32 -> io_lib:format("\\u~4.16.0B", [C]);
+            (C) -> [C]
+        end,
+        Str
     ).

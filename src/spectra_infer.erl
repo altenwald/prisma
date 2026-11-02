@@ -679,7 +679,11 @@ check_call_site(CallerMFA, Line, {CM, CF, CA}, ZipArgs) ->
                         kind = discrepancy,
                         mfa = CallerMFA,
                         line = Line,
-                        message = Msg
+                        message = Msg,
+                        callee = {CM, CF, CA},
+                        arg_idx = Idx,
+                        actual = Actual,
+                        expected = Expected
                     },
                     {[W | WAcc], Idx + 1};
                 _ ->

@@ -16,7 +16,10 @@
     consistent_subtype/2,
     substitute/2,
     unfold_bounded_fun/1,
-    expand/4
+    expand/4,
+    format/1,
+    format/2,
+    clean_module/1
 ]).
 
 -export_type([
@@ -780,3 +783,286 @@ builtin_remote_type('Elixir.MapSet', t, [ValType], _Key) ->
     ]}};
 builtin_remote_type(_Mod, _Name, _Args, Key) ->
     {error, {undefined_type, Key}}.
+
+%% @doc Pretty-prints a normalized `stype()` using auto-detected language syntax.
+-spec format(stype()) -> binary().
+format(Type) ->
+    format(Type, #{}).
+
+%% @doc Pretty-prints a normalized `stype()` with options (e.g. `#{lang => elixir | erlang}`).
+-spec format(stype(), map()) -> binary().
+format(Type, Opts) ->
+    Lang = maps:get(lang, Opts, auto),
+    EffectiveLang = case Lang of
+        auto -> detect_lang(Type);
+        L -> L
+    end,
+    iolist_to_binary(format_type(Type, EffectiveLang)).
+
+%% @doc Strips the Elixir prefix (`Elixir.`) from module names when present.
+-spec clean_module(term()) -> string().
+clean_module(Mod) when is_atom(Mod) ->
+    Bin = atom_to_binary(Mod, utf8),
+    case Bin of
+        <<"Elixir.", Rest/binary>> -> binary_to_list(Rest);
+        _ -> atom_to_list(Mod)
+    end;
+clean_module(Other) ->
+    lists:flatten(io_lib:format("~p", [Other])).
+
+detect_lang(Type) ->
+    case has_elixir_marker(Type) of
+        true -> elixir;
+        false -> erlang
+    end.
+
+has_elixir_marker({atom_lit, A}) ->
+    is_elixir_module_atom(A);
+has_elixir_marker({remote_type, Mod, _, _}) ->
+    is_elixir_module_atom(Mod);
+has_elixir_marker({tuple, Elems}) ->
+    lists:any(fun has_elixir_marker/1, Elems);
+has_elixir_marker({list, E}) ->
+    has_elixir_marker(E);
+has_elixir_marker({nonempty_list, E}) ->
+    has_elixir_marker(E);
+has_elixir_marker({improper_list, H, T}) ->
+    has_elixir_marker(H) orelse has_elixir_marker(T);
+has_elixir_marker({map, Fields}) ->
+    lists:any(
+        fun({_Kind, K, V}) ->
+            has_elixir_marker(K) orelse has_elixir_marker(V)
+        end,
+        Fields
+    );
+has_elixir_marker({union, Members}) ->
+    lists:any(fun has_elixir_marker/1, Members);
+has_elixir_marker({fun_type, Args, Ret}) ->
+    has_elixir_marker(Ret) orelse lists:any(fun has_elixir_marker/1, Args);
+has_elixir_marker(_) ->
+    false.
+
+is_elixir_module_atom(A) when is_atom(A) ->
+    case atom_to_binary(A, utf8) of
+        <<"Elixir.", _/binary>> -> true;
+        _ -> false
+    end;
+is_elixir_module_atom(_) ->
+    false.
+
+format_type(any, elixir) -> "term()";
+format_type(any, erlang) -> "any()";
+format_type(none, _) -> "none()";
+format_type(atom, _) -> "atom()";
+format_type(integer, _) -> "integer()";
+format_type(pos_integer, _) -> "pos_integer()";
+format_type(non_neg_integer, _) -> "non_neg_integer()";
+format_type(neg_integer, _) -> "neg_integer()";
+format_type(float, _) -> "float()";
+format_type(number, _) -> "number()";
+format_type(boolean, _) -> "boolean()";
+format_type(nil, _) -> "nil";
+format_type(pid, _) -> "pid()";
+format_type(port, _) -> "port()";
+format_type(reference, _) -> "reference()";
+format_type(any_tuple, _) -> "tuple()";
+format_type(any_map, _) -> "map()";
+format_type(any_fun, _) -> "fun()";
+format_type({atom_lit, nil}, _) -> "nil";
+format_type({atom_lit, true}, _) -> "true";
+format_type({atom_lit, false}, _) -> "false";
+format_type({atom_lit, A}, elixir) ->
+    case is_elixir_module_atom(A) of
+        true ->
+            clean_module(A);
+        false ->
+            AStr = atom_to_list(A),
+            case is_simple_elixir_atom(AStr) of
+                true -> [":", AStr];
+                false -> [":\"", escape_quotes(AStr), "\""]
+            end
+    end;
+format_type({atom_lit, A}, erlang) ->
+    lists:flatten(io_lib:write_atom(A));
+format_type({int_lit, I}, _) ->
+    integer_to_list(I);
+format_type({int_range, Lo, Hi}, _) ->
+    LoStr = case Lo of neg_inf -> "-inf"; _ -> integer_to_list(Lo) end,
+    HiStr = case Hi of pos_inf -> "inf"; _ -> integer_to_list(Hi) end,
+    [LoStr, "..", HiStr];
+format_type({binary, 0, 8}, elixir) ->
+    "String.t()";
+format_type({binary, 0, 8}, erlang) ->
+    "binary()";
+format_type({binary, 0, 1}, _) ->
+    "bitstring()";
+format_type({binary, B, U}, _) when B > 0, U =:= 0 ->
+    ["<<_:", integer_to_list(B), ">>"];
+format_type({binary, B, U}, _) when B > 0, U > 0 ->
+    ["<<_:", integer_to_list(B), ", _:_*", integer_to_list(U), ">>"];
+format_type({binary, 0, U}, _) when U > 0 ->
+    ["<<_:_*", integer_to_list(U), ">>"];
+format_type({binary, _, _}, _) ->
+    "binary()";
+format_type({tuple, Elems}, Lang) ->
+    ["{", string:join([format_type(E, Lang) || E <- Elems], ", "), "}"];
+format_type({list, E}, Lang) ->
+    case is_keyword_elem(E, Lang) of
+        {true, KeyValStrs} ->
+            ["[", string:join(KeyValStrs, ", "), "]"];
+        false ->
+            ["[", format_type(E, Lang), "]"]
+    end;
+format_type({nonempty_list, E}, Lang) ->
+    case is_keyword_elem(E, Lang) of
+        {true, KeyValStrs} ->
+            ["[", string:join(KeyValStrs, ", "), ", ...]"];
+        false ->
+            ["[", format_type(E, Lang), ", ...]"]
+    end;
+format_type({improper_list, H, T}, Lang) ->
+    ["[", format_type(H, Lang), " | ", format_type(T, Lang), "]"];
+format_type({map, Fields}, Lang) ->
+    format_map(Fields, Lang);
+format_type({union, Members}, Lang) ->
+    string:join([format_type(M, Lang) || M <- Members], " | ");
+format_type({fun_type, Args, Ret}, elixir) ->
+    ArgsStr = string:join([format_type(A, elixir) || A <- Args], ", "),
+    ["(", ArgsStr, " -> ", format_type(Ret, elixir), ")"];
+format_type({fun_type, Args, Ret}, erlang) ->
+    ArgsStr = string:join([format_type(A, erlang) || A <- Args], ", "),
+    ["fun((", ArgsStr, ") -> ", format_type(Ret, erlang), ")"];
+format_type({fun_any_args, Ret}, elixir) ->
+    ["(... -> ", format_type(Ret, elixir), ")"];
+format_type({fun_any_args, Ret}, erlang) ->
+    ["fun((...) -> ", format_type(Ret, erlang), ")"];
+format_type({record, Name, Fields}, Lang) ->
+    ["#", atom_to_list(Name), "{", format_record_fields(Fields, Lang), "}"];
+format_type({remote_type, Mod, Name, Args}, Lang) ->
+    format_remote_type(Mod, Name, Args, Lang);
+format_type({local_type, Name, Args}, Lang) ->
+    ArgsStr = string:join([format_type(A, Lang) || A <- Args], ", "),
+    [atom_to_list(Name), "(", ArgsStr, ")"];
+format_type({opaque, Mod, Name, Args, _Body}, Lang) ->
+    format_remote_type(Mod, Name, Args, Lang);
+format_type({var, Name}, _) ->
+    atom_to_list(Name);
+format_type(Other, _) ->
+    lists:flatten(io_lib:format("~p", [Other])).
+
+is_keyword_elem({union, Members}, elixir) ->
+    Pairs = [is_keyword_elem(M, elixir) || M <- Members],
+    AllTrue = lists:all(fun(P) -> P =/= false end, Pairs),
+    case AllTrue of
+        true ->
+            Items = lists:append([Elems || {true, Elems} <- Pairs]),
+            {true, Items};
+        false ->
+            false
+    end;
+is_keyword_elem({tuple, [{atom_lit, K}, V]}, elixir) ->
+    KStr = atom_to_list(K),
+    case is_simple_elixir_atom(KStr) of
+        true -> {true, [KStr ++ ": " ++ format_type(V, elixir)]};
+        false -> false
+    end;
+is_keyword_elem(_, _) ->
+    false.
+
+format_map(Fields, elixir) ->
+    case find_struct_mod(Fields) of
+        {ok, StructMod, RestFields} ->
+            CleanMod = clean_module(StructMod),
+            case RestFields of
+                [] -> ["%", CleanMod, "{}"];
+                _ -> ["%", CleanMod, "{", format_elixir_map_fields(RestFields), "}"]
+            end;
+        none ->
+            case Fields of
+                [] -> "%{}";
+                _ -> ["%{", format_elixir_map_fields(Fields), "}"]
+            end
+    end;
+format_map(Fields, erlang) ->
+    case Fields of
+        [] -> "#{}";
+        _ -> ["#{", format_erlang_map_fields(Fields), "}"]
+    end.
+
+find_struct_mod(Fields) ->
+    StructMatches = [Mod || {_Kind, {atom_lit, '__struct__'}, {atom_lit, Mod}} <- Fields],
+    case StructMatches of
+        [Mod | _] ->
+            Rest = [F || F <- Fields, element(2, F) =/= {atom_lit, '__struct__'}],
+            {ok, Mod, Rest};
+        [] ->
+            none
+    end.
+
+format_elixir_map_fields(Fields) ->
+    SortedFields = lists:sort(fun(F1, F2) -> element(2, F1) =< element(2, F2) end, Fields),
+    Parts = lists:map(
+        fun
+            ({_Kind, {atom_lit, K}, V}) ->
+                KStr = atom_to_list(K),
+                case is_simple_elixir_atom(KStr) of
+                    true -> [KStr, ": ", format_type(V, elixir)];
+                    false -> [":\"", escape_quotes(KStr), "\" => ", format_type(V, elixir)]
+                end;
+            ({_Kind, K, V}) ->
+                [format_type(K, elixir), " => ", format_type(V, elixir)]
+        end,
+        SortedFields
+    ),
+    string:join(Parts, ", ").
+
+format_erlang_map_fields(Fields) ->
+    SortedFields = lists:sort(fun(F1, F2) -> element(2, F1) =< element(2, F2) end, Fields),
+    Parts = lists:map(
+        fun({Kind, K, V}) ->
+            Sep = case Kind of exact -> " := "; assoc -> " => " end,
+            [format_type(K, erlang), Sep, format_type(V, erlang)]
+        end,
+        SortedFields
+    ),
+    string:join(Parts, ", ").
+
+format_record_fields(Fields, Lang) ->
+    Parts = [
+        [atom_to_list(F), " = ", format_type(T, Lang)]
+        || {F, T} <- Fields
+    ],
+    string:join(Parts, ", ").
+
+format_remote_type('Elixir.String', t, [], elixir) ->
+    "String.t()";
+format_remote_type(Mod, Name, Args, elixir) ->
+    CleanMod = clean_module(Mod),
+    ArgsStr = string:join([format_type(A, elixir) || A <- Args], ", "),
+    [CleanMod, ".", atom_to_list(Name), "(", ArgsStr, ")"];
+format_remote_type(Mod, Name, Args, erlang) ->
+    ArgsStr = string:join([format_type(A, erlang) || A <- Args], ", "),
+    [atom_to_list(Mod), ":", atom_to_list(Name), "(", ArgsStr, ")"].
+
+is_simple_elixir_atom([First | Rest])
+  when (First >= $a andalso First =< $z) orelse First =:= $_ ->
+    lists:all(
+        fun(C) ->
+            (C >= $a andalso C =< $z) orelse
+            (C >= $A andalso C =< $Z) orelse
+            (C >= $0 andalso C =< $9) orelse
+            C =:= $_ orelse C =:= $@ orelse C =:= $? orelse C =:= $!
+        end,
+        Rest
+    );
+is_simple_elixir_atom(_) ->
+    false.
+
+escape_quotes(Str) ->
+    lists:flatmap(
+        fun
+            ($") -> "\\\"";
+            (C) -> [C]
+        end,
+        Str
+    ).
