@@ -404,7 +404,8 @@ infer_expr(Mod, MFA, {map, Anno, Base, Fields}, Env0, Contracts, Warns0, Sites0)
             {none, Env1, [W | Warns1], Sites1};
         _ ->
             {MapFields, Env2, Warns2, Sites2} = infer_map_fields(Mod, MFA, Fields, Env1, Contracts, Warns1, Sites1, []),
-            {{map, lists:usort(MapFields)}, Env2, Warns2, Sites2}
+            UpdatedType = update_map_type(BaseType, MapFields),
+            {UpdatedType, Env2, Warns2, Sites2}
     end;
 infer_expr(Mod, MFA, {match, Anno, Pat, Rhs}, Env0, Contracts, Warns0, Sites0) ->
     {RhsType, Env1, Warns1, Sites1} = infer_expr(Mod, MFA, Rhs, Env0, Contracts, Warns0, Sites0),
@@ -718,12 +719,29 @@ make_warning(Kind, MFA, Anno, Msg) ->
 
 seed_arg_types(MFA, Arity, AllContracts) ->
     case maps:find(MFA, AllContracts) of
-        {ok, #func_contract{declared_specs = [Spec | _]}} ->
-            case spectra_type:unfold_bounded_fun(Spec) of
-                {fun_type, SpecArgs, _} when length(SpecArgs) =:= Arity ->
-                    [sanitize_seed_type(A) || A <- SpecArgs];
+        {ok, #func_contract{declared_specs = [_ | _] = Specs}} ->
+            SpecArgLists = lists:filtermap(
+                fun(Spec) ->
+                    case spectra_type:unfold_bounded_fun(Spec) of
+                        {fun_type, SpecArgs, _} when length(SpecArgs) =:= Arity ->
+                            {true, [sanitize_seed_type(A) || A <- SpecArgs]};
+                        _ ->
+                            false
+                    end
+                end,
+                Specs
+            ),
+            case SpecArgLists of
+                [] ->
+                    lists:duplicate(Arity, any);
                 _ ->
-                    lists:duplicate(Arity, any)
+                    lists:map(
+                        fun(Idx) ->
+                            Col = [lists:nth(Idx, Args) || Args <- SpecArgLists],
+                            spectra_type:normalize_union(Col)
+                        end,
+                        lists:seq(1, Arity)
+                    )
             end;
         _ ->
             lists:duplicate(Arity, any)
@@ -736,3 +754,12 @@ sanitize_seed_type({nonempty_list, E}) -> {nonempty_list, sanitize_seed_type(E)}
 sanitize_seed_type({tuple, Es}) -> {tuple, [sanitize_seed_type(E) || E <- Es]};
 sanitize_seed_type({union, Ms}) -> spectra_type:normalize_union([sanitize_seed_type(M) || M <- Ms]);
 sanitize_seed_type(Other) -> Other.
+
+update_map_type({map, BaseFields}, NewFields) ->
+    NewKeys = [K || {_Kind, K, _V} <- NewFields],
+    KeptBase = [F || {_BKind, BK, _BV} = F <- BaseFields, not lists:member(BK, NewKeys)],
+    {map, lists:usort(KeptBase ++ NewFields)};
+update_map_type({union, Members}, NewFields) ->
+    spectra_type:normalize_union([update_map_type(M, NewFields) || M <- Members]);
+update_map_type(_, NewFields) ->
+    {map, lists:usort(NewFields)}.
