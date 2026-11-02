@@ -181,15 +181,4 @@ resolve_ebins(_AppEbins, _Root, [_|_] = Targets) ->
 resolve_ebins([_|_] = AppEbins, _Root, []) ->
     [unicode:characters_to_list(D) || D <- AppEbins];
 resolve_ebins([], Root, []) ->
-    Wildcard = filename:join([Root, "_build", "*", "lib", "*", "ebin"]),
-    Found = filelib:wildcard(Wildcard),
-    case Found of
-        [_|_] ->
-            Found;
-        [] ->
-            DefaultEbin = filename:join(Root, "ebin"),
-            case filelib:is_dir(DefaultEbin) of
-                true -> [DefaultEbin];
-                false -> []
-            end
-    end.
+    spectra_lock:discover_project_ebins(Root, #{}).

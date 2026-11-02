@@ -3,3 +3,6 @@
 *.plt
 *.splt
 /.rebar3/
+*.tar
+/doc/
+/deps/

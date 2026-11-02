@@ -1,6 +1,6 @@
 %% @doc Structural Oxbow Code detector for Erlang and Elixir codebases.
 %%
-%% Based on the research by Fernando "Brujo" Benavides & Laura M. Castro
+%% Based on the research by Fernando "Brujo" Benavides and Laura M. Castro
 %% in "Detecting Oxbow Code in Erlang Codebases with the Highest Degree of Certainty" (2021).
 %%
 %% Detects:

@@ -1,14 +1,18 @@
 defmodule Spectra.MixProject do
   use Mix.Project
 
+  @version "0.1.0"
+  @source_url "https://github.com/altenwald/spectra"
+
   def project do
     [
       app: :spectra,
-      version: "0.1.0",
+      version: @version,
       language: :erlang,
       erlc_options: [:debug_info],
       description: "Hybrid Success & Gradual Type Analyzer with Modular PLTs for Erlang and Elixir",
       package: package(),
+      docs: docs(),
       deps: deps()
     ]
   end
@@ -20,13 +24,26 @@ defmodule Spectra.MixProject do
   end
 
   defp deps do
-    []
+    [
+      {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
+    ]
   end
 
   defp package do
     [
+      name: "spectra",
       licenses: ["Apache-2.0"],
-      links: %{"GitHub" => "https://github.com/altenwald/spectra"}
+      links: %{"GitHub" => @source_url},
+      files: ~w(src include mix.exs rebar.config rebar.lock README* LICENSE*)
+    ]
+  end
+
+  defp docs do
+    [
+      main: "readme",
+      source_url: @source_url,
+      source_ref: "v#{@version}",
+      extras: ["README.md", "LICENSE"]
     ]
   end
 end

@@ -1,5 +1,6 @@
 {application, spectra, [
     {description, "Hybrid Success & Gradual Type Analyzer with Modular PLTs for Erlang and Elixir"},
+    {pkg_name, "spectra"},
     {vsn, "0.1.0"},
     {registered, []},
     {applications, [
@@ -13,5 +14,14 @@
     {licenses, ["Apache-2.0"]},
     {links, [
         {"GitHub", "https://github.com/altenwald/spectra"}
+    ]},
+    {files, [
+        "src",
+        "include",
+        "rebar.config",
+        "rebar.lock",
+        "mix.exs",
+        "README.md",
+        "LICENSE"
     ]}
 ]}.
