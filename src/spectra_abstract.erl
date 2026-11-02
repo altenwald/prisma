@@ -86,42 +86,47 @@ enrich_from_debug_info(Beam, Module, Dbgi, Exports, Summary) ->
     #module_summary{}.
 parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types = AttrExpTypes} = Summary) ->
     ExportSet = maps:from_list([{FA, true} || FA <- Exports]),
-    {RawTypes, FormExpTypes, Specs, InitialFuncs, ClausesByMFA} = lists:foldl(
-        fun(Form, {TAcc, ETAcc, SAcc, FAcc, CAcc}) ->
+    {RawTypes, FormExpTypes, Specs, InitialFuncs, ClausesByMFA, _GenSet} = lists:foldl(
+        fun(Form, {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc}) ->
             case Form of
+                {attribute, _Anno, compiler_generated, {F, A}} ->
+                    {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc#{{Mod, F, A} => true}};
                 {attribute, _Anno, export_type, ExpList} when is_list(ExpList) ->
-                    {TAcc, ExpList ++ ETAcc, SAcc, FAcc, CAcc};
+                    {TAcc, ExpList ++ ETAcc, SAcc, FAcc, CAcc, GAcc};
                 {attribute, _Anno, Kind, {_TypeName, _TypeDef, _TypeArgs} = TypeAttr}
                   when Kind =:= type; Kind =:= opaque; Kind =:= nominal ->
                     Decl = spectra_type:from_type_attr(Mod, Kind, TypeAttr),
                     Key = Decl#type_decl.key,
-                    {TAcc#{Key => Decl}, ETAcc, SAcc, FAcc, CAcc};
+                    {TAcc#{Key => Decl}, ETAcc, SAcc, FAcc, CAcc, GAcc};
                 {attribute, _Anno, spec, {{F, A}, SpecClauses}} ->
                     Key = {Mod, F, A},
                     NormSpecs = [spectra_type:from_abstract(S) || S <- SpecClauses],
-                    {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc, CAcc};
+                    {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc, CAcc, GAcc};
                 {attribute, _Anno, spec, {{M, F, A}, SpecClauses}} ->
                     Key = {M, F, A},
                     NormSpecs = [spectra_type:from_abstract(S) || S <- SpecClauses],
-                    {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc, CAcc};
+                    {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc, CAcc, GAcc};
                 {function, Anno, F, A, Clauses} ->
                     Key = {Mod, F, A},
                     Line = erl_anno:line(Anno),
                     Calls = extract_calls_from_clauses(Mod, Clauses),
                     InitType = {fun_type, lists:duplicate(A, any), any},
+                    IsGen = maps:is_key(Key, GAcc) orelse F =:= module_info orelse F =:= behaviour_info,
                     Contract = #func_contract{
                         mfa = Key,
                         exported = maps:is_key({F, A}, ExportSet),
                         inferred_type = InitType,
                         calls = Calls,
+                        clauses = Clauses,
+                        compiler_generated = IsGen,
                         line = Line
                     },
-                    {TAcc, ETAcc, SAcc, FAcc#{Key => Contract}, CAcc#{Key => {Line, Clauses}}};
+                    {TAcc, ETAcc, SAcc, FAcc#{Key => Contract}, CAcc#{Key => {Line, Clauses}}, GAcc};
                 _ ->
-                    {TAcc, ETAcc, SAcc, FAcc, CAcc}
+                    {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc}
             end
         end,
-        {#{}, AttrExpTypes, #{}, #{}, #{}},
+        {#{}, AttrExpTypes, #{}, #{}, #{}, #{}},
         Forms
     ),
     AllExpTypes = lists:usort(FormExpTypes),
@@ -170,6 +175,12 @@ collect_calls(Mod, {call, _Anno, {remote, _A2, {atom, _A3, M}, {atom, _A4, F}}, 
 collect_calls(Mod, {call, _Anno, {atom, _A2, F}, Args}, Acc) ->
     Acc1 = Acc#{{Mod, F, length(Args)} => true},
     collect_calls_list(Mod, Args, Acc1);
+collect_calls(Mod, {'fun', _Anno, {function, F, A}}, Acc) when is_atom(F), is_integer(A) ->
+    Acc#{{Mod, F, A} => true};
+collect_calls(_Mod, {'fun', _Anno, {function, {atom, _, M}, {atom, _, F}, {integer, _, A}}}, Acc) ->
+    Acc#{{M, F, A} => true};
+collect_calls(_Mod, {'fun', _Anno, {function, M, F, A}}, Acc) when is_atom(M), is_atom(F), is_integer(A) ->
+    Acc#{{M, F, A} => true};
 collect_calls(Mod, Tuple, Acc) when is_tuple(Tuple) ->
     collect_calls_list(Mod, tuple_to_list(Tuple), Acc);
 collect_calls(Mod, List, Acc) when is_list(List) ->

@@ -86,6 +86,10 @@ parse_args_loop(["--env", EnvStr | Rest], Acc) ->
     parse_args_loop(Rest, Acc#{env => EnvStr});
 parse_args_loop(["--format", Fmt | Rest], Acc) ->
     parse_args_loop(Rest, Acc#{format => parse_format(Fmt)});
+parse_args_loop(["--no-oxbow" | Rest], Acc) ->
+    parse_args_loop(Rest, Acc#{oxbow => false});
+parse_args_loop(["--oxbow" | Rest], Acc) ->
+    parse_args_loop(Rest, Acc#{oxbow => true});
 parse_args_loop(["--no-color" | Rest], Acc) ->
     parse_args_loop(Rest, Acc#{color => never});
 parse_args_loop(["--color" | Rest], Acc) ->

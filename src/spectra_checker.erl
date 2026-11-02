@@ -39,14 +39,19 @@ check_module(Summary, Plt) ->
 
 %% @doc Analyzes a `#module_summary{}` using the configured mode (`hybrid`, `gradual`, `discrepancy`).
 -spec check_module(#module_summary{}, #spectra_plt{}, map()) -> [#spectra_warning{}].
-check_module(#module_summary{functions = Funcs}, Plt, Opts) ->
+check_module(#module_summary{functions = Funcs} = Summary, Plt, Opts) ->
     Mode = maps:get(mode, Opts, hybrid),
-    lists:flatmap(
+    ContractWarnings = lists:flatmap(
         fun({_MFA, Contract}) ->
             check_contract(Contract, Plt, Mode)
         end,
         lists:sort(maps:to_list(Funcs))
-    ).
+    ),
+    OxbowWarnings = case maps:get(oxbow, Opts, true) of
+        true -> spectra_oxbow:check_module(Summary, Opts);
+        false -> []
+    end,
+    lists:usort(ContractWarnings ++ OxbowWarnings).
 
 check_contract(Contract, Plt, Mode) ->
     DiscrepancyWarnings =
@@ -303,6 +308,7 @@ format_human(#spectra_warning{
     KindColor = case Kind of
         discrepancy -> "\e[1;31m";       %% bold red
         dead_code -> "\e[1;33m";         %% bold yellow
+        oxbow_code -> "\e[1;33m";        %% bold yellow
         gradual_mismatch -> "\e[1;35m";  %% bold magenta
         opacity_violation -> "\e[1;31m"; %% bold red
         _ -> "\e[1;31m"

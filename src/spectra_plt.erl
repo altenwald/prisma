@@ -99,12 +99,12 @@ encode(#spectra_plt{} = Plt) ->
 -spec decode(binary()) -> {ok, #spectra_plt{}} | {error, term()}.
 decode(<<?SPECTRA_PLT_MAGIC, Payload/binary>>) ->
     try binary_to_term(Payload, [safe]) of
-        #spectra_plt{} = Plt -> {ok, Plt};
+        #spectra_plt{} = Plt -> {ok, upgrade_plt(Plt)};
         _ -> {error, invalid_plt_record}
     catch
         error:badarg ->
             try binary_to_term(Payload) of
-                #spectra_plt{} = Plt -> {ok, Plt};
+                #spectra_plt{} = Plt -> {ok, upgrade_plt(Plt)};
                 _ -> {error, invalid_plt_record}
             catch
                 _:Reason -> {error, {corrupt_plt, Reason}}
@@ -112,6 +112,49 @@ decode(<<?SPECTRA_PLT_MAGIC, Payload/binary>>) ->
     end;
 decode(_) ->
     {error, invalid_plt_magic}.
+
+upgrade_plt(#spectra_plt{modules = Mods} = Plt) ->
+    NewMods = maps:map(
+        fun(_M, #module_summary{functions = Funcs} = Summary) when is_map(Funcs) ->
+            NewFuncs = maps:map(fun(_MFA, FC) -> upgrade_func_contract(FC) end, Funcs),
+            Summary#module_summary{functions = NewFuncs};
+           (_M, Summary) ->
+            Summary
+        end,
+        Mods
+    ),
+    Plt#spectra_plt{modules = NewMods}.
+
+upgrade_func_contract(#func_contract{} = FC) ->
+    FC;
+upgrade_func_contract({func_contract, MFA, Exp, Specs, Inferred, Calls, Sites, Warns, Line}) ->
+    #func_contract{
+        mfa = MFA,
+        exported = Exp,
+        declared_specs = Specs,
+        inferred_type = Inferred,
+        calls = Calls,
+        call_sites = Sites,
+        local_warnings = Warns,
+        clauses = [],
+        compiler_generated = false,
+        line = Line
+    };
+upgrade_func_contract({func_contract, MFA, Exp, Specs, Inferred, Calls, Sites, Warns, Clauses, Line}) ->
+    #func_contract{
+        mfa = MFA,
+        exported = Exp,
+        declared_specs = Specs,
+        inferred_type = Inferred,
+        calls = Calls,
+        call_sites = Sites,
+        local_warnings = Warns,
+        clauses = Clauses,
+        compiler_generated = false,
+        line = Line
+    };
+upgrade_func_contract(Other) ->
+    Other.
 
 %% @doc Writes a `#spectra_plt{}` to `FilePath`.
 -spec save(#spectra_plt{}, file:filename_all()) -> ok | {error, term()}.
@@ -132,7 +175,10 @@ load(FilePath) ->
 lookup_mfa({M, _F, _A} = MFA, #spectra_plt{modules = Mods}) ->
     case maps:find(M, Mods) of
         {ok, #module_summary{functions = Funcs}} ->
-            maps:find(MFA, Funcs);
+            case maps:find(MFA, Funcs) of
+                {ok, FC} -> {ok, upgrade_func_contract(FC)};
+                error -> error
+            end;
         error ->
             error
     end.

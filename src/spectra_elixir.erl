@@ -30,11 +30,11 @@ from_elixir_dbgi(_Mod, _Dbgi, Exports, #module_summary{module = Mod} = Summary) 
 to_abstract_forms(Mod, Map, SpecsForms) ->
     StructForms = extract_struct_forms(Mod, maps:get(struct, Map, nil), SpecsForms),
     Defs = maps:get(definitions, Map, []),
-    FunForms = [
+    FunForms = lists:append([
         translate_definition(Def)
         || {{_F, _A}, Kind, _Meta, _Clauses} = Def <- Defs,
            Kind =:= def orelse Kind =:= defp
-    ],
+    ]),
     SpecsForms ++ StructForms ++ FunForms.
 
 extract_struct_forms(Mod, StructFields, SpecsForms) when is_list(StructFields) ->
@@ -75,26 +75,50 @@ extract_struct_forms(_Mod, _Struct, _SpecsForms) ->
 
 translate_definition({{Name, Arity}, _Kind, Meta, Clauses}) when is_list(Clauses) ->
     Anno = meta_anno(Meta),
-    ErlClauses = [translate_clause(C) || C <- Clauses],
-    {function, Anno, Name, Arity, ErlClauses}.
+    ErlClauses = [translate_clause(C, Name) || C <- Clauses],
+    FunForm = {function, Anno, Name, Arity, ErlClauses},
+    case is_elixir_generated(Name, Meta) of
+        true ->
+            [{attribute, Anno, compiler_generated, {Name, Arity}}, FunForm];
+        false ->
+            [FunForm]
+    end.
 
-translate_clause({Meta, Args, Guards, Body}) when is_list(Args), is_list(Guards) ->
+is_elixir_generated(Name, Meta) ->
+    case atom_to_list(Name) of
+        "__" ++ _ -> true;
+        Str ->
+            string:str(Str, "overridable") > 0 orelse
+            proplists:get_value(context, Meta) =:= elixir_def orelse
+            proplists:get_value(generated, Meta) =:= true
+    end.
+
+translate_clause({Meta, Args, Guards, Body}, CurrentFun) when is_list(Args), is_list(Guards) ->
     Anno = meta_anno(Meta),
     PatArgs = [translate_pattern(A) || A <- Args],
     ErlGuards = case Guards of
         [] -> [];
         _ -> [[translate_guard(G) || G <- Guards]]
     end,
-    ErlBody = translate_body(Body),
+    ErlBody = translate_body(Body, CurrentFun),
     {clause, Anno, PatArgs, ErlGuards, ErlBody};
-translate_clause(_) ->
+translate_clause(_, _CurrentFun) ->
     Anno = erl_anno:new(1),
     {clause, Anno, [], [], [{atom, Anno, ok}]}.
 
-translate_body({'__block__', _Meta, Exprs}) when is_list(Exprs), Exprs =/= [] ->
-    [translate_expr(E) || E <- Exprs];
-translate_body(SingleExpr) ->
-    [translate_expr(SingleExpr)].
+translate_body(Body) ->
+    translate_body(Body, undefined).
+
+translate_body({'__block__', _Meta, Exprs}, CurrentFun) when is_list(Exprs), Exprs =/= [] ->
+    [translate_expr_with_fun(E, CurrentFun) || E <- Exprs];
+translate_body(SingleExpr, CurrentFun) ->
+    [translate_expr_with_fun(SingleExpr, CurrentFun)].
+
+translate_expr_with_fun({super, Meta, Args}, CurrentFun) when is_atom(CurrentFun), is_list(Args) ->
+    Anno = meta_anno(Meta),
+    {call, Anno, {atom, Anno, CurrentFun}, [translate_expr(A) || A <- Args]};
+translate_expr_with_fun(Other, _CurrentFun) ->
+    translate_expr(Other).
 
 translate_pattern({'_', Meta, Ctx}) when is_atom(Ctx) ->
     {var, meta_anno(Meta), '_'};
@@ -136,6 +160,8 @@ translate_pattern(Float) when is_float(Float) ->
     {float, erl_anno:new(1), Float};
 translate_pattern(Atom) when is_atom(Atom) ->
     {atom, erl_anno:new(1), Atom};
+translate_pattern({'<<>>', Meta, _Segments}) ->
+    {bin, meta_anno(Meta), []};
 translate_pattern(Bin) when is_binary(Bin) ->
     Anno = erl_anno:new(1),
     {bin, Anno, [{bin_element, Anno, {string, Anno, binary_to_list(Bin)}, default, default}]};
@@ -221,6 +247,22 @@ translate_expr({fn, Meta, Clauses}) when is_list(Clauses) ->
     Anno = meta_anno(Meta),
     ErlClauses = [translate_case_clause(C) || C <- Clauses],
     {'fun', Anno, {clauses, ErlClauses}};
+translate_expr({'/', Meta, [{Fun, _FunMeta, Ctx}, Arity]})
+  when is_atom(Fun), is_atom(Ctx), is_integer(Arity) ->
+    Anno = meta_anno(Meta),
+    {'fun', Anno, {function, Fun, Arity}};
+translate_expr({'&', Meta, [{'/', _, [{Fun, _FunMeta, Ctx}, Arity]}]})
+  when is_atom(Fun), is_atom(Ctx), is_integer(Arity) ->
+    Anno = meta_anno(Meta),
+    {'fun', Anno, {function, Fun, Arity}};
+translate_expr({'/', Meta, [{{'.', _, [Mod, Fun]}, _, []}, Arity]})
+  when is_atom(Fun), is_integer(Arity) ->
+    Anno = meta_anno(Meta),
+    {'fun', Anno, {function, translate_expr(Mod), {atom, Anno, Fun}, {integer, Anno, Arity}}};
+translate_expr({'&', Meta, [{'/', _, [{{'.', _, [Mod, Fun]}, _, []}, Arity]}]})
+  when is_atom(Fun), is_integer(Arity) ->
+    Anno = meta_anno(Meta),
+    {'fun', Anno, {function, translate_expr(Mod), {atom, Anno, Fun}, {integer, Anno, Arity}}};
 translate_expr({'&', Meta, [{Fun, FunMeta, Ctx}]}) when is_atom(Fun), is_atom(Ctx) ->
     Anno = meta_anno(Meta),
     {var, Anno, elixir_var(Fun, FunMeta, Ctx)};

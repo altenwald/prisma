@@ -159,6 +159,10 @@ parse_check_opts_loop(["--plt", PltFile | Rest], Acc) ->
     parse_check_opts_loop(Rest, Acc#{plts => [PltFile | Plts]});
 parse_check_opts_loop(["--format", Fmt | Rest], Acc) ->
     parse_check_opts_loop(Rest, Acc#{format => parse_format(Fmt)});
+parse_check_opts_loop(["--no-oxbow" | Rest], Acc) ->
+    parse_check_opts_loop(Rest, Acc#{oxbow => false});
+parse_check_opts_loop(["--oxbow" | Rest], Acc) ->
+    parse_check_opts_loop(Rest, Acc#{oxbow => true});
 parse_check_opts_loop(["--no-color" | Rest], Acc) ->
     parse_check_opts_loop(Rest, Acc#{color => never});
 parse_check_opts_loop(["--color" | Rest], Acc) ->
