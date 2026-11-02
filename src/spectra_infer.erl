@@ -86,11 +86,12 @@ join_arg_vectors(Arity, Vectors) ->
     ).
 
 infer_clause(Mod, MFA, {clause, Anno, PatArgs, Guards, Body}, AllContracts) ->
-    case bind_patterns(PatArgs, lists:duplicate(length(PatArgs), any), #{}) of
-        {none, _} ->
+    SeedArgs = seed_arg_types(MFA, length(PatArgs), AllContracts),
+    case bind_patterns(PatArgs, SeedArgs, #{}) of
+        unreachable ->
             Warn = make_warning(dead_code, MFA, Anno, <<"Function clause pattern cannot match">>),
             {unreachable, [Warn]};
-        {PatTypes, Env0} ->
+        {ok, PatTypes, Env0} ->
             case apply_guard_disjunction(Guards, Env0) of
                 unreachable ->
                     Warn = make_warning(dead_code, MFA, Anno, <<"Function clause guard cannot succeed">>),
@@ -112,15 +113,15 @@ refine_pat_type(_, PatType, _Env) ->
     PatType.
 
 bind_patterns([], [], Env) ->
-    {[], Env};
+    {ok, [], Env};
 bind_patterns([P | Ps], [Expected | Es], Env0) ->
     case bind_pattern(P, Expected, Env0) of
-        {none, Env1} ->
-            {none, Env1};
+        {none, _Env1} ->
+            unreachable;
         {T, Env1} ->
             case bind_patterns(Ps, Es, Env1) of
-                {none, Env2} -> {none, Env2};
-                {Ts, Env2} -> {[T | Ts], Env2}
+                unreachable -> unreachable;
+                {ok, Ts, Env2} -> {ok, [T | Ts], Env2}
             end
     end.
 
@@ -181,8 +182,8 @@ bind_pattern({tuple, _, PatElems}, Expected, Env0) ->
             {none, Env0};
         ElemExpecteds ->
             case bind_patterns(PatElems, ElemExpecteds, Env0) of
-                {none, Env1} -> {none, Env1};
-                {BoundElems, Env1} -> {spectra_type:meet({tuple, BoundElems}, Expected), Env1}
+                unreachable -> {none, Env0};
+                {ok, BoundElems, Env1} -> {spectra_type:meet({tuple, BoundElems}, Expected), Env1}
             end
     end;
 bind_pattern({map, _, Fields}, Expected, Env0) ->
@@ -533,7 +534,8 @@ infer_unop(MFA, Anno, Op, ArgAst, ArgType, Env0, Warns, Sites)
             Msg = iolist_to_binary(io_lib:format("Unary '~s' requires number, got ~p", [Op, ArgType])),
             {none, Env0, [make_warning(discrepancy, MFA, Anno, Msg) | Warns], Sites};
         M ->
-            {M, constrain_ast_var(ArgAst, number, Env0), Warns, Sites}
+            ResType = case ArgType of any -> any; _ -> M end,
+            {ResType, constrain_ast_var(ArgAst, number, Env0), Warns, Sites}
     end;
 infer_unop(_MFA, _Anno, _Op, _ArgAst, _ArgType, Env, Warns, Sites) ->
     {any, Env, Warns, Sites}.
@@ -713,3 +715,24 @@ make_warning(Kind, MFA, Anno, Msg) ->
         line = erl_anno:line(Anno),
         message = Msg
     }.
+
+seed_arg_types(MFA, Arity, AllContracts) ->
+    case maps:find(MFA, AllContracts) of
+        {ok, #func_contract{declared_specs = [Spec | _]}} ->
+            case spectra_type:unfold_bounded_fun(Spec) of
+                {fun_type, SpecArgs, _} when length(SpecArgs) =:= Arity ->
+                    [sanitize_seed_type(A) || A <- SpecArgs];
+                _ ->
+                    lists:duplicate(Arity, any)
+            end;
+        _ ->
+            lists:duplicate(Arity, any)
+    end.
+
+sanitize_seed_type({local_type, _, _}) -> any;
+sanitize_seed_type({remote_type, _, _, _}) -> any;
+sanitize_seed_type({list, E}) -> {list, sanitize_seed_type(E)};
+sanitize_seed_type({nonempty_list, E}) -> {nonempty_list, sanitize_seed_type(E)};
+sanitize_seed_type({tuple, Es}) -> {tuple, [sanitize_seed_type(E) || E <- Es]};
+sanitize_seed_type({union, Ms}) -> spectra_type:normalize_union([sanitize_seed_type(M) || M <- Ms]);
+sanitize_seed_type(Other) -> Other.

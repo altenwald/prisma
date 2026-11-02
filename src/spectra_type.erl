@@ -13,6 +13,7 @@
     normalize_union/1,
     join/2,
     meet/2,
+    consistent_subtype/2,
     substitute/2,
     unfold_bounded_fun/1,
     expand/4
@@ -198,6 +199,12 @@ meet({var, _}, T) -> T;
 meet(T, {var, _}) -> T;
 meet({recursive_ref, _, _}, T) -> T;
 meet(T, {recursive_ref, _, _}) -> T;
+meet({local_type, _, _}, T) -> T;
+meet(T, {local_type, _, _}) -> T;
+meet({remote_type, _, _, _}, T) -> T;
+meet(T, {remote_type, _, _, _}) -> T;
+meet({opaque, _, _, _, Body}, T) -> meet(Body, T);
+meet(T, {opaque, _, _, _, Body}) -> meet(T, Body);
 meet(Same, Same) -> Same;
 meet({union, Members}, T2) ->
     normalize_union([meet(M, T2) || M <- Members]);
@@ -208,6 +215,126 @@ meet(T1, T2) ->
         true -> meet_numeric(T1, T2);
         false -> meet_non_numeric(T1, T2)
     end.
+
+%% @doc Checks the gradual subtyping relation `Sub <~ Super`.
+%%
+%% Dynamic types (`any`, type variables, recursive refs) are consistent with
+%% all types, while unions, maps, records, lists, and opaques are checked strictly.
+-spec consistent_subtype(stype(), stype()) -> boolean().
+consistent_subtype(any, _) -> true;
+consistent_subtype(_, any) -> true;
+consistent_subtype({var, _}, _) -> true;
+consistent_subtype(_, {var, _}) -> true;
+consistent_subtype({recursive_ref, _, _}, _) -> true;
+consistent_subtype(_, {recursive_ref, _, _}) -> true;
+consistent_subtype({local_type, _, _}, _) -> true;
+consistent_subtype(_, {local_type, _, _}) -> true;
+consistent_subtype({remote_type, _, _, _}, _) -> true;
+consistent_subtype(_, {remote_type, _, _, _}) -> true;
+consistent_subtype(none, _) -> true;
+consistent_subtype(_, none) -> false;
+consistent_subtype(Same, Same) -> true;
+consistent_subtype({union, SubMembers}, Super) ->
+    lists:all(fun(M) -> consistent_subtype(M, Super) end, SubMembers);
+consistent_subtype(Sub, {union, SuperMembers}) ->
+    lists:any(fun(M) -> consistent_subtype(Sub, M) end, SuperMembers);
+consistent_subtype(Sub, Super) ->
+    case is_numeric(Sub) andalso is_numeric(Super) of
+        true -> subtype_numeric(Sub, Super);
+        false -> subtype_non_numeric(Sub, Super)
+    end.
+
+subtype_numeric(_, number) -> true;
+subtype_numeric(float, float) -> true;
+subtype_numeric(float, _) -> false;
+subtype_numeric(_, float) -> false;
+subtype_numeric(number, _) -> false;
+subtype_numeric(SubInt, SuperInt) ->
+    {Lo1, Hi1} = int_bounds(SubInt),
+    {Lo2, Hi2} = int_bounds(SuperInt),
+    bound_ge(Lo1, Lo2) andalso bound_le(Hi1, Hi2).
+
+bound_ge(_, neg_inf) -> true;
+bound_ge(neg_inf, _) -> false;
+bound_ge(pos_inf, _) -> true;
+bound_ge(_, pos_inf) -> false;
+bound_ge(A, B) -> A >= B.
+
+bound_le(_, pos_inf) -> true;
+bound_le(pos_inf, _) -> false;
+bound_le(neg_inf, _) -> true;
+bound_le(_, neg_inf) -> false;
+bound_le(A, B) -> A =< B.
+
+subtype_non_numeric({atom_lit, B}, boolean) when is_boolean(B) -> true;
+subtype_non_numeric(boolean, atom) -> true;
+subtype_non_numeric({atom_lit, _}, atom) -> true;
+subtype_non_numeric({binary, B1, U1}, {binary, B2, U2}) ->
+    B1 >= B2 andalso (U2 =:= 0 orelse (U1 rem U2 =:= 0 andalso (B1 - B2) rem U2 =:= 0));
+subtype_non_numeric(nil, {list, _}) -> true;
+subtype_non_numeric(nil, {improper_list, _, _}) -> true;
+subtype_non_numeric({nonempty_list, E1}, {nonempty_list, E2}) ->
+    consistent_subtype(E1, E2);
+subtype_non_numeric({nonempty_list, E1}, {list, E2}) ->
+    consistent_subtype(E1, E2);
+subtype_non_numeric({list, E1}, {list, E2}) ->
+    consistent_subtype(E1, E2);
+subtype_non_numeric({improper_list, E1, T1}, {improper_list, E2, T2}) ->
+    consistent_subtype(E1, E2) andalso consistent_subtype(T1, T2);
+subtype_non_numeric({tuple, _}, any_tuple) -> true;
+subtype_non_numeric({record, _, _}, any_tuple) -> true;
+subtype_non_numeric({tuple, [{atom_lit, Name} | _]}, {record, Name, _}) -> true;
+subtype_non_numeric({record, Name, _}, {tuple, [{atom_lit, Name} | _]}) -> true;
+subtype_non_numeric({tuple, E1}, {tuple, E2}) when length(E1) =:= length(E2) ->
+    lists:all(fun({A, B}) -> consistent_subtype(A, B) end, lists:zip(E1, E2));
+subtype_non_numeric({record, Name, F1}, {record, Name, F2}) ->
+    lists:all(
+        fun({FieldName, SuperType}) ->
+            SubType = proplists:get_value(FieldName, F1, any),
+            consistent_subtype(SubType, SuperType)
+        end,
+        F2
+    );
+subtype_non_numeric({map, _}, any_map) -> true;
+subtype_non_numeric(any_map, {map, _}) -> true;
+subtype_non_numeric({map, SubFields}, {map, SuperFields}) ->
+    subtype_map_fields(SubFields, SuperFields);
+subtype_non_numeric({fun_type, _, _}, any_fun) -> true;
+subtype_non_numeric({fun_any_args, _}, any_fun) -> true;
+subtype_non_numeric({fun_type, _, Ret1}, {fun_any_args, Ret2}) ->
+    consistent_subtype(Ret1, Ret2);
+subtype_non_numeric({fun_any_args, Ret1}, {fun_any_args, Ret2}) ->
+    consistent_subtype(Ret1, Ret2);
+subtype_non_numeric({fun_type, A1, R1}, {fun_type, A2, R2}) when length(A1) =:= length(A2) ->
+    consistent_subtype(R1, R2) andalso
+        lists:all(fun({SubA, SuperA}) -> consistent_subtype(SuperA, SubA) end, lists:zip(A1, A2));
+subtype_non_numeric({opaque, Mod, Name, Args1, _}, {opaque, Mod, Name, Args2, _})
+  when length(Args1) =:= length(Args2) ->
+    lists:all(fun({A, B}) -> consistent_subtype(A, B) end, lists:zip(Args1, Args2));
+subtype_non_numeric(_, _) ->
+    false.
+
+subtype_map_fields(SubFields, SuperFields) ->
+    ReqSuper = [{K, V} || {exact, K, V} <- SuperFields],
+    AllSuper = [{K, V} || {_Kind, K, V} <- SuperFields],
+    ExactSub = #{K => V || {exact, K, V} <- SubFields},
+    ReqSatisfied = lists:all(
+        fun({ReqK, ReqV}) ->
+            case maps:find(ReqK, ExactSub) of
+                {ok, SubV} -> consistent_subtype(SubV, ReqV);
+                error -> false
+            end
+        end,
+        ReqSuper
+    ),
+    ValuesCompatible = lists:all(
+        fun({_Kind, SubK, SubV}) ->
+            MatchingSuper = [SuperV || {SuperK, SuperV} <- AllSuper, SuperK =:= SubK],
+            lists:all(fun(SuperV) -> consistent_subtype(SubV, SuperV) end, MatchingSuper)
+        end,
+        SubFields
+    ),
+    ReqSatisfied andalso ValuesCompatible.
 
 is_numeric(number) -> true;
 is_numeric(float) -> true;

@@ -21,6 +21,7 @@
     lookup_mfa/2,
     lookup_type/2,
     resolve_type/3,
+    resolve_type/4,
     modules/1
 ]).
 
@@ -150,8 +151,14 @@ lookup_type({M, _Name, _Arity} = Key, #spectra_plt{modules = Mods}) ->
 -spec resolve_type(module(), spectra_type:stype(), #spectra_plt{}) ->
     {ok, spectra_type:stype()} | {error, term()}.
 resolve_type(CallerMod, Type, Plt) ->
+    resolve_type(CallerMod, CallerMod, Type, Plt).
+
+%% @doc Expands `Type` defined in `DefiningMod` as seen from `CallerMod`.
+-spec resolve_type(module(), module(), spectra_type:stype(), #spectra_plt{}) ->
+    {ok, spectra_type:stype()} | {error, term()}.
+resolve_type(CallerMod, DefiningMod, Type, Plt) ->
     LookupFun = fun(Key) -> lookup_type(Key, Plt) end,
-    spectra_type:expand(CallerMod, CallerMod, Type, LookupFun).
+    spectra_type:expand(CallerMod, DefiningMod, Type, LookupFun).
 
 %% @doc Returns the sorted list of modules stored in the PLT.
 -spec modules(#spectra_plt{}) -> [module()].
