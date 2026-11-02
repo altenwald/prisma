@@ -73,12 +73,12 @@ extract_struct_forms(Mod, StructFields, SpecsForms) when is_list(StructFields) -
 extract_struct_forms(_Mod, _Struct, _SpecsForms) ->
     [].
 
-translate_definition({{Name, Arity}, _Kind, Meta, Clauses}) ->
+translate_definition({{Name, Arity}, _Kind, Meta, Clauses}) when is_list(Clauses) ->
     Anno = meta_anno(Meta),
     ErlClauses = [translate_clause(C) || C <- Clauses],
     {function, Anno, Name, Arity, ErlClauses}.
 
-translate_clause({Meta, Args, Guards, Body}) ->
+translate_clause({Meta, Args, Guards, Body}) when is_list(Args), is_list(Guards) ->
     Anno = meta_anno(Meta),
     PatArgs = [translate_pattern(A) || A <- Args],
     ErlGuards = case Guards of
@@ -86,7 +86,10 @@ translate_clause({Meta, Args, Guards, Body}) ->
         _ -> [[translate_guard(G) || G <- Guards]]
     end,
     ErlBody = translate_body(Body),
-    {clause, Anno, PatArgs, ErlGuards, ErlBody}.
+    {clause, Anno, PatArgs, ErlGuards, ErlBody};
+translate_clause(_) ->
+    Anno = erl_anno:new(1),
+    {clause, Anno, [], [], [{atom, Anno, ok}]}.
 
 translate_body({'__block__', _Meta, Exprs}) when is_list(Exprs), Exprs =/= [] ->
     [translate_expr(E) || E <- Exprs];
@@ -101,14 +104,14 @@ translate_pattern({'^', _Meta, [Inner]}) ->
     translate_pattern(Inner);
 translate_pattern({'=', Meta, [P1, P2]}) ->
     {match, meta_anno(Meta), translate_pattern(P1), translate_pattern(P2)};
-translate_pattern({'%', Meta, [StructModAst, {'%{}', _, Pairs}]}) ->
+translate_pattern({'%', Meta, [StructModAst, {'%{}', _, Pairs}]}) when is_list(Pairs) ->
     Anno = meta_anno(Meta),
     StructMod = unwrap_atom(StructModAst),
     TagField = {map_field_exact, Anno, {atom, Anno, '__struct__'}, {atom, Anno, StructMod}},
-    {map, Anno, [TagField | [translate_map_pat_pair(Anno, P) || P <- Pairs]]};
-translate_pattern({'%{}', Meta, Pairs}) ->
+    {map, Anno, [TagField | translate_map_pat_pairs(Anno, Pairs)]};
+translate_pattern({'%{}', Meta, Pairs}) when is_list(Pairs) ->
     Anno = meta_anno(Meta),
-    {map, Anno, [translate_map_pat_pair(Anno, P) || P <- Pairs]};
+    {map, Anno, translate_map_pat_pairs(Anno, Pairs)};
 translate_pattern({'{}', Meta, Elems}) when is_list(Elems) ->
     {tuple, meta_anno(Meta), [translate_pattern(E) || E <- Elems]};
 translate_pattern({A, B}) ->
@@ -135,8 +138,20 @@ translate_pattern(Bin) when is_binary(Bin) ->
 translate_pattern(_) ->
     {var, erl_anno:new(1), '_'}.
 
-translate_map_pat_pair(Anno, {K, V}) ->
-    {map_field_exact, Anno, translate_pattern(K), translate_pattern(V)}.
+translate_map_pat_pairs(Anno, Pairs) when is_list(Pairs) ->
+    lists:flatmap(
+        fun
+            ({'|', _, [_Base, InnerPairs]}) when is_list(InnerPairs) ->
+                translate_map_pat_pairs(Anno, InnerPairs);
+            ({K, V}) ->
+                [{map_field_exact, Anno, translate_pattern(K), translate_pattern(V)}];
+            (_) ->
+                []
+        end,
+        Pairs
+    );
+translate_map_pat_pairs(_Anno, _) ->
+    [].
 
 translate_guard(Expr) ->
     translate_expr(Expr).
@@ -147,21 +162,27 @@ translate_expr({'__block__', Meta, Exprs}) when is_list(Exprs), Exprs =/= [] ->
     {'block', meta_anno(Meta), [translate_expr(E) || E <- Exprs]};
 translate_expr({'=', Meta, [Pat, Rhs]}) ->
     {match, meta_anno(Meta), translate_pattern(Pat), translate_expr(Rhs)};
-translate_expr({'case', Meta, [Scrutinee, Blocks]}) ->
+translate_expr({'case', Meta, [Scrutinee, Blocks]}) when is_list(Blocks) ->
     Anno = meta_anno(Meta),
-    DoClauses = proplists:get_value(do, Blocks, []),
+    DoClauses = case proplists:get_value(do, Blocks, []) of
+        L when is_list(L) -> L;
+        _ -> []
+    end,
     {'case', Anno, translate_expr(Scrutinee), [translate_case_clause(C) || C <- DoClauses]};
-translate_expr({'%', Meta, [StructModAst, {'%{}', _, Pairs}]}) ->
+translate_expr({'%', Meta, [_StructModAst, {'%{}', _, [{'|', _, [Base, Pairs]}]}]}) when is_list(Pairs) ->
+    Anno = meta_anno(Meta),
+    {map, Anno, translate_expr(Base), translate_map_expr_pairs(Anno, Pairs)};
+translate_expr({'%', Meta, [StructModAst, {'%{}', _, Pairs}]}) when is_list(Pairs) ->
     Anno = meta_anno(Meta),
     StructMod = unwrap_atom(StructModAst),
     TagField = {map_field_exact, Anno, {atom, Anno, '__struct__'}, {atom, Anno, StructMod}},
-    {map, Anno, [TagField | [translate_map_expr_pair(Anno, P) || P <- Pairs]]};
-translate_expr({'%{}', Meta, [{'|', _, [Base, Pairs]}]}) ->
+    {map, Anno, [TagField | translate_map_expr_pairs(Anno, Pairs)]};
+translate_expr({'%{}', Meta, [{'|', _, [Base, Pairs]}]}) when is_list(Pairs) ->
     Anno = meta_anno(Meta),
-    {map, Anno, translate_expr(Base), [translate_map_expr_pair(Anno, P) || P <- Pairs]};
+    {map, Anno, translate_expr(Base), translate_map_expr_pairs(Anno, Pairs)};
 translate_expr({'%{}', Meta, Pairs}) when is_list(Pairs) ->
     Anno = meta_anno(Meta),
-    {map, Anno, [translate_map_expr_pair(Anno, P) || P <- Pairs]};
+    {map, Anno, translate_map_expr_pairs(Anno, Pairs)};
 translate_expr({'{}', Meta, Elems}) when is_list(Elems) ->
     {tuple, meta_anno(Meta), [translate_expr(E) || E <- Elems]};
 translate_expr({{'.', _, [erlang, Op]}, Meta, [L, R]}) ->
@@ -214,13 +235,33 @@ translate_expr(Bin) when is_binary(Bin) ->
 translate_expr(_) ->
     {atom, erl_anno:new(1), ok}.
 
-translate_case_clause({'->', Meta, [[{'when', _, [Pat, Guard]}], Body]}) ->
+translate_case_clause({'->', Meta, [[{'when', _, ArgsAndGuard}], Body]})
+  when is_list(ArgsAndGuard), length(ArgsAndGuard) >= 2 ->
+    Pat = hd(ArgsAndGuard),
+    Guard = lists:last(ArgsAndGuard),
     {clause, meta_anno(Meta), [translate_pattern(Pat)], [[translate_guard(Guard)]], translate_body(Body)};
 translate_case_clause({'->', Meta, [[Pat], Body]}) ->
-    {clause, meta_anno(Meta), [translate_pattern(Pat)], [], translate_body(Body)}.
+    {clause, meta_anno(Meta), [translate_pattern(Pat)], [], translate_body(Body)};
+translate_case_clause({'->', Meta, [Pats, Body]}) when is_list(Pats) ->
+    {clause, meta_anno(Meta), [translate_pattern(P) || P <- Pats], [], translate_body(Body)};
+translate_case_clause(_) ->
+    Anno = erl_anno:new(1),
+    {clause, Anno, [{var, Anno, '_'}], [], [{atom, Anno, ok}]}.
 
-translate_map_expr_pair(Anno, {K, V}) ->
-    {map_field_exact, Anno, translate_expr(K), translate_expr(V)}.
+translate_map_expr_pairs(Anno, Pairs) when is_list(Pairs) ->
+    lists:flatmap(
+        fun
+            ({'|', _, [_Base, InnerPairs]}) when is_list(InnerPairs) ->
+                translate_map_expr_pairs(Anno, InnerPairs);
+            ({K, V}) ->
+                [{map_field_exact, Anno, translate_expr(K), translate_expr(V)}];
+            (_) ->
+                []
+        end,
+        Pairs
+    );
+translate_map_expr_pairs(_Anno, _) ->
+    [].
 
 is_erl_binop('+') -> true;
 is_erl_binop('-') -> true;
@@ -249,7 +290,7 @@ is_erl_unop('+') -> true;
 is_erl_unop(_) -> false.
 
 unwrap_atom(Atom) when is_atom(Atom) -> Atom;
-unwrap_atom({'__aliases__', _, Parts}) ->
+unwrap_atom({'__aliases__', _, Parts}) when is_list(Parts) ->
     ModBins = [atom_to_binary(P, utf8) || P <- Parts, is_atom(P)],
     binary_to_atom(iolist_to_binary(lists:join(<<".">>, [<<"Elixir">> | ModBins])), utf8);
 unwrap_atom(_) -> 'Elixir.Any'.
@@ -263,7 +304,11 @@ elixir_var(VarName, Ctx) when is_atom(Ctx) ->
     ).
 
 meta_anno(Meta) when is_list(Meta) ->
-    Line = proplists:get_value(line, Meta, 1),
+    case proplists:get_value(line, Meta, 1) of
+        Line when is_integer(Line), Line >= 0 -> erl_anno:new(Line);
+        _ -> erl_anno:new(1)
+    end;
+meta_anno(Line) when is_integer(Line), Line >= 0 ->
     erl_anno:new(Line);
 meta_anno(_) ->
     erl_anno:new(1).

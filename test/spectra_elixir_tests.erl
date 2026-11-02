@@ -202,3 +202,40 @@ mix_task_run_and_flags_test() ->
     BeamFile = code:where_is_file("spectra.beam"),
     EbinDir = filename:dirname(BeamFile),
     ?assertEqual(ok, 'Elixir.Mix.Tasks.Spectra':run([list_to_binary(EbinDir)])).
+
+elixir_struct_update_and_complex_clauses_test() ->
+    Mod = 'Elixir.Dymmer.Sample',
+    Definitions = [
+        {{update_response, 2}, def, [{line, 140}], [
+            {[{line, 140}],
+             [
+                 {response, [{version, 0}, {line, 140}, {column, 10}], nil},
+                 {domains, [{version, 1}, {line, 140}, {column, 20}], nil}
+             ],
+             [],
+             {'%', [{line, 142}], [
+                 'Elixir.Dymmer.Response',
+                 {'%{}', [{line, 142}, {column, 20}], [
+                     {'|', [{line, 142}, {column, 26}], [
+                         {response, [{version, 0}, {line, 142}, {column, 17}], nil},
+                         [{responseData,
+                             {'%{}', [{line, 142}, {column, 42}], [
+                                 {domains, {domains, [{version, 1}, {line, 142}, {column, 53}], nil}}
+                             ]}
+                         }]
+                     ]}
+                 ]}
+             ]}}
+        ]}
+    ],
+    Dbgi = {debug_info_v1, elixir_erl, {elixir_v1, #{
+        module => Mod,
+        struct => nil,
+        definitions => Definitions
+    }, []}},
+    Summary = spectra_elixir:from_elixir_dbgi(Mod, Dbgi, [{update_response, 2}], #module_summary{
+        module = Mod,
+        language = elixir,
+        exports = [{update_response, 2}]
+    }),
+    ?assert(maps:is_key({Mod, update_response, 2}, Summary#module_summary.functions)).

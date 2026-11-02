@@ -661,12 +661,24 @@ eval_bound({atom, _, inf}) -> pos_inf;
 eval_bound(_) -> 0.
 
 parse_record_field({type, _, field_type, [{atom, _, FieldName}, FieldType]}) ->
-    {FieldName, from_abstract(FieldType)}.
+    {FieldName, from_abstract(FieldType)};
+parse_record_field({typed_record_field, {record_field, _, {atom, _, FieldName}}, FieldType}) ->
+    {FieldName, from_abstract(FieldType)};
+parse_record_field({typed_record_field, {record_field, _, {atom, _, FieldName}, _Default}, FieldType}) ->
+    {FieldName, from_abstract(FieldType)};
+parse_record_field({record_field, _, {atom, _, FieldName}}) ->
+    {FieldName, any};
+parse_record_field({record_field, _, {atom, _, FieldName}, _Default}) ->
+    {FieldName, any};
+parse_record_field(_) ->
+    {'_', any}.
 
 parse_map_field({type, _, map_field_exact, [K, V]}) ->
     {exact, from_abstract(K), from_abstract(V)};
 parse_map_field({type, _, map_field_assoc, [K, V]}) ->
-    {assoc, from_abstract(K), from_abstract(V)}.
+    {assoc, from_abstract(K), from_abstract(V)};
+parse_map_field(_) ->
+    {assoc, any, any}.
 
 parse_constraints(ConstraintsAst) when is_list(ConstraintsAst) ->
     lists:foldl(
