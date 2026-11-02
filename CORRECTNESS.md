@@ -3,7 +3,7 @@
 How often Spectra is right, measured on real code and compared with other tools **inside the same category**.
 Speed and memory live in [`BENCHMARK.md`](BENCHMARK.md); the harness is in [`bench/`](bench/README.md).
 
-Status: first measurement (RabbitMQ) plus the first PropEr properties (type algebra). The inference-soundness properties and the seeded-fault (mutation) corpus are not written yet.
+Status: first measurement (RabbitMQ), PropEr properties for the type algebra and for inference soundness by execution. The seeded-fault (mutation) corpus is not written yet.
 
 ## Like-for-like: discrepancies
 
@@ -61,9 +61,37 @@ disjoint, so any pair of types that goes through this path can be reported as "w
 under a name proper does not run, and should be renamed to `prop_*` when `meet/2` is fixed. (A first attempt to show it as a
 false positive with a two-line module did not work out: Dialyzer also rejects that `-spec`, so it is not evidence.)
 
-The three false-positive causes of the RabbitMQ triage (improper lists as pairs, non-boolean `andalso`/`orelse`, overloaded
-specs) live in the inference and checker, not in the type algebra, so these properties do not see them: the next step is the
-execution-based soundness property.
+The false-positive causes of the RabbitMQ triage live in the inference and checker, not in the type algebra, so these
+properties do not see them. The next section does.
+
+## Property-based tests: inference and warnings against execution (PropEr)
+
+`test/prop_spectra_infer.erl`. PropEr generates small well-typed modules (one function `f/2`: a few bindings and `case`
+expressions over integers, booleans, atoms, pairs, lists and `[H | T]` cells, each clause on its own line) and 25 argument
+samples. The module is compiled, run under `cover`, and for every run that returns normally:
+
+1. the arguments must be inside the inferred domain and the result inside the inferred return type (success typing: what
+   really happens can never be outside what was inferred);
+2. no `discrepancy` or `dead_code` warning may point at a line that has just run without crashing. Those warnings claim
+   "this fails" or "this clause cannot match"; a line that ran refutes them.
+
+A refutation is a **proven** false positive (or an unsound inference), and PropEr shrinks it to a minimal module. Three came out
+in the first session, each in a few lines (all in [`bench/repro/`](bench/repro/README.md)):
+
+| Shrunk program | What Spectra says | Truth |
+| :--- | :--- | :--- |
+| `case true andalso 0 of false -> 0; N when is_integer(N) -> N end` | "`andalso` will fail", "guard cannot succeed" | returns `0` |
+| `case [0 \| 0] of [H \| T] when is_integer(T) -> H + T end` | inferred return type `none` | returns `0` |
+| `f() -> -1.` and `case f() of -1 -> ok end` | `f/0` returns `1`; "no clause can match" | returns `-1` |
+
+The third is new and the most basic of the three: **`infer_unop` keeps the type of the operand for unary `-`, so every
+negative literal is inferred as its absolute value**. It also explains part of the RabbitMQ noise that the first triage could not attribute.
+
+The full property (`known_bug_inference_and_warnings_agree_with_execution`) therefore fails and is disabled under a name
+PropEr does not run. The same generator with those three constructs left out
+(`prop_inference_and_warnings_agree_with_execution_without_known_bugs`) passes **1000 programs x 25 runs**, so nothing else in
+this fragment (integer arithmetic, `case` on literals, tuples, lists, guards, `hd`/`length`/`element`) has been refuted yet.
+The fragment is small: no maps, records, funs, `try`, binaries, calls between modules or specs.
 
 ## Not yet measured
 

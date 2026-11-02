@@ -9,3 +9,5 @@ Compile with `erlc +debug_info <files>` and analyze the `.beam` files with `spec
 | `improper_list_and_andalso.erl` `d/0` | "Clause pattern cannot match" | `A andalso B` returns `B` when `A` is true: it is not a boolean |
 | `orelse_non_boolean.erl` `e/1` | "`orelse` will fail" | only the left operand must be boolean; `X > 0 orelse {false, Reason}` is valid |
 | `overloaded_spec_caller.erl` + `overloaded_spec_callee.erl` | `h(non_blocking)` "does not match expected blocking" | overloaded `-spec` clauses: only the first one is used across modules |
+| `improper_cell_pattern.erl` | `f/0` returns `none`, "No case/if clause can match", "guard cannot succeed" | `case [0 \| 0] of [H \| T] when is_integer(T) -> H + T end` returns `0`. Dialyzer only warns that the cons builds an improper list, it does not claim the `case` fails |
+| `negative_literal.erl` | `f() -> -1` has return type `1`; `case f() of -1 -> ok end` "No case/if clause can match" | `infer_unop` (`src/spectra_infer.erl`) returns the operand's type for `-`, the sign is lost |
