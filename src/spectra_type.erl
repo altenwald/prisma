@@ -320,14 +320,27 @@ subtype_map_fields(SubFields, SuperFields) ->
     ExactSub = #{K => V || {exact, K, V} <- SubFields},
     ReqSatisfied = lists:all(
         fun({ReqK, ReqV}) ->
-            case maps:find(ReqK, ExactSub) of
-                {ok, SubV} -> consistent_subtype(SubV, ReqV);
-                error ->
-                    %% In gradual typing, if a struct tag matches (__struct__),
-                    %% unspecialized struct instances are compatible with declared struct fields
-                    case ReqK of
-                        {atom_lit, '__struct__'} -> false;
-                        _ -> maps:is_key({atom_lit, '__struct__'}, ExactSub)
+            case is_domain_key_type(ReqK) of
+                true ->
+                    lists:all(
+                        fun({_Kind, SubK, SubV}) ->
+                            case consistent_subtype(SubK, ReqK) of
+                                true -> consistent_subtype(SubV, ReqV);
+                                false -> true
+                            end
+                        end,
+                        SubFields
+                    );
+                false ->
+                    case maps:find(ReqK, ExactSub) of
+                        {ok, SubV} -> consistent_subtype(SubV, ReqV);
+                        error ->
+                            %% In gradual typing, if a struct tag matches (__struct__),
+                            %% unspecialized struct instances are compatible with declared struct fields
+                            case ReqK of
+                                {atom_lit, '__struct__'} -> false;
+                                _ -> maps:is_key({atom_lit, '__struct__'}, ExactSub)
+                            end
                     end
             end
         end,
@@ -335,12 +348,20 @@ subtype_map_fields(SubFields, SuperFields) ->
     ),
     ValuesCompatible = lists:all(
         fun({_Kind, SubK, SubV}) ->
-            MatchingSuper = [SuperV || {SuperK, SuperV} <- AllSuper, SuperK =:= SubK],
+            MatchingSuper = [SuperV || {SuperK, SuperV} <- AllSuper, consistent_subtype(SubK, SuperK)],
             lists:all(fun(SuperV) -> consistent_subtype(SubV, SuperV) end, MatchingSuper)
         end,
         SubFields
     ),
     ReqSatisfied andalso ValuesCompatible.
+
+is_domain_key_type(atom) -> true;
+is_domain_key_type(binary) -> true;
+is_domain_key_type({binary, _, _}) -> true;
+is_domain_key_type(integer) -> true;
+is_domain_key_type(number) -> true;
+is_domain_key_type(any) -> true;
+is_domain_key_type(_) -> false.
 
 is_numeric(number) -> true;
 is_numeric(float) -> true;

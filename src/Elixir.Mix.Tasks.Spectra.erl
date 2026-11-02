@@ -5,12 +5,31 @@
 -module('Elixir.Mix.Tasks.Spectra').
 
 -export([
+    '__info__'/1,
     '__mix_recompile__?'/0,
     run/1,
     parse_args/1,
     resolve_ebin_dirs/1,
     resolve_ebin_dirs/2
 ]).
+
+-spec '__info__'(atom()) -> term().
+'__info__'(attributes) ->
+    [{behaviour, ['Elixir.Mix.Task']}];
+'__info__'(compile) ->
+    [];
+'__info__'(functions) ->
+    module_info(functions);
+'__info__'(macros) ->
+    [];
+'__info__'(md5) ->
+    module_info(md5);
+'__info__'(module) ->
+    ?MODULE;
+'__info__'(struct) ->
+    nil;
+'__info__'(_) ->
+    [].
 
 -spec '__mix_recompile__?'() -> boolean().
 '__mix_recompile__?'() ->
@@ -25,6 +44,8 @@ run(RawArgs) ->
         _ ->
             ok
     end,
+    SelfBeamDir = filename:dirname(code:which(?MODULE)),
+    code:add_patha(SelfBeamDir),
     Opts = parse_args(RawArgs),
     Root = maps:get(root, Opts, "."),
     Dirs = resolve_ebin_dirs(maps:get(targets, Opts, []), Opts),
