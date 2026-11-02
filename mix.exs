@@ -34,7 +34,7 @@ defmodule Spectra.MixProject do
       name: "spectra",
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url},
-      files: ~w(src include mix.exs rebar.config rebar.lock README* LICENSE*)
+      files: ~w(src include mix.exs rebar.config rebar.lock README* BENCHMARK* LICENSE*)
     ]
   end
 
@@ -43,7 +43,7 @@ defmodule Spectra.MixProject do
       main: "readme",
       source_url: @source_url,
       source_ref: "v#{@version}",
-      extras: ["README.md", "LICENSE"]
+      extras: ["README.md", "BENCHMARK.md", "LICENSE"]
     ]
   end
 end

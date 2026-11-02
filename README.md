@@ -221,6 +221,19 @@ spectra check --splt /path/to/project.splt _build/default/lib/*/ebin
 
 ---
 
+## 📈 Benchmarks
+
+Real-world benchmark on **RabbitMQ** (438,000+ lines of Erlang, 440 core modules tested with `hyperfine 2.0.0` on Apple M1, macOS, Erlang/OTP 29):
+
+| Suite | Spectra Wall Time | Dialyzer Wall Time | Speedup | Peak RAM (Spectra vs Dialyzer) |
+| :--- | :---: | :---: | :---: | :---: |
+| **Broker Core** (`rabbit`, 245 modules) | **856.2 ms** | 8,781.6 ms | **10.3× faster** | **319.4 MiB** vs 372.5 MiB |
+| **Full Core** (440 modules across 7 apps) | **3.922 s** | 20.722 s | **5.3× faster** | **441.0 MiB** vs **1,286.8 MiB** (2.9× less RAM) |
+
+See the complete telemetry, CPU metrics, and reproduction instructions in [BENCHMARK.md](BENCHMARK.md).
+
+---
+
 ## 🧪 Testing & Code Quality
 
 Run the test suite and coverage analysis:
