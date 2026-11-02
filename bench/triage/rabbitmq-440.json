@@ -1,0 +1,71 @@
+{
+ "_doc": "Manual verdicts for Spectra warnings (discrepancy mode) on the 440 modules of rabbitmq-server 5dacb85 that are not in deps/rabbit (see rabbitmq-core.json for those). key = module:function:line:kind.",
+ "_summary": "43 warnings at the end: 5 in rabbit (wrong specs, see rabbitmq-core.json) + 38 here. 0 false positives left. 4 false positives were found and fixed on the way: comparison with 0 (3), environment join of an orelse guard (1).",
+ "cuttlefish_error:xlate:*": {
+  "verdict": "true_positive",
+  "kind": "wrong_spec",
+  "count": 24,
+  "evidence": "-spec xlate({atom(), term()} | string()) but 24 clauses take tuples of 3+ elements, and cuttlefish_mapping:155 returns {error, {alias_not_a_string, V, X}} which xlate({error, D}) passes on; every 3+-tuple clause of the file is flagged, none other; the error() type is wrong too",
+  "dialyzer": "-Woverspecs flags it"
+ },
+ "rabbit_reader / rabbit_channel -> rabbit_misc:amqp_error/4 arg #4": {
+  "verdict": "true_positive",
+  "kind": "wrong_spec",
+  "count": 9,
+  "evidence": "amqp_error/4 expects rabbit_framing:amqp_method_name(), 9 calls pass `none`, which is the default of the record field (rabbit.hrl: method = none); protocol_error/3 passes none too; the type amqp_error() has the same gap",
+  "dialyzer": "default: nothing; -Woverspecs flags the spec"
+ },
+ "rabbit_data_coercion:to_list_of_binaries:90:dead_code": {
+  "verdict": "true_positive",
+  "kind": "wrong_spec",
+  "evidence": "rabbit_auth_backend_oauth2:325 passes get_scope(Payload), whose own spec is binary() | list(); the binary clause runs; the spec of to_list_of_binaries/1 only has undefined | list",
+  "dialyzer": "not flagged"
+ },
+ "rabbit_date_time:parse_duration:36:dead_code": {
+  "verdict": "true_positive",
+  "kind": "wrong_spec",
+  "confidence": "probable",
+  "evidence": "-spec parse_duration(string()), clause is_binary(Bin); the Elixir CLI command AddSuperStreamCommand passes the max_age option (a binary in Elixir) -- not verified end to end",
+  "dialyzer": "not flagged"
+ },
+ "cuttlefish_unit:path:134:dead_code": {
+  "verdict": "true_positive",
+  "kind": "wrong_spec",
+  "confidence": "probable",
+  "evidence": "clause path(_, undefined); the recursion path(T, SmallerProplist) passes any value found in the config, and undefined is how cuttlefish marks an unset key",
+  "dialyzer": "-Woverspecs flags it"
+ },
+ "cow_date:pad_int:378:dead_code": {
+  "verdict": "true_positive",
+  "kind": "spec_vs_clause",
+  "confidence": "unproven",
+  "evidence": "-spec pad_int(0..59) but a clause pad_int(60) (leap second?) exists; nothing shows 60 is ever passed",
+  "dialyzer": "-Woverspecs flags it"
+ },
+ "khepri_sproc:to_standalone_fun:42:dead_code": {
+  "verdict": "true_positive",
+  "kind": "dead_by_design",
+  "evidence": "-spec takes fun(); the clause takes an already standalone fun; the only caller (khepri_payload:146) passes a fun that is_function; idempotence for future callers",
+  "dialyzer": "-Woverspecs flags it"
+ },
+ "cuttlefish_datatypes:from_string:556:dead_code": {
+  "verdict": "false_positive",
+  "cause": "X >= 0 on a float made X an integer",
+  "status": "fixed"
+ },
+ "cuttlefish_util:ceiling:110:dead_code": {
+  "verdict": "false_positive",
+  "cause": "Neg < 0 on a float made Neg an integer",
+  "status": "fixed"
+ },
+ "cuttlefish_util:ceiling:111:dead_code": {
+  "verdict": "false_positive",
+  "cause": "Pos > 0 on a float made Pos an integer",
+  "status": "fixed"
+ },
+ "ra_log:write_sparse:624:dead_code": {
+  "verdict": "false_positive",
+  "cause": "join of the environments of an orelse guard: a variable constrained in one branch only kept that type",
+  "status": "fixed"
+ }
+}

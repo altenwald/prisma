@@ -33,14 +33,14 @@ minimal reproduction in [`bench/repro/`](bench/repro/README.md).
 | `orelse` / `andalso` with a non-boolean right operand | 2 (`rabbit_auth_backend_authn_state`, `mc_compat`) | **false positive**, reproduced |
 | Overloaded `-spec` (`(.., blocking) -> ..; (.., non_blocking) -> ..`): only the first clause counts | 2 (`rabbit_khepri`), maybe 2 more | **false positive**, reproduced |
 | Clause or guard that the declared `-spec` rules out: `rabbit_amqp_util`, `rabbit_definitions` x2, `rabbit_fifo_index`, `rabbit_peer_discovery` | 5 | **true positive: the spec is wrong, the code is right** (details below) |
-| Same, but dead by construction: `rabbit_vhost_limit` x2 | 2 | **true positive, intentional**: `get_limit/2` only returns `{ok, N}` for `N >= 0`, the code says "extra defensive" |
+| Same, but dead by construction: `rabbit_vhost_limit` x2 | 2 | **true positive, intentional**: `get_limit/2` only returns `{ok, N}` for `N >= 0`, the code says "extra defensive". **No longer reported** after the comparison-with-0 fix (see *Precision lost*) |
 | `Time == 0` with `Time` a float (`rabbit_variable_queue:update_rate/4`): `==` compares by value, `0.0 == 0` | 1 | false positive, found while triaging. **Fixed**: 8 -> 7, none new |
 
 So **44 of the 51 were false positives and 7 were true** (below). None of the 51 is a bug in the code; five point at wrong `-spec`s. After the improper-cells fix
 (37 warnings, all of `rabbit_fifo*`) the same run gives **14**, with none new: the two `andalso`/`orelse` ones, the overloaded
 specs, the 5 that the declared `-spec` rules out and the 5 not looked at yet. Then the `andalso`/`orelse` fix took the two of
 that cause (**12 left**), the overloaded-spec fix took four (**8**) and the float `==` fix one more: **7 left, all of them true, none new in any step**. On the 440 modules of the seven applications the same run went from
-101 to **49**; those have not been triaged.
+101 to **43**, triaged in the next sections: 0 false positives.
 
 ## The last 7 warnings of `rabbit`: all true
 
@@ -60,6 +60,47 @@ in **942 spec-difference warnings** for the same `rabbit` ebin. Dialyzer's defau
 the cases where a spec contradicts a *clause*, 7 out of those 942, and none of the 7 is noise. That is a different kind of
 finding from the false positives above: **the first real results of Spectra on this code base are wrong specs**, low severity,
 which nobody would find without it (or without reading 942 lines).
+
+## The 43 warnings of the 440 modules
+
+After the fixes above the run over the seven applications gives 43 warnings: the 5 wrong specs of `rabbit` already described and 38 in
+`cuttlefish`, `cowlib`, `khepri` and `rabbit_common` (code in `rabbit` that calls into them). Four **false positives** turned up
+while reading them (two causes, both Spectra bugs, both fixed below) and the rest are true:
+
+| Where | Warnings | What is true |
+| :--- | :---: | :--- |
+| `cuttlefish_error:xlate/1` | 24 | `-spec xlate({atom(), term()} \| string())`, but 24 clauses take tuples of **3 or more** elements. `cuttlefish_mapping:155` returns `{error, {alias_not_a_string, Variable, Single}}` and `xlate({error, Details})` hands it on. Every 3+-tuple clause of the file is reported and no other: the spec (and the `error()` type) were not widened when the alias errors were added. **Wrong spec, certain.** |
+| calls to `rabbit_misc:amqp_error/4`, in `rabbit_reader` (7) and `rabbit_channel` (2) | 9 | the 4th argument must be an `amqp_method_name()`; the calls pass `none`, which is the default of the record field (`method = none`), and `protocol_error/3` passes it too. The `amqp_error()` type has the same gap. **Wrong spec, certain.** |
+| `rabbit_data_coercion:to_list_of_binaries/1` | 1 | its caller passes `get_scope(Payload)`, whose own spec is `binary() \| list()`; the binary clause runs. **Wrong spec, certain.** |
+| `rabbit_date_time:parse_duration/1` | 1 | `-spec ... (string())` with an `is_binary` clause; the Elixir CLI command that calls it passes an option value (a binary in Elixir). **Wrong spec, probable** (not followed to the end). |
+| `cuttlefish_unit:path/2` | 1 | clause for `undefined`; the recursion passes whatever value the config holds, and `undefined` is how cuttlefish marks an unset key. **Wrong spec, probable.** |
+| `cow_date:pad_int/1` | 1 | `-spec pad_int(0..59)` but there is a clause for `60` (a leap second?). Nothing shows that 60 is passed. **Unproven.** |
+| `khepri_sproc:to_standalone_fun/1` | 1 | the clause takes an already standalone fun; the spec says `fun()` and the only caller passes a plain fun. **Defensive.** |
+| `cuttlefish_util:ceiling/1` (2), `cuttlefish_datatypes:from_string/2` (1) | 3 | **false positives**: `Neg < 0`, `Pos > 0`, `X >= 0` on a float. Fixed. |
+| `ra_log:write_sparse/3` | 1 | **false positive**: `P == undefined orelse Range == undefined orelse ...`, fixed. |
+
+Dialyzer, with `-Woverspecs`/`-Wunderspecs`, flags five of these functions, among **2229 spec-difference warnings** on the same 440 modules
+(and `to_list_of_binaries` and `parse_duration` it does not flag at all); with its default warnings, none. So: Spectra's list is 38 long
+and has no noise, but it is not a subset of what Dialyzer can say, and neither is the other way round.
+
+### The two bugs, and the gap in the generator that hid them
+
+- **Comparing with 0.** `X > 0` was read as "X is a positive integer". It also holds for `0.5` and, because numbers are smaller than
+  every other term, for **any non-number**: `b > 0` is true. `X < 0` only holds for negative numbers (integers or floats). Now `>` and `>=`
+  refine only a variable already known to be a number (to integer or float), and `<` always refines to a negative integer or float.
+- **Joining the environments of `A orelse B`.** A variable constrained in only one branch kept that constraint, as if "not mentioned" meant
+  "nothing" instead of "anything". Now only variables that every branch constrains keep a type.
+
+The generator knew neither: it had no `X > 0` on floats or atoms, no guards joined by `orelse`, and no record patterns in the head (the variables
+of a record pattern are the ones that are not in the environment). It has all three now. With both fixes reverted it fails in 88 tests, shrunk to
+`V1 = b, if V1 > 0 -> 1; ...` ("`b > 0` cannot succeed"). Passes 1500 programs x 25 runs with them.
+
+### Precision lost, so nobody finds it by surprise
+
+The two `rabbit_vhost_limit` clauses (`{ok, Limit} when Limit < 0`, dead because `get_limit/2` only returns `{ok, N}` for `N >= 0`) are no
+longer reported. They were found for the wrong reason: `N >= 0` used to make N a non-negative integer, which is false (an atom satisfies it). To
+see that `{ok, N}` with `N >= 0` can never also satisfy `N < 0`, the type language would need "a float that is not negative", and it has none.
+So the right answer is gone and the sound one is "cannot tell". Nothing else was lost in `rabbit` or in the 440 modules.
 
 ## Property-based tests: type algebra (PropEr)
 

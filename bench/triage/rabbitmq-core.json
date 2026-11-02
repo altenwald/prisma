@@ -62,12 +62,14 @@
  "rabbit_vhost_limit:is_over_connection_limit:102:dead_code": {
   "verdict": "true_positive",
   "kind": "dead_by_design",
-  "evidence": "get_limit/2 returns {ok, N} only for N >= 0; the comment says 'extra defensive'"
+  "evidence": "get_limit/2 returns {ok, N} only for N >= 0; the comment says 'extra defensive'",
+  "status": "no longer reported since the comparison-with-0 fix (precision lost: needs a non-negative float type)"
  },
  "rabbit_vhost_limit:would_exceed_queue_limit:125:dead_code": {
   "verdict": "true_positive",
   "kind": "dead_by_design",
-  "evidence": "get_limit/2 returns {ok, N} only for N >= 0; the comment says 'extra defensive'"
+  "evidence": "get_limit/2 returns {ok, N} only for N >= 0; the comment says 'extra defensive'",
+  "status": "no longer reported since the comparison-with-0 fix (precision lost: needs a non-negative float type)"
  },
  "rabbit_variable_queue:update_rate:709:dead_code": {
   "verdict": "false_positive",
@@ -96,5 +98,5 @@
   "cause": "overloaded_spec",
   "status": "fixed: overloaded -spec as whole vectors"
  },
- "_note_fixed": "The 37 rabbit_fifo* warnings (improper cells) are gone since the improper-cells fix: 51 -> 14 warnings on deps/rabbit, no new ones. Only 5 of them are listed individually above. The two andalso/orelse warnings are gone as well: 14 -> 12. Overloaded specs: 12 -> 8. Float ==: 8 -> 7. The 7 left are all spec_excludes_clause (debatable). Final state of deps/rabbit: 7 warnings, all true positives (5 wrong specs, 2 intentionally dead clauses), 0 false positives."
+ "_note_fixed": "The 37 rabbit_fifo* warnings (improper cells) are gone since the improper-cells fix: 51 -> 14 warnings on deps/rabbit, no new ones. Only 5 of them are listed individually above. The two andalso/orelse warnings are gone as well: 14 -> 12. Overloaded specs: 12 -> 8. Float ==: 8 -> 7. The 7 left are all spec_excludes_clause (debatable). Final state of deps/rabbit: 7 warnings, all true positives (5 wrong specs, 2 intentionally dead clauses), 0 false positives. The two vhost_limit warnings stopped being reported with the comparison-with-0 fix, so deps/rabbit ends with 5 warnings (all wrong specs)."
 }
