@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Spectra Logo" width="160">
+</p>
+
 # Spectra
 
 > *"If a static analysis tool produces false positives, developers lose confidence and stop using it or disable the checks. When code is flagged as dead, you should be able to kill it with fire with absolute certainty."*  

@@ -18,6 +18,7 @@
     {files, [
         "src",
         "include",
+        "assets",
         "rebar.config",
         "rebar.lock",
         "mix.exs",

@@ -34,13 +34,15 @@ defmodule Spectra.MixProject do
       name: "spectra",
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url},
-      files: ~w(src include mix.exs rebar.config rebar.lock README* BENCHMARK* LICENSE*)
+      files: ~w(src include assets mix.exs rebar.config rebar.lock README* BENCHMARK* LICENSE*)
     ]
   end
 
   defp docs do
     [
       main: "readme",
+      logo: "assets/logo.png",
+      assets: %{"assets" => "assets"},
       source_url: @source_url,
       source_ref: "v#{@version}",
       extras: ["README.md", "BENCHMARK.md", "LICENSE"]

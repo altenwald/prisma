@@ -1,0 +1,199 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 420" width="512" height="420">
+  <defs>
+    <!-- Facet Gradients for rich 3D Altenwald blue glass -->
+    <linearGradient id="prism-left-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="25%" stop-color="#e0edfd"/>
+      <stop offset="70%" stop-color="#b9d5fb"/>
+      <stop offset="100%" stop-color="#91bbf7"/>
+    </linearGradient>
+
+    <linearGradient id="prism-right-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="45%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+
+    <linearGradient id="prism-top-grad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f0f6ff"/>
+      <stop offset="60%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#dbeafe"/>
+    </linearGradient>
+
+    <!-- Dispersion fan gradient inside the right prism face -->
+    <linearGradient id="fan-glow" x1="0%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.8"/>
+      <stop offset="60%" stop-color="#93c5fd" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#60a5fa" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Ambient Floor Shadow -->
+  <ellipse cx="200" cy="374" rx="98" ry="18" fill="#1b3566" opacity="0.14"/>
+
+  <!-- Altenwald Dashed Measurement Arc (Golden Amber #f5962a) -->
+  <path d="M 58 125 C 108 55, 205 32, 288 42 S 398 72, 442 122" fill="none" stroke="#f5962a" stroke-width="7" stroke-linecap="round" stroke-dasharray="1 21"/>
+
+  <!-- ================= SPECTRAL FAN (5 Rays Emerging from Distinct Exit Points) ================= -->
+  <!-- Exit points along right edge (x=280): 
+       Ray 1 (Amber):  (280, 162) -> (435, 108)
+       Ray 2 (Teal):   (280, 178) -> (452, 162)
+       Ray 3 (Azure):  (280, 195) -> (466, 218)
+       Ray 4 (Blue):   (280, 212) -> (448, 276)
+       Ray 5 (Violet): (280, 228) -> (422, 332)
+  -->
+
+  <!-- Ray Outlines (Navy #1b3566) -->
+  <g stroke="#1b3566" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 280 162 C 322 158, 360 120, 435 108" stroke-width="12" fill="none"/>
+    <path d="M 280 178 C 328 174, 370 162, 452 162" stroke-width="12" fill="none"/>
+    <path d="M 280 195 C 335 195, 385 218, 466 218" stroke-width="13" fill="none"/>
+    <path d="M 280 212 C 328 214, 370 255, 448 276" stroke-width="12" fill="none"/>
+    <path d="M 280 228 C 322 232, 360 288, 422 332" stroke-width="12" fill="none"/>
+  </g>
+
+  <!-- Ray Colored Inners -->
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <!-- Ray 1: Amber (#f5962a) -->
+    <path d="M 280 162 C 322 158, 360 120, 435 108" stroke="#f5962a" stroke-width="6" fill="none"/>
+
+    <!-- Ray 2: Teal / Emerald (#1fb5a8) -->
+    <path d="M 280 178 C 328 174, 370 162, 452 162" stroke="#1fb5a8" stroke-width="6" fill="none"/>
+
+    <!-- Ray 3: Electric Sky Azure (#38bdf8) -->
+    <path d="M 280 195 C 335 195, 385 218, 466 218" stroke="#38bdf8" stroke-width="7" fill="none"/>
+
+    <!-- Ray 4: Royal Blue (#2563eb) -->
+    <path d="M 280 212 C 328 214, 370 255, 448 276" stroke="#2563eb" stroke-width="6" fill="none"/>
+
+    <!-- Ray 5: Deep Violet (#7b6cf0) -->
+    <path d="M 280 228 C 322 232, 360 288, 422 332" stroke="#7b6cf0" stroke-width="6" fill="none"/>
+  </g>
+
+  <!-- Specular Highlights on Output Rays -->
+  <g stroke="#ffffff" stroke-opacity="0.8" stroke-width="2.5" stroke-linecap="round">
+    <path d="M 350 140 C 378 122, 402 114, 422 110" fill="none"/>
+    <path d="M 360 170 C 390 165, 418 163, 438 162" fill="none"/>
+    <path d="M 355 212 L 448 217" fill="none"/>
+    <path d="M 360 242 C 390 258, 418 268, 435 273" fill="none"/>
+    <path d="M 350 274 C 378 300, 398 316, 412 325" fill="none"/>
+  </g>
+
+  <!-- Diagnostic Output Pins (Altenwald Pin Gauge Style) -->
+  <!-- Pin 1: Amber -->
+  <g transform="translate(435 108)">
+    <circle cx="0" cy="0" r="15" fill="#f5962a" stroke="#1b3566" stroke-width="6"/>
+    <path d="M -9 -4 A 10 10 0 0 1 3 -9" fill="none" stroke="#ffffff" stroke-opacity="0.85" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="0" cy="0" r="5" fill="#eef4ff" stroke="#1b3566" stroke-width="3"/>
+  </g>
+
+  <!-- Pin 2: Teal -->
+  <g transform="translate(452 162)">
+    <circle cx="0" cy="0" r="15" fill="#1fb5a8" stroke="#1b3566" stroke-width="6"/>
+    <path d="M -9 -4 A 10 10 0 0 1 3 -9" fill="none" stroke="#ffffff" stroke-opacity="0.85" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="0" cy="0" r="5" fill="#eef4ff" stroke="#1b3566" stroke-width="3"/>
+  </g>
+
+  <!-- Pin 3: Sky Azure (Primary Node) -->
+  <g transform="translate(466 218)">
+    <circle cx="0" cy="0" r="18" fill="#38bdf8" stroke="#1b3566" stroke-width="7"/>
+    <path d="M -11 -5 A 12 12 0 0 1 4 -11" fill="none" stroke="#ffffff" stroke-opacity="0.85" stroke-width="3.5" stroke-linecap="round"/>
+    <circle cx="0" cy="0" r="6" fill="#eef4ff" stroke="#1b3566" stroke-width="3.5"/>
+  </g>
+
+  <!-- Pin 4: Royal Blue -->
+  <g transform="translate(448 276)">
+    <circle cx="0" cy="0" r="15" fill="#2563eb" stroke="#1b3566" stroke-width="6"/>
+    <path d="M -9 -4 A 10 10 0 0 1 3 -9" fill="none" stroke="#ffffff" stroke-opacity="0.85" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="0" cy="0" r="5" fill="#eef4ff" stroke="#1b3566" stroke-width="3"/>
+  </g>
+
+  <!-- Pin 5: Violet -->
+  <g transform="translate(422 332)">
+    <circle cx="0" cy="0" r="15" fill="#7b6cf0" stroke="#1b3566" stroke-width="6"/>
+    <path d="M -9 -4 A 10 10 0 0 1 3 -9" fill="none" stroke="#ffffff" stroke-opacity="0.85" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="0" cy="0" r="5" fill="#eef4ff" stroke="#1b3566" stroke-width="3"/>
+  </g>
+
+  <!-- ================= INCOMING LIGHT BEAM ================= -->
+  <!-- Laser Beam from left (38, 195) into prism left facet (120, 195) -->
+  <path d="M 38 195 L 122 195" stroke="#1b3566" stroke-width="12" stroke-linecap="round"/>
+  <path d="M 38 195 L 122 195" stroke="#93c5fd" stroke-width="6" stroke-linecap="round"/>
+  <path d="M 38 195 L 122 195" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Left Input Emitter Pin -->
+  <g transform="translate(38 195)">
+    <circle cx="0" cy="0" r="16" fill="#2563eb" stroke="#1b3566" stroke-width="6"/>
+    <path d="M -10 -4 A 11 11 0 0 1 3 -10" fill="none" stroke="#ffffff" stroke-opacity="0.85" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="0" cy="0" r="5" fill="#eef4ff" stroke="#1b3566" stroke-width="3"/>
+  </g>
+
+  <!-- ================= THE OPTICAL PRISM ================= -->
+  <!--
+       Isometric Triangular Prism Geometry:
+       Top Vertices:
+         T_Left  = (120, 90)
+         T_Front = (200, 130)
+         T_Right = (280, 85)
+       Bottom Vertices (height = 220):
+         B_Left  = (120, 310)
+         B_Front = (200, 350)
+         B_Right = (280, 305)
+  -->
+
+  <!-- Prism Outer Contours and Facets -->
+  <g stroke="#1b3566" stroke-width="12" stroke-linejoin="round" stroke-linecap="round">
+    <!-- Left Face (Light Glass) -->
+    <polygon points="120,90 200,130 200,350 120,310" fill="url(#prism-left-grad)"/>
+
+    <!-- Right Face (Deep Refracting Sapphire) -->
+    <polygon points="200,130 280,85 280,305 200,350" fill="url(#prism-right-grad)"/>
+
+    <!-- Top Cap (Translucent White/Ice Triangular Face) -->
+    <polygon points="120,90 200,130 280,85" fill="url(#prism-top-grad)"/>
+  </g>
+
+  <!-- Front Center Ridge Separator -->
+  <line x1="200" y1="130" x2="200" y2="350" stroke="#1b3566" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- Internal Crystalline Refraction Glows -->
+  <polygon points="208,142 272,102 272,295 208,338" fill="#1e3a8a" opacity="0.18"/>
+
+  <!-- Internal Dispersion Fan Inside Right Face -->
+  <!-- Fan spreading from center ridge (200, 210) to the exit edge (280, 162..228) -->
+  <polygon points="200,210 280,162 280,228" fill="url(#fan-glow)"/>
+
+  <!-- ================= "S" SPECTRAL WAVE (TRAVERSING CRYSTAL) ================= -->
+  <!-- Enters (120, 195), arches smoothly through the prism to center (200, 210), branching to exit (280, 195) -->
+  <g stroke-linecap="round">
+    <!-- Navy outline of the S-wave -->
+    <path d="M 120 195 C 155 155, 172 170, 200 210 S 245 235, 280 195" fill="none" stroke="#1b3566" stroke-width="10"/>
+    <!-- Cyan glow aura -->
+    <path d="M 120 195 C 155 155, 172 170, 200 210 S 245 235, 280 195" fill="none" stroke="#60a5fa" stroke-width="6"/>
+    <!-- Brilliant white core -->
+    <path d="M 120 195 C 155 155, 172 170, 200 210 S 245 235, 280 195" fill="none" stroke="#ffffff" stroke-width="3"/>
+  </g>
+
+  <!-- Secondary Internal Dispersion Filaments inside Right Face -->
+  <g stroke-linecap="round" opacity="0.75">
+    <path d="M 200 210 C 230 200, 255 178, 280 162" stroke="#f5962a" stroke-width="2.5" fill="none"/>
+    <path d="M 200 210 C 230 204, 255 188, 280 178" stroke="#1fb5a8" stroke-width="2.5" fill="none"/>
+    <path d="M 200 210 C 230 215, 255 220, 280 212" stroke="#2563eb" stroke-width="2.5" fill="none"/>
+    <path d="M 200 210 C 230 220, 255 228, 280 228" stroke="#7b6cf0" stroke-width="2.5" fill="none"/>
+  </g>
+
+  <!-- ================= SPECULAR GLOSS & HIGHLIGHTS ================= -->
+  <!-- Top Cap glossy edge reflection -->
+  <polygon points="132,96 198,127 186,129 126,100" fill="#ffffff" opacity="0.85"/>
+
+  <!-- Left Face: Altenwald signature vertical pill highlights -->
+  <rect x="132" y="115" width="10" height="155" rx="5" fill="#ffffff" opacity="0.85" transform="skewY(14)"/>
+  <rect x="148" y="125" width="6" height="50" rx="3" fill="#ffffff" opacity="0.55" transform="skewY(14)"/>
+
+  <!-- Right Face: Deep sapphire sleek glossy reflections -->
+  <rect x="264" y="222" width="7" height="110" rx="3.5" fill="#ffffff" opacity="0.38" transform="skewY(-16)"/>
+  <rect x="252" y="240" width="4" height="45" rx="2" fill="#ffffff" opacity="0.25" transform="skewY(-16)"/>
+
+  <!-- Glint spark on the apex -->
+  <circle cx="200" cy="130" r="3.5" fill="#ffffff" opacity="0.9"/>
+</svg>
