@@ -201,9 +201,28 @@ translate_expr({{'.', _, [erlang, Op]}, Meta, [Arg]}) ->
             Anno = meta_anno(Meta),
             {call, Anno, {remote, Anno, {atom, Anno, erlang}, {atom, Anno, Op}}, [translate_expr(Arg)]}
     end;
+translate_expr({{'.', _, [{FunVar, _, Ctx}]}, Meta, Args}) when is_atom(FunVar), is_atom(Ctx), is_list(Args) ->
+    Anno = meta_anno(Meta),
+    {call, Anno, {var, Anno, elixir_var(FunVar, Ctx)}, [translate_expr(A) || A <- Args]};
+translate_expr({{'.', _, [Target]}, Meta, Args}) when is_list(Args) ->
+    Anno = meta_anno(Meta),
+    {call, Anno, translate_expr(Target), [translate_expr(A) || A <- Args]};
+translate_expr({{'.', _, [Target, Field]}, Meta, []}) when is_atom(Field) ->
+    Anno = meta_anno(Meta),
+    {call, Anno, {remote, Anno, {atom, Anno, erlang}, {atom, Anno, map_get}}, [{atom, Anno, Field}, translate_expr(Target)]};
 translate_expr({{'.', _, [ModAst, FunAtom]}, Meta, Args}) when is_atom(FunAtom), is_list(Args) ->
     Anno = meta_anno(Meta),
     {call, Anno, {remote, Anno, translate_expr(ModAst), {atom, Anno, FunAtom}}, [translate_expr(A) || A <- Args]};
+translate_expr({fn, Meta, Clauses}) when is_list(Clauses) ->
+    Anno = meta_anno(Meta),
+    ErlClauses = [translate_case_clause(C) || C <- Clauses],
+    {'fun', Anno, {clauses, ErlClauses}};
+translate_expr({'&', Meta, [{Fun, _, Ctx}]}) when is_atom(Fun), is_atom(Ctx) ->
+    Anno = meta_anno(Meta),
+    {var, Anno, elixir_var(Fun, Ctx)};
+translate_expr({'&', Meta, [{{'.', _, [Mod, Fun]}, _, []}, Arity]}) when is_integer(Arity) ->
+    Anno = meta_anno(Meta),
+    {'fun', Anno, {function, translate_expr(Mod), {atom, Anno, Fun}, {integer, Anno, Arity}}};
 translate_expr({'_', Meta, Ctx}) when is_atom(Ctx) ->
     {var, meta_anno(Meta), '_'};
 translate_expr({VarName, Meta, Ctx}) when is_atom(VarName), is_atom(Ctx) ->

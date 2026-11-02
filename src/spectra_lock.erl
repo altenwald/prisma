@@ -292,16 +292,34 @@ sort_deps(Deps) ->
 discover_project_ebins(ProjectRoot, Opts) ->
     Root = unicode:characters_to_list(ProjectRoot),
     Deps = discover_deps(Root),
-    DepNames = maps:from_list([{binary_to_list(Name), true} || #{name := Name} <- Deps]),
+    LockDepNames = maps:from_list([{binary_to_list(Name), true} || #{name := Name} <- Deps]),
+    DirDepNames = maps:from_list([{filename:basename(D), true} || D <- filelib:wildcard(filename:join([Root, "deps", "*"]))]),
+    DepNames = maps:merge(LockDepNames, DirDepNames),
     CandidateEbins = candidate_build_ebins(Root, Opts),
+    ProjectApp = detect_project_app_name(Root),
     lists:filter(
         fun(EbinPath) ->
             AppDir = filename:dirname(EbinPath),
             AppName = filename:basename(AppDir),
-            not maps:is_key(AppName, DepNames)
+            case ProjectApp of
+                {ok, PApp} -> AppName =:= PApp;
+                undefined -> not maps:is_key(AppName, DepNames)
+            end
         end,
         CandidateEbins
     ).
+
+detect_project_app_name(Root) ->
+    MixExs = filename:join(Root, "mix.exs"),
+    case file:read_file(MixExs) of
+        {ok, Bin} ->
+            case re:run(Bin, "app:\\s*:([a-zA-Z0-9_]+)", [{capture, [1], list}]) of
+                {match, [AppName]} -> {ok, AppName};
+                nomatch -> undefined
+            end;
+        _ ->
+            undefined
+    end.
 
 candidate_build_ebins(Root, Opts) ->
     case maps:find(env, Opts) of

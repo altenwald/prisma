@@ -322,7 +322,13 @@ subtype_map_fields(SubFields, SuperFields) ->
         fun({ReqK, ReqV}) ->
             case maps:find(ReqK, ExactSub) of
                 {ok, SubV} -> consistent_subtype(SubV, ReqV);
-                error -> false
+                error ->
+                    %% In gradual typing, if a struct tag matches (__struct__),
+                    %% unspecialized struct instances are compatible with declared struct fields
+                    case ReqK of
+                        {atom_lit, '__struct__'} -> false;
+                        _ -> maps:is_key({atom_lit, '__struct__'}, ExactSub)
+                    end
             end
         end,
         ReqSuper
