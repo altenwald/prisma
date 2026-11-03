@@ -1,8 +1,8 @@
 -ifndef(PRISMA_HRL).
 -define(PRISMA_HRL, true).
 
--define(PRISMA_PPLT_MAGIC, "PRISMA_PPLT_V2").
--define(PRISMA_PPLT_VERSION, 2).
+-define(PRISMA_PPLT_MAGIC, "PRISMA_PPLT_V1").
+-define(PRISMA_PPLT_VERSION, 1).
 
 -type mfa_key() :: {module(), atom(), arity()}.
 -type type_key() :: {module(), atom(), arity()}.
