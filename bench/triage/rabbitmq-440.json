@@ -1,6 +1,6 @@
 {
  "_doc": "Manual verdicts for Spectra warnings (discrepancy mode) on the 440 modules of rabbitmq-server 5dacb85 that are not in deps/rabbit (see rabbitmq-core.json for those). key = module:function:line:kind.",
- "_summary": "43 warnings at the end: 5 in rabbit (wrong specs, see rabbitmq-core.json) + 38 here. 0 false positives left. 4 false positives were found and fixed on the way: comparison with 0 (3), environment join of an orelse guard (1).",
+ "_summary": "44 warnings at the end: 5 in rabbit (wrong specs, see rabbitmq-core.json) + 39 here. 0 false positives left. 4 false positives were found and fixed on the way: comparison with 0 (3), environment join of an orelse guard (1).",
  "cuttlefish_error:xlate:*": {
   "verdict": "true_positive",
   "kind": "wrong_spec",
@@ -67,5 +67,11 @@
   "verdict": "false_positive",
   "cause": "join of the environments of an orelse guard: a variable constrained in one branch only kept that type",
   "status": "fixed"
+ },
+ "cuttlefish_variable:replace_match:98:dead_code": {
+  "verdict": "true_positive",
+  "kind": "dead_by_design",
+  "evidence": "-spec replace_match(variable(), string()) with a clause for undefined; no caller passes it (found when comprehensions started to be analyzed)",
+  "dialyzer": "not checked"
  }
 }

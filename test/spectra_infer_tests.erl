@@ -525,3 +525,79 @@ orelse_guard_joins_environments_test() ->
           "    case Range of\n        undefined -> a;\n        {_, _} -> b\n    end;\n"
           "f(_, _) -> c.\n",
     ?assertEqual([], plain_warnings(Src)).
+
+%% Calls inside fun, try, catch, receive, comprehensions, records and binaries must be checked like any other call.
+
+nested_callee() ->
+    "-export([g/1]).\n-spec g(integer()) -> ok.\ng(_) -> ok.\n".
+
+nested_hits(Body) ->
+    Caller = "-export([f/0]).\n-record(st, {x}).\nf() ->\n" ++ Body ++ ".\n",
+    %% line 5 is the first line of the body
+    [L || {discrepancy, L} <- two_module_warnings(Caller, nested_callee(), discrepancy)].
+
+call_inside_an_anonymous_fun_test() ->
+    ?assertEqual([5], nested_hits("    F = fun(_) -> ov_callee:g(oops) end,\n    F(1)")),
+    ?assertEqual([5], nested_hits("    lists:foreach(fun(X) when is_integer(X) -> ov_callee:g(oops) end, [1])")),
+    ?assertEqual([5], nested_hits("    F = fun Loop(0) -> ov_callee:g(oops); Loop(N) -> Loop(N - 1) end,\n    F(1)")).
+
+call_inside_try_test() ->
+    ?assertEqual([5], nested_hits("    try ov_callee:g(oops) of\n        ok -> a\n    catch _:_ -> b\n    end")),
+    ?assertEqual([6], nested_hits("    try ok of\n        ok -> ov_callee:g(oops)\n    catch _:_ -> b\n    end")),
+    ?assertEqual([7], nested_hits("    try ok\n    catch\n        _:_ -> ov_callee:g(oops)\n    end")),
+    ?assertEqual([8], nested_hits("    try ok\n    catch _:_ -> b\n    after\n        ov_callee:g(oops)\n    end")).
+
+call_inside_catch_and_receive_test() ->
+    ?assertEqual([5], nested_hits("    catch ov_callee:g(oops)")),
+    ?assertEqual([6], nested_hits("    receive\n        _ -> ov_callee:g(oops)\n    after 0 -> ok\n    end")),
+    ?assertEqual([8], nested_hits("    receive\n        _ -> ok\n    after 0 ->\n        ov_callee:g(oops)\n    end")).
+
+call_inside_a_comprehension_test() ->
+    ?assertEqual([5], nested_hits("    [ov_callee:g(oops) || _ <- [1]]")),
+    ?assertEqual([5], nested_hits("    [X || X <- [ov_callee:g(oops)]]")),
+    ?assertEqual([5], nested_hits("    [X || X <- [1], ov_callee:g(oops) =:= ok]")),
+    ?assertEqual([5], nested_hits("    << <<X>> || X <- [ov_callee:g(oops)] >>")).
+
+call_inside_a_record_and_a_binary_test() ->
+    ?assertEqual([5], nested_hits("    #st{x = ov_callee:g(oops)}")),
+    ?assertEqual([6], nested_hits("    R = #st{x = 1},\n    R#st{x = ov_callee:g(oops)}")),
+    ?assertEqual([6], nested_hits("    R = #st{x = 1},\n    {R#st.x, ov_callee:g(oops)}")),
+    ?assertEqual([5], nested_hits("    <<(ov_callee:g(oops)):8>>")).
+
+nested_constructs_report_nothing_when_correct_test() ->
+    Body = "    F = fun(X) -> ov_callee:g(X) end,\n    [ov_callee:g(Y) || Y <- [1, 2], is_integer(Y)],\n"
+           "    try ov_callee:g(1) of ok -> ok catch _:_ -> ov_callee:g(2) after ov_callee:g(3) end,\n"
+           "    #st{x = ov_callee:g(4)},\n    F(5)",
+    ?assertEqual([], nested_hits(Body)).
+
+variables_bound_inside_do_not_leak_test() ->
+    %% X is bound inside the fun and the comprehension only: the X outside is a different one
+    Body = "    F = fun(X) -> X + 1 end,\n    _ = [Y || Y <- [a, b]],\n    X = oops,\n    Y = 1,\n    {F(1), X, Y}",
+    ?assertEqual([], nested_hits(Body)).
+
+%% A tuple whose first element is the record's name and whose size is the record's is a value of that record type.
+
+record_callee() ->
+    "-export([g/1]).\n-record(r, {a :: integer(), b :: atom()}).\n-spec g(#r{}) -> ok.\ng(_) -> ok.\n".
+
+record_hits(Body) ->
+    Caller = "-export([f/0]).\nf() ->\n" ++ Body ++ ".\n",
+    [L || {discrepancy, L} <- two_module_warnings(Caller, record_callee(), discrepancy)].
+
+tuple_with_the_record_tag_fits_the_record_test() ->
+    ?assertEqual([], record_hits("    ov_callee:g({r, 1, a})")),
+    ?assertEqual([], record_hits("    try ok catch\n        exit:{r, _, _} = E -> ov_callee:g(E)\n    end")).
+
+tuple_that_cannot_be_the_record_is_still_rejected_test() ->
+    ?assertEqual([4], record_hits("    ov_callee:g({other, 1, a})")),
+    ?assertEqual([4], record_hits("    ov_callee:g(not_a_tuple)")),
+    ?assertEqual([4], record_hits("    ov_callee:g([r, 1, a])")).
+
+meet_of_a_tuple_and_a_record_test_() ->
+    Rec = {record, r, [{a, integer}, {b, atom}]},
+    [?_assertEqual(Rec, spectra_type:meet({tuple, [{atom_lit, r}, integer, atom]}, Rec)),
+     ?_assertEqual(Rec, spectra_type:meet(Rec, {tuple, [{atom_lit, r}, any, any]})),
+     ?_assertEqual(none, spectra_type:meet({tuple, [{atom_lit, s}, integer, atom]}, Rec)),
+     %% arity and field types are not checked: a spec only lists some of the fields
+     ?_assertEqual(Rec, spectra_type:meet({tuple, [{atom_lit, r}, integer]}, Rec)),
+     ?_assertEqual({record, r, []}, spectra_type:meet({tuple, [{atom_lit, r}, atom, atom]}, {record, r, []}))].

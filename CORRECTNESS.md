@@ -271,6 +271,34 @@ Where Spectra looks, it finds them (52 of 52, two more than Dialyzer). The 73 mi
 4. **The return type of a call to another module is `any`** (`r6`, 25 mutants): inference only knows the contracts of the module it is
    analyzing, so `{ok, V} = other:f()` is never compared with the `-spec` of `other:f/0`.
 
+### Closing the gaps, one by one
+
+Same 125 mutants after each fix (the counts for Dialyzer and `erlc` do not change).
+
+| Fix | Spectra | what it caught |
+| :--- | :---: | :--- |
+| before | 52 / 125 | |
+| 1. look inside `fun`, `try`, `catch`, `receive`, comprehensions, records and binaries | **57 / 125** | `r2` 21 -> 24, `r3` 6 -> 8; nothing lost |
+
+**Gap 1.** `infer_expr` answered `any` for every construct it did not know without looking inside. It now has a clause each for `fun`
+(and named funs), `try` (body, `of`, `catch`, `after`), `catch`, `receive`, list and binary comprehensions, record creation, update and access,
+and the elements of a binary. They are inferred for warnings and call sites only: patterns bind their variables to `any`, nothing bound
+inside reaches the code that follows, and the result stays `any`. One mutant of this class is still missed (`conf_parse`, generated parser
+code); not investigated.
+
+Three things turned up on the way, none of them in the mutants:
+- the first version typed a `fun` as `any_fun`, which is not consistent with a declared `fun((A) -> B)`: **Spectra's own test, which analyzes
+  Spectra, reported two false positives in `spectra_hub` and `spectra_plt`**. A `fun` stays `any`;
+- calls inside a `catch` clause in RabbitMQ then showed a **false positive of `meet`**: `{amqp_error, _, _, _}` was disjoint from the record
+  `#amqp_error{}`. A tuple whose first element can be the record's name is now a value of the record type. Arity and field types are not checked,
+  because `{record, Name, Fields}` only lists the fields that the spec mentions (`#r{}` lists none);
+- one **true positive**: `cuttlefish_variable:replace_match/2` has `-spec ... (variable(), string())` and a clause for `undefined`; nobody passes it
+  (defensive; same class as `khepri_sproc`). The 440 modules go from 43 to 44 warnings.
+
+The generator now puts the call to the module with the overloaded spec in a plain statement, in a fun, in a comprehension, in a record field and
+(with arguments that fit the spec, because a `catch` would hide the failure) in a `try`. It guards against false positives in those places (1500
+programs x 25 runs); it cannot see false negatives, which the unit tests and the mutants measure.
+
 What this sample does not say: 125 mutants of five kinds, injected on purpose, are not the distribution of real bugs; "must fail" is by contract
 or by BIF, so a mutant on code that is never reached still counts; Dialyzer ran with its default warnings and the erts/kernel/stdlib PLT; and the
 new warnings that each tool gives *outside* the mutated function (6 for Spectra, 201 for Dialyzer) were counted but not analyzed (most are probably

@@ -401,7 +401,8 @@ infer_expr(_Mod, _MFA, {atom, _, A}, Env, _Contracts, Warns, Sites) ->
     {{atom_lit, A}, Env, Warns, Sites};
 infer_expr(_Mod, _MFA, {nil, _}, Env, _Contracts, Warns, Sites) ->
     {nil, Env, Warns, Sites};
-infer_expr(_Mod, _MFA, {bin, _, _}, Env, _Contracts, Warns, Sites) ->
+infer_expr(Mod, MFA, {bin, _, Elements}, Env, Contracts, Warns0, Sites0) ->
+    {Warns, Sites} = infer_effects(Mod, MFA, bin_element_exprs(Elements), Env, Contracts, Warns0, Sites0),
     {{binary, 0, 8}, Env, Warns, Sites};
 infer_expr(_Mod, _MFA, {string, _, S}, Env, _Contracts, Warns, Sites) ->
     Type = case S of
@@ -469,8 +470,98 @@ infer_expr(Mod, MFA, {'block', _Anno, Body}, Env0, Contracts, Warns0, Sites0) ->
 infer_expr(Mod, MFA, {call, Anno, Target, Args}, Env0, Contracts, Warns0, Sites0) ->
     {ArgTypes, Env1, Warns1, Sites1} = infer_expr_list(Mod, MFA, Args, Env0, Contracts, Warns0, Sites0),
     infer_call(Mod, MFA, Anno, Target, Args, ArgTypes, Env1, Contracts, Warns1, Sites1);
+%% The constructs below used to be answered `any` without looking inside, so a call in a fun, a try, a comprehension or a
+%% record field was never checked. They are looked into for warnings and call sites only: what is bound inside does not
+%% reach the code that follows, and the result stays `any` (a fun typed `any_fun` is not consistent with a declared
+%% `fun((A) -> B)`, which Spectra's own code showed on the first run).
+infer_expr(Mod, MFA, {'fun', _, {clauses, Clauses}}, Env, Contracts, Warns0, Sites0) ->
+    {Warns, Sites} = infer_nested_clauses(Mod, MFA, Clauses, Env, Contracts, Warns0, Sites0),
+    {any, Env, Warns, Sites};
+infer_expr(Mod, MFA, {named_fun, _, _Name, Clauses}, Env, Contracts, Warns0, Sites0) ->
+    {Warns, Sites} = infer_nested_clauses(Mod, MFA, Clauses, Env, Contracts, Warns0, Sites0),
+    {any, Env, Warns, Sites};
+infer_expr(_Mod, _MFA, {'fun', _, _}, Env, _Contracts, Warns, Sites) ->
+    {any, Env, Warns, Sites};
+infer_expr(Mod, MFA, {'try', _, Body, OfClauses, CatchClauses, After}, Env, Contracts, Warns0, Sites0) ->
+    {_, _, Warns1, Sites1} = infer_body(Mod, MFA, Body, Env, Contracts, Warns0, Sites0),
+    {Warns2, Sites2} = infer_nested_clauses(Mod, MFA, OfClauses, Env, Contracts, Warns1, Sites1),
+    {Warns3, Sites3} = infer_nested_clauses(Mod, MFA, CatchClauses, Env, Contracts, Warns2, Sites2),
+    {_, _, Warns4, Sites4} = infer_body(Mod, MFA, After, Env, Contracts, Warns3, Sites3),
+    {any, Env, Warns4, Sites4};
+infer_expr(Mod, MFA, {'catch', _, Expr}, Env, Contracts, Warns0, Sites0) ->
+    {_, _, Warns, Sites} = infer_expr(Mod, MFA, Expr, Env, Contracts, Warns0, Sites0),
+    {any, Env, Warns, Sites};
+infer_expr(Mod, MFA, {'receive', _, Clauses}, Env, Contracts, Warns0, Sites0) ->
+    {Warns, Sites} = infer_nested_clauses(Mod, MFA, Clauses, Env, Contracts, Warns0, Sites0),
+    {any, Env, Warns, Sites};
+infer_expr(Mod, MFA, {'receive', _, Clauses, Timeout, AfterBody}, Env, Contracts, Warns0, Sites0) ->
+    {Warns1, Sites1} = infer_effects(Mod, MFA, [Timeout], Env, Contracts, Warns0, Sites0),
+    {Warns2, Sites2} = infer_nested_clauses(Mod, MFA, Clauses, Env, Contracts, Warns1, Sites1),
+    {_, _, Warns3, Sites3} = infer_body(Mod, MFA, AfterBody, Env, Contracts, Warns2, Sites2),
+    {any, Env, Warns3, Sites3};
+infer_expr(Mod, MFA, {lc, _, Template, Qualifiers}, Env, Contracts, Warns0, Sites0) ->
+    {Warns, Sites} = infer_comprehension(Mod, MFA, Template, Qualifiers, Env, Contracts, Warns0, Sites0),
+    {{list, any}, Env, Warns, Sites};
+infer_expr(Mod, MFA, {bc, _, Template, Qualifiers}, Env, Contracts, Warns0, Sites0) ->
+    {Warns, Sites} = infer_comprehension(Mod, MFA, Template, Qualifiers, Env, Contracts, Warns0, Sites0),
+    {{binary, 0, 1}, Env, Warns, Sites};
+infer_expr(Mod, MFA, {record, _, _Name, Fields}, Env, Contracts, Warns0, Sites0) ->
+    {Warns, Sites} = infer_effects(Mod, MFA, record_field_exprs(Fields), Env, Contracts, Warns0, Sites0),
+    {any, Env, Warns, Sites};
+infer_expr(Mod, MFA, {record, _, Expr, _Name, Fields}, Env, Contracts, Warns0, Sites0) ->
+    {Warns, Sites} = infer_effects(Mod, MFA, [Expr | record_field_exprs(Fields)], Env, Contracts, Warns0, Sites0),
+    {any, Env, Warns, Sites};
+infer_expr(Mod, MFA, {record_field, _, Expr, _Name, _Field}, Env, Contracts, Warns0, Sites0) ->
+    {Warns, Sites} = infer_effects(Mod, MFA, [Expr], Env, Contracts, Warns0, Sites0),
+    {any, Env, Warns, Sites};
 infer_expr(_Mod, _MFA, _Other, Env, _Contracts, Warns, Sites) ->
     {any, Env, Warns, Sites}.
+
+%% Infers each expression only for its warnings and call sites, in the same environment (nothing flows between them).
+infer_effects(Mod, MFA, Exprs, Env, Contracts, Warns0, Sites0) ->
+    lists:foldl(
+        fun(Expr, {W, S}) ->
+            {_, _, W1, S1} = infer_expr(Mod, MFA, Expr, Env, Contracts, W, S),
+            {W1, S1}
+        end, {Warns0, Sites0}, Exprs).
+
+bin_element_exprs(Elements) ->
+    lists:append([[Expr | case Size of default -> []; _ -> [Size] end]
+                  || {bin_element, _, Expr, Size, _} <- Elements]).
+
+record_field_exprs(Fields) ->
+    [Expr || {record_field, _, _Key, Expr} <- Fields].
+
+%% Clauses whose patterns are matched against something unknown (funs, catch, receive, the `of` of a try): each pattern
+%% binds its variables to `any`, the guard is applied, the body is inferred; nothing flows out and nothing is reported
+%% about the clauses themselves.
+infer_nested_clauses(Mod, MFA, Clauses, Env0, Contracts, Warns0, Sites0) ->
+    lists:foldl(
+        fun({clause, _, Pats, Guards, Body}, {W, S}) ->
+                Env1 = lists:foldl(fun(Pat, E) -> {_, E1} = bind_pattern(Pat, any, E), E1 end, Env0, Pats),
+                case apply_guard_disjunction(Guards, Env1) of
+                    unreachable ->
+                        {W, S};
+                    {ok, Env2} ->
+                        {_, _, W1, S1} = infer_body(Mod, MFA, Body, Env2, Contracts, W, S),
+                        {W1, S1}
+                end
+        end, {Warns0, Sites0}, Clauses).
+
+%% [Template || Qualifiers]: generators bind their pattern to `any`, filters are expressions, the template is inferred last.
+infer_comprehension(Mod, MFA, Template, Qualifiers, Env0, Contracts, Warns0, Sites0) ->
+    {Env, Warns1, Sites1} = lists:foldl(
+        fun({Gen, _, Pat, Source}, {E, W, S}) when Gen =:= generate; Gen =:= generate_strict;
+                                                   Gen =:= b_generate; Gen =:= b_generate_strict ->
+                {_, _, W1, S1} = infer_expr(Mod, MFA, Source, E, Contracts, W, S),
+                {_, E1} = bind_pattern(Pat, any, E),
+                {E1, W1, S1};
+           (Filter, {E, W, S}) ->
+                {_, _, W1, S1} = infer_expr(Mod, MFA, Filter, E, Contracts, W, S),
+                {E, W1, S1}
+        end, {Env0, Warns0, Sites0}, Qualifiers),
+    {_, _, Warns, Sites} = infer_expr(Mod, MFA, Template, Env, Contracts, Warns1, Sites1),
+    {Warns, Sites}.
 
 infer_expr_list(Mod, MFA, Exprs, Env0, Contracts, Warns0, Sites0) ->
     lists:foldl(

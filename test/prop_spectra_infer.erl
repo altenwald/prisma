@@ -34,10 +34,11 @@ tag() -> oneof(?TAGS).
 %% With Rec the second argument is taken out of a record in the head, `#r{v = B}`: the variables of a record pattern are
 %% not in the inference environment, which is where the environment joins of guards go wrong.
 render({Stmts, Last}, Rec) ->
-    {Decl, Head} = case Rec of
-        true -> {"-record(r, {v}).\n", "f(A, #r{v = B})"};
-        false -> {"", "f(A, B)"}
+    Head = case Rec of
+        true -> "f(A, #r{v = B})";
+        false -> "f(A, B)"
     end,
+    Decl = "-record(r, {v}).\n",
     lists:flatten(["-module(MODNAME).\n-export([f/2]).\n", Decl, Head, " ->\n", string:join(Stmts, ",\n"),
                    ",\n    ", Last, ".\n"]).
 
@@ -95,11 +96,21 @@ stmt(V, K, Env) ->
     CellCase = ?LET(C, expr(cell, Env, 1),
                     {fmt("    ~s = case ~s of\n        [H~s | T~s] when is_integer(T~s) -> H~s + T~s\n    end",
                          [V, C, S, S, S, S, S]), int}),
+    %% The same call in several places: plain, in a fun, in a comprehension, in a record field. A failure inside any of these
+    %% propagates, so any argument types will do. Inside `try ... catch` a failure would be swallowed (and the run would look
+    %% fine), so there the arguments always fit a clause of the spec.
     CallStmts = case lists:keyfind(callee, 1, Env) of
         {callee, {Arity, Vecs}} ->
-            [?LET(ArgTags, frequency([{4, oneof(Vecs)}, {1, vector(Arity, oneof(?CALLEE_TAGS))}]),
+            Shapes = ["    ~s = CALLEE:g(~s)",
+                      "    ~s = (fun() -> CALLEE:g(~s) end)()",
+                      "    ~s = hd([CALLEE:g(~s) || _ <- [1]])",
+                      "    ~s = element(2, #r{v = CALLEE:g(~s)})"],
+            [?LET({Shape, ArgTags}, {oneof(Shapes), frequency([{4, oneof(Vecs)}, {1, vector(Arity, oneof(?CALLEE_TAGS))}])},
                   ?LET(Args, [expr(T, Env, 1) || T <- ArgTags],
-                       {fmt("    ~s = CALLEE:g(~s)", [V, string:join(Args, ", ")]), int}))];
+                       {fmt(Shape, [V, string:join(Args, ", ")]), int})),
+             ?LET(ArgTags, oneof(Vecs),
+                  ?LET(Args, [expr(T, Env, 1) || T <- ArgTags],
+                       {fmt("    ~s = try CALLEE:g(~s) catch _:_ -> 0 end", [V, string:join(Args, ", ")]), int}))];
         false ->
             []
     end,

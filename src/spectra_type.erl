@@ -440,6 +440,10 @@ meet_non_numeric({binary, B1, U1}, {binary, B2, U2}) ->
     {binary, erlang:max(B1, B2), erlang:min(U1, U2)};
 meet_non_numeric(any_tuple, {tuple, _} = T) -> T;
 meet_non_numeric({tuple, _} = T, any_tuple) -> T;
+meet_non_numeric({tuple, [Tag | _]}, {record, Name, _} = Record) ->
+    meet_tuple_with_record(Tag, Name, Record);
+meet_non_numeric({record, _, _} = Record, {tuple, [_ | _]} = Tuple) ->
+    meet_non_numeric(Tuple, Record);
 meet_non_numeric(any_tuple, {record, _, _} = R) -> R;
 meet_non_numeric({record, _, _} = R, any_tuple) -> R;
 meet_non_numeric({tuple, E1}, {tuple, E2}) when length(E1) =:= length(E2) ->
@@ -544,6 +548,15 @@ meet_tail({union, Members}, E, Tail) ->
     normalize_union([meet_tail(M, E, Tail) || M <- Members]);
 meet_tail(T, E, Tail) ->
     meet(T, {improper_list, E, Tail}).
+
+%% A tuple is a value of a record type when its first element can be the record's name. The arity and the position of each
+%% field are not known here: `{record, Name, Fields}` only lists the fields that the type mentions (`#r{}` lists none),
+%% so nothing more can be checked without the record definition.
+meet_tuple_with_record(Tag, Name, Record) ->
+    case meet(Tag, {atom_lit, Name}) of
+        none -> none;
+        _ -> Record
+    end.
 
 improper_chain(E, none) -> {list, E};
 improper_chain(E, Tail) -> {improper_list, E, Tail}.
