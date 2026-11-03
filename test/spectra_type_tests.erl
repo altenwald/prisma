@@ -345,12 +345,15 @@ widen_cuts_deep_types_test() ->
                  spectra_type:widen({union, [{atom_lit, a}, {list, {list, {list, {list, {list, integer}}}}}]})).
 
 widen_collapses_unions_with_too_many_members_test() ->
-    Atoms = [{atom_lit, list_to_atom("a" ++ integer_to_list(N))} || N <- lists:seq(1, 30)],
+    Atoms = [{atom_lit, list_to_atom("a" ++ integer_to_list(N))} || N <- lists:seq(1, 2000)],
     ?assertEqual(atom, spectra_type:widen({union, Atoms})),
-    Ints = [{int_lit, N} || N <- lists:seq(1, 30)],
+    Ints = [{int_lit, N} || N <- lists:seq(1, 2000)],
     ?assertEqual(integer, spectra_type:widen({union, Ints})),
     Tuples = [{tuple, [{atom_lit, list_to_atom("t" ++ integer_to_list(N))}, integer]} || N <- lists:seq(1, 30)],
     ?assertEqual(any, spectra_type:widen({union, Tuples})),
+    %% a spec may list a couple of hundred method names: a flat union of literals is kept
+    Names = [{atom_lit, list_to_atom("m" ++ integer_to_list(N))} || N <- lists:seq(1, 200)],
+    ?assertEqual({union, lists:sort(Names)}, spectra_type:widen({union, Names})),
     %% a few atoms are kept as they are
     Few = [{atom_lit, a}, {atom_lit, b}, {atom_lit, c}],
     ?assertEqual({union, Few}, spectra_type:widen({union, Few})).

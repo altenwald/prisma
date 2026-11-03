@@ -10,6 +10,7 @@
 -define(MAX_IMPROPER_MEET_DEPTH, 2).
 -define(WIDEN_DEPTH, 4).
 -define(WIDEN_MEMBERS, 16).
+-define(WIDEN_LITERALS, 1024).
 
 -export([
     from_abstract/1,
@@ -217,7 +218,11 @@ widen(_, 0) ->
 widen({union, Members}, Depth) ->
     %% a union is not a level of nesting: its members keep the depth
     case normalize_union([widen(M, Depth) || M <- Members]) of
-        {union, Many} when length(Many) > ?WIDEN_MEMBERS -> collapse_members(Many);
+        {union, Many} = U ->
+            case length(Many) > limit_of(Many) of
+                true -> collapse_members(Many);
+                false -> U
+            end;
         Other -> Other
     end;
 widen({tuple, Elems}, Depth) -> {tuple, [widen(E, Depth - 1) || E <- Elems]};
@@ -228,6 +233,14 @@ widen({map, Fields}, Depth) -> {map, [{Kind, widen(K, Depth - 1), widen(V, Depth
 widen({record, Name, Fields}, Depth) -> {record, Name, [{F, widen(T, Depth - 1)} || {F, T} <- Fields]};
 widen({fun_type, Args, Ret}, Depth) -> {fun_type, [widen(A, Depth - 1) || A <- Args], widen(Ret, Depth - 1)};
 widen(Other, _Depth) -> Other.
+
+%% A flat union of literals (the names of a protocol's methods, say) is cheap and a spec may list every one of them, so it
+%% is kept up to a much larger size; what made types explode was nesting, not width.
+limit_of(Members) ->
+    case lists:all(fun({atom_lit, _}) -> true; ({int_lit, _}) -> true; (_) -> false end, Members) of
+        true -> ?WIDEN_LITERALS;
+        false -> ?WIDEN_MEMBERS
+    end.
 
 collapse_members(Members) ->
     Collapsed = lists:map(fun({atom_lit, _}) -> atom; ({int_lit, _}) -> integer; (M) -> M end, Members),
