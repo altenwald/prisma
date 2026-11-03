@@ -41,7 +41,7 @@ defmodule Prisma.MixProject do
   defp docs do
     [
       main: "readme",
-      logo: "assets/logo.png",
+      logo: "assets/prisma.png",
       assets: %{"assets" => "assets"},
       source_url: @source_url,
       source_ref: "v#{@version}",

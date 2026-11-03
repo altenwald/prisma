@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Prisma Logo" width="160">
+  <img src="assets/prisma.png" alt="Prisma Logo" width="160">
 </p>
 
 # Prisma
