@@ -661,10 +661,44 @@ sudo cp _build/default/bin/spectra /usr/local/bin/</code></pre>
           <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-spectra-amber/10 border border-spectra-amber/30 text-spectra-amber text-xs font-semibold">
             <span>❤️ Backed by the Community</span>
           </div>
-          <h2 class="text-3xl sm:text-4xl font-extrabold text-base-content">Sponsor Spectra Development</h2>
+          <h2 class="text-3xl sm:text-4xl font-extrabold text-base-content">Sponsors &amp; Partners</h2>
           <p class="text-base text-base-content/70">
-            Spectra is free, open-source software created by Altenwald. Your sponsorship helps accelerate compiler optimizations, pre-built Hex .splt caches, and enterprise LSP tooling.
+            Spectra is free, open-source software created by Altenwald. Proudly supported and battle-tested by our founding partners and community sponsors.
           </p>
+        </div>
+
+        <!-- Featured Founding Sponsors: Altenwald & Dymmer -->
+        <div class="mb-14">
+          <div class="text-xs uppercase tracking-widest text-spectra-azure font-semibold text-center mb-6">Principal Sponsors &amp; Maintainers</div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 max-w-3xl mx-auto">
+            
+            <!-- Altenwald Card -->
+            <a href="https://altenwald.com" target="_blank" rel="noopener noreferrer" class="glass-card rounded-2xl p-6 flex flex-col items-center justify-center text-center group hover:border-spectra-azure transition-all duration-300 hover:-translate-y-1 shadow-md">
+              <div class="h-16 flex items-center justify-center mb-2">
+                <img src="assets/altenwald_logo_white.png" alt="Altenwald Logo" class="h-10 w-auto object-contain transition-transform group-hover:scale-105 duration-300" id="logo-altenwald">
+              </div>
+              <div class="font-bold text-base text-base-content group-hover:text-spectra-azure transition-colors flex items-center gap-1.5">
+                Altenwald
+                <svg class="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+              </div>
+              <span class="text-xs text-base-content/60 mt-1">Founding organization &amp; BEAM ecosystem research</span>
+              <span class="text-[11px] text-spectra-azure font-mono mt-2">altenwald.com</span>
+            </a>
+
+            <!-- Dymmer Card -->
+            <a href="https://dymmer.com" target="_blank" rel="noopener noreferrer" class="glass-card rounded-2xl p-6 flex flex-col items-center justify-center text-center group hover:border-spectra-azure transition-all duration-300 hover:-translate-y-1 shadow-md">
+              <div class="h-16 flex items-center justify-center mb-2">
+                <img src="assets/dymmer_logo_white.png" alt="Dymmer Logo" class="h-10 w-auto object-contain transition-transform group-hover:scale-105 duration-300" id="logo-dymmer">
+              </div>
+              <div class="font-bold text-base text-base-content group-hover:text-spectra-azure transition-colors flex items-center gap-1.5">
+                Dymmer
+                <svg class="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+              </div>
+              <span class="text-xs text-base-content/60 mt-1">High-performance production Elixir cloud infrastructure</span>
+              <span class="text-[11px] text-spectra-azure font-mono mt-2">dymmer.com</span>
+            </a>
+
+          </div>
         </div>
 
         <!-- Featured Sponsor Tier Cards -->
@@ -748,10 +782,16 @@ sudo cp _build/default/bin/spectra /usr/local/bin/</code></pre>
     // Theme Switcher Logic
     const themeToggle = document.getElementById('theme-toggle');
     themeToggle.addEventListener('change', function() {
+      const altenwaldLogo = document.getElementById('logo-altenwald');
+      const dymmerLogo = document.getElementById('logo-dymmer');
       if (this.checked) {
         document.documentElement.setAttribute('data-theme', 'corporate');
+        if (altenwaldLogo) altenwaldLogo.src = 'assets/altenwald_logo.png';
+        if (dymmerLogo) dymmerLogo.src = 'assets/dymmer_logo.png';
       } else {
         document.documentElement.setAttribute('data-theme', 'night');
+        if (altenwaldLogo) altenwaldLogo.src = 'assets/altenwald_logo_white.png';
+        if (dymmerLogo) dymmerLogo.src = 'assets/dymmer_logo_white.png';
       }
       renderChart(); // re-render chart to adapt colors
     });
