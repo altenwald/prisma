@@ -914,9 +914,17 @@ a_variable_that_is_already_bound_is_not_a_catch_all_test() ->
     ?assert(spectra_oracle:member(ok, Ret2)),
     ?assert(spectra_oracle:member(error, Ret2)).
 
-a_pattern_with_a_variable_subtracts_nothing_test() ->
+a_pattern_with_a_new_variable_subtracts_the_whole_tuple_test() ->
+    %% E is new: `{error, E}` takes every `{error, _}` out of what the next clause sees (this used to pass only because
+    %% the pattern bound E to `any` and the whole return became `any`)
     Ret = case_ret("    case ov_callee:g() of\n        {error, E} -> E;\n        Other -> Other\n    end"),
-    %% {error, E} might be an equality test on E: nothing is taken out, `{error, _}` stays possible in the second clause
+    ?assertNot(spectra_oracle:member({error, x}, Ret)),
+    ?assert(spectra_oracle:member(ok, Ret)),
+    ?assert(spectra_oracle:member({badrpc, x}, Ret)).
+
+a_pattern_with_a_bound_variable_subtracts_nothing_test() ->
+    %% E is already bound: `{error, E}` might be an equality test, nothing is taken out
+    Ret = case_ret("    E = x,\n    case ov_callee:g() of\n        {error, E} -> E;\n        Other -> Other\n    end"),
     ?assert(spectra_oracle:member({error, x}, Ret)),
     ?assert(spectra_oracle:member(ok, Ret)).
 
