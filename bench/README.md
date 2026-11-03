@@ -14,3 +14,10 @@ python3 bench/adapters.py spectra _build/default/lib/spectra/ebin
 ```
 
 Property tests (type algebra): `rebar3 as test proper -n 1000`.
+
+Mutation testing (false negatives):
+
+```bash
+escript bench/mutate.escript 1 25 bench/results/mut-main <ebin-dir>...   # seed, mutants per operator, output, ebins
+python3 bench/run_mutants.py bench/results/mut-main --workers 5
+```

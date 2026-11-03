@@ -218,10 +218,70 @@ Costs and losses, so nobody finds them by surprise:
 - **Depth.** The exact meet of two improper lists with list-able tails is cut at a nesting depth of 2 (counted across the recursion),
   then a safe superset; without the cut `compiler` took minutes.
 
+## False negatives: mutation testing
+
+The other half of the question: of the real faults, how many does Spectra see? `bench/mutate.escript` takes the compiled modules of a
+corpus, injects **one** fault in the abstract code (keeping every line number) and writes the mutant; `bench/run_mutants.py` puts it in a
+copy of the application's `ebin`, runs Spectra and Dialyzer over the directory and counts a fault as **detected** when the tool gives, inside
+the mutated function, a warning it did not give for the unmodified directory. `erlc` is counted too, but only for warnings that say the
+code fails (the mutation also causes unused-variable warnings, which are not detection).
+
+Five operators, each a fault that cannot succeed whenever it runs (under the `-spec`, or under the BIF):
+
+| Operator | Fault |
+| :--- | :--- |
+| `r1` | a function whose `-spec` returns a simple type (`binary()`, `integer()`, a tuple...) returns an atom |
+| `r2` | a call passes an atom where the callee's `-spec` asks for a simple type |
+| `r3` | a BIF gets an argument of the wrong type (`length(foo)`, `byte_size(foo)`...) |
+| `r4` | a call to a function that does not exist, in a module of the corpus |
+| `r6` | `{Tag, X} = f(...)` with a `Tag` that the `-spec` of `f` never returns |
+
+Sample: seed 1, up to 25 mutants per operator over `ra`, `khepri`, `cuttlefish`, `cowlib` and `ranch` (144 modules): **125 mutants**.
+
+| Operator | Mutants | Spectra | Dialyzer | erlc |
+| :--- | :---: | :---: | :---: | :---: |
+| `r1` spec return | 25 | 25 | 25 | 0 |
+| `r2` argument vs spec | 25 | 21 | 24 | 0 |
+| `r3` BIF argument | 25 | 6 | 24 | 23 |
+| `r4` missing function | 25 | 0 | 25 | 0 |
+| `r6` pattern vs spec | 25 | 0 | 25 | 0 |
+| **all** | **125** | **52 (42%)** | **123 (98%)** | **23 (18%)** |
+
+Together Spectra and Dialyzer detect all 125; Spectra alone sees two that Dialyzer does not (a call in the generated `conf_parse` and a
+`byte_size` in `cow_qpack`), Dialyzer alone sees 73. So on this sample **Spectra misses most of what Dialyzer finds**. But the misses are not
+spread out, they follow one thing: where the fault is.
+
+| Where the fault is | Mutants | Spectra | Dialyzer |
+| :--- | :---: | :---: | :---: |
+| plain function body, `r1`-`r3` | 52 | **52** | 50 |
+| plain function body, `r4`, `r6` | 41 | 0 | 41 |
+| inside a guard | 17 | 0 | 17 |
+| inside an anonymous `fun` | 9 | 0 | 9 |
+| inside `try ... of` | 5 | 0 | 5 |
+| inside a record field | 1 | 0 | 1 |
+
+Where Spectra looks, it finds them (52 of 52, two more than Dialyzer). The 73 misses come from four gaps, each reproduced by a few lines in
+[`bench/repro/false_negatives/`](bench/repro/false_negatives/README.md):
+
+1. **Calls inside `fun`, `try` and record fields are not checked** (15 mutants; also part of the `r4` and `r6` ones in those contexts). Not
+   investigated further: the construct is simply not reported.
+2. **BIF arguments in guards are not checked** (17 mutants, all `r3`): a clause with `when length(foo) > N` can never match and Spectra says nothing.
+3. **A call to a function that does not exist is not reported** (`r4`, 25 mutants): the checker looks the callee up in the `.splt` and, when it
+   is not there, stays silent. This is what `xref` is for; Spectra has an `unknown_function` kind and never produces it for this.
+4. **The return type of a call to another module is `any`** (`r6`, 25 mutants): inference only knows the contracts of the module it is
+   analyzing, so `{ok, V} = other:f()` is never compared with the `-spec` of `other:f/0`.
+
+What this sample does not say: 125 mutants of five kinds, injected on purpose, are not the distribution of real bugs; "must fail" is by contract
+or by BIF, so a mutant on code that is never reached still counts; Dialyzer ran with its default warnings and the erts/kernel/stdlib PLT; and the
+new warnings that each tool gives *outside* the mutated function (6 for Spectra, 201 for Dialyzer) were counted but not analyzed (most are probably
+consequences, such as a caller of a function that now returns an atom). One correction made on the way: the first version of the runner
+looked for warnings between the first and the last line of the function and **missed Dialyzer's invalid-spec warnings, which sit on the `-spec`
+line**, so it undercounted Dialyzer (14 of 18 on a small sample instead of 18); it was caught by looking at the mutants one by one before running the
+big batch.
+
 ## Not yet measured
 
 - Gradual contract mismatches (115 on `rabbit`) against Gradualizer: not installed where it can be found.
 - Oxbow (80 on `rabbit`) against xref's unused locals: xref reports 0 because the compiler already warns on them, so the
   80 are mostly "ignored parameter" findings, which have no counterpart in the other tools.
-- False negatives: needs the seeded-fault corpus.
 - Dialyzer with a full PLT of the dependencies (this run lacks it, so it sees fewer calls).
