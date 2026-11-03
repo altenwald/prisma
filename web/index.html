@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="night">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spectra — Fast Modular Type & Spec Analyzer for Erlang & Elixir</title>
+  <meta name="description" content="Hybrid Success & Gradual Type Analyzer with Modular .splt PLTs for Erlang and Elixir. 10.3x faster than Dialyzer.">
+  <link rel="icon" type="image/png" href="assets/logo.png">
+
+  <!-- Tailwind CSS & DaisyUI via CDN -->
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- D3.js for interactive benchmark charts -->
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: ['class', '[data-theme="night"]'],
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            spectra: {
+              navy: '#1b3566',
+              dark: '#0a1226',
+              card: '#131e3a',
+              blue: '#2563eb',
+              azure: '#38bdf8',
+              ice: '#eef5ff',
+              amber: '#f5962a',
+              teal: '#1fb5a8',
+              purple: '#7b6cf0',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    code, pre { font-family: 'JetBrains Mono', monospace; }
+    .glass-card {
+      background: var(--fallback-b1,oklch(var(--b1)/0.75));
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--fallback-bc,oklch(var(--bc)/0.12));
+    }
+    .hero-glow {
+      position: absolute;
+      width: 650px;
+      height: 650px;
+      background: radial-gradient(circle, rgba(37, 99, 235, 0.22) 0%, rgba(56, 189, 248, 0.08) 45%, rgba(0,0,0,0) 70%);
+      top: -100px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 0;
+      pointer-events: none;
+    }
+    .d3-tooltip {
+      position: absolute;
+      text-align: center;
+      padding: 8px 12px;
+      font-size: 12px;
+      background: #0f172a;
+      color: #ffffff;
+      border: 1px solid #38bdf8;
+      border-radius: 8px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+      z-index: 50;
+    }
+  </style>
+</head>
+<body class="bg-base-200 text-base-content min-h-screen flex flex-col selection:bg-spectra-azure selection:text-spectra-dark relative overflow-x-hidden">
+
+  <!-- Ambient Light Effect -->
+  <div class="hero-glow"></div>
+
+  <!-- ================= NAVBAR ================= -->
+  <header class="sticky top-0 z-50 backdrop-blur-md bg-base-100/80 border-b border-base-content/10 transition-colors">
+    <div class="navbar max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="navbar-start flex items-center gap-3">
+        <a href="#" class="flex items-center gap-3 group">
+          <img src="assets/logo.svg" alt="Spectra Logo" class="w-10 h-10 transition-transform group-hover:scale-105 duration-300 drop-shadow">
+          <div class="flex flex-col">
+            <span class="font-bold text-xl tracking-tight text-base-content flex items-center gap-1.5">
+              Spectra
+              <span class="badge badge-sm badge-info font-mono text-[10px] text-white bg-spectra-blue border-none">v0.1.0</span>
+            </span>
+            <span class="text-[10px] uppercase tracking-wider text-spectra-azure font-medium hidden sm:block">Altenwald Ecosystem</span>
+          </div>
+        </a>
+      </div>
+
+      <div class="navbar-center hidden lg:flex">
+        <ul class="menu menu-horizontal px-1 font-medium gap-1 text-sm">
+          <li><a href="#features" class="hover:text-spectra-azure transition-colors">Features</a></li>
+          <li><a href="#architecture" class="hover:text-spectra-azure transition-colors">Architecture</a></li>
+          <li><a href="#benchmarks" class="hover:text-spectra-azure transition-colors">Benchmarks</a></li>
+          <li><a href="#usage" class="hover:text-spectra-azure transition-colors">Quickstart</a></li>
+          <li><a href="#sponsors" class="hover:text-spectra-amber transition-colors">Sponsors</a></li>
+        </ul>
+      </div>
+
+      <div class="navbar-end flex items-center gap-3">
+        <!-- Theme Toggle -->
+        <label class="swap swap-rotate btn btn-ghost btn-circle btn-sm" title="Toggle Light / Dark mode">
+          <input type="checkbox" id="theme-toggle" />
+          <!-- sun icon (light mode active) -->
+          <svg class="swap-on fill-current w-5 h-5 text-amber-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5.64,17l-.71.71a1,1,0,0,0,0,1.41,1,1,0,0,0,1.41,0l.71-.71A1,1,0,0,0,5.64,17ZM5,12a1,1,0,0,0-1-1H3a1,1,0,0,0,0,2H4A1,1,0,0,0,5,12Zm7-7a1,1,0,0,0,1-1V3a1,1,0,0,0-2,0V4A1,1,0,0,0,12,5ZM6.34,6.34A1,1,0,0,0,4.93,4.93L4.22,5.64A1,1,0,0,0,5.64,7.05Zm12,.71.71-.71a1,1,0,1,0-1.41-1.41l-.71.71A1,1,0,0,0,18.36,7.05Zm-5.72,12.7A1,1,0,0,0,12,19a1,1,0,0,0-1,1v1a1,1,0,0,0,2,0Zm7.72-7.76A1,1,0,0,0,19,12H18a1,1,0,0,0,0,2h1A1,1,0,0,0,20.36,12.99ZM12,6.5A5.5,5.5,0,1,0,17.5,12,5.51,5.51,0,0,0,12,6.5Zm0,9A3.5,3.5,0,1,1,15.5,12,3.5,3.5,0,0,1,12,15.5Z"/></svg>
+          <!-- moon icon (dark mode active) -->
+          <svg class="swap-off fill-current w-5 h-5 text-sky-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21.64,13a1,1,0,0,0-1.05-.14,8.05,8.05,0,0,1-3.37.73A8.15,8.15,0,0,1,9.08,5.49a8.59,8.59,0,0,1,.25-2A1,1,0,0,0,8,2.36,10.14,10.14,0,1,0,22,14.05,1,1,0,0,0,21.64,13Zm-9.5,6.69A8.14,8.14,0,0,1,7.08,5.22v.27A10.15,10.15,0,0,0,17.22,15.63a9.79,9.79,0,0,0,2.1-.22A8.11,8.11,0,0,1,12.14,19.73Z"/></svg>
+        </label>
+
+        <!-- GitHub Link -->
+        <a href="https://github.com/altenwald/spectra" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline border-base-content/20 hover:border-spectra-azure hover:bg-spectra-azure/10 gap-2">
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          <span class="hidden sm:inline">GitHub</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-grow">
+
+    <!-- ================= HERO SECTION ================= -->
+    <section class="relative pt-12 pb-20 sm:pt-20 sm:pb-28 overflow-hidden">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+          
+          <!-- Hero Text -->
+          <div class="lg:col-span-7 text-center lg:text-left space-y-6">
+            <!-- Badge -->
+            <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-spectra-azure/10 border border-spectra-azure/30 text-spectra-azure text-xs font-semibold tracking-wide">
+              <span class="inline-block w-2 h-2 rounded-full bg-spectra-azure animate-pulse"></span>
+              10.3× Faster than Dialyzer • Erlang & Elixir Ready
+            </div>
+
+            <h1 class="text-4xl sm:text-6xl font-extrabold tracking-tight text-base-content leading-[1.1]">
+              Fast, Modular Type &amp; Spec Analysis <span class="bg-gradient-to-r from-spectra-azure via-blue-500 to-spectra-purple bg-clip-text text-transparent">without the wait</span>.
+            </h1>
+
+            <p class="text-lg sm:text-xl text-base-content/80 max-w-2xl mx-auto lg:mx-0 leading-relaxed font-normal">
+              Spectra combines the sound pragmatism of <strong class="text-base-content">Success Typing</strong>, the contract guarantees of <strong class="text-base-content">Gradual Typing</strong>, and isolated <strong class="text-spectra-azure">.splt</strong> caches to deliver sub-second static verification with <span class="text-spectra-amber font-semibold">zero false positives</span>.
+            </p>
+
+            <!-- Actions -->
+            <div class="flex flex-wrap items-center justify-center lg:justify-start gap-4 pt-2">
+              <a href="#usage" class="btn btn-primary bg-spectra-blue hover:bg-blue-600 border-none text-white px-7 shadow-lg shadow-blue-500/25">
+                Get Started
+                <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+              </a>
+              <a href="#benchmarks" class="btn btn-outline border-base-content/20 hover:border-spectra-azure hover:bg-spectra-azure/10">
+                View Benchmarks
+              </a>
+              <a href="https://hex.pm/packages/spectra" target="_blank" class="btn btn-ghost hover:bg-base-300 gap-1 text-sm">
+                <img src="https://img.shields.io/hexpm/v/spectra.svg?label=hex&color=38bdf8" alt="Hex Version" class="h-5">
+              </a>
+            </div>
+
+            <!-- Highlights Pill -->
+            <div class="pt-4 flex flex-wrap justify-center lg:justify-start gap-6 text-xs text-base-content/70">
+              <div class="flex items-center gap-1.5">
+                <svg class="w-4 h-4 text-spectra-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                <span>Zero Monolithic PLT Rebuilds</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <svg class="w-4 h-4 text-spectra-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                <span>Dead Oxbow Elimination</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <svg class="w-4 h-4 text-spectra-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                <span>Erlang &amp; Elixir 1st Class</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Hero Graphic / Interactive CLI Showcase -->
+          <div class="lg:col-span-5 flex flex-col items-center">
+            <!-- Logo Presentation Card -->
+            <div class="relative w-full max-w-md">
+              <div class="absolute -inset-1 bg-gradient-to-r from-spectra-blue to-spectra-azure rounded-2xl blur-xl opacity-25 animate-pulse"></div>
+              
+              <div class="relative glass-card rounded-2xl p-6 shadow-2xl flex flex-col items-center">
+                <!-- 3D Logo -->
+                <div class="w-48 h-48 sm:w-56 sm:h-56 flex items-center justify-center p-2 mb-4">
+                  <img src="assets/logo.png" alt="Spectra 3D Crystal Logo" class="w-full h-full object-contain filter drop-shadow-[0_15px_25px_rgba(37,99,235,0.35)] transition-transform duration-500 hover:scale-105">
+                </div>
+
+                <!-- Live Command Demo Box (Always crisp dark terminal) -->
+                <div class="w-full bg-[#0a0f1d] rounded-xl p-4 border border-slate-700/50 font-mono text-xs shadow-inner">
+                  <div class="flex items-center justify-between pb-3 border-b border-slate-800 mb-3 text-slate-400">
+                    <div class="flex items-center gap-1.5">
+                      <span class="w-2.5 h-2.5 rounded-full bg-red-500/80"></span>
+                      <span class="w-2.5 h-2.5 rounded-full bg-yellow-500/80"></span>
+                      <span class="w-2.5 h-2.5 rounded-full bg-green-500/80"></span>
+                    </div>
+                    <span>terminal — zsh</span>
+                  </div>
+                  
+                  <div class="space-y-1.5 text-left">
+                    <p class="text-spectra-azure font-semibold">$ mix spectra</p>
+                    <p class="text-slate-400">==&gt; Loading 18 modular .splt dependency caches...</p>
+                    <p class="text-slate-400">==&gt; Analyzing 42 project modules (success typing &amp; specs)...</p>
+                    <p class="text-spectra-teal font-semibold">✔ Analysis completed in 0.28s</p>
+                    <p class="text-slate-200">0 discrepancies, 0 contract violations, 0 oxbow dead clauses.</p>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= METRICS BANNER ================= -->
+    <section class="border-y border-base-content/10 bg-base-100/60 py-10">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
+          <div class="space-y-1">
+            <div class="text-3xl sm:text-4xl font-extrabold text-spectra-azure font-mono">10.3×</div>
+            <div class="text-xs uppercase tracking-wider text-base-content/60 font-medium">Faster Wall-Clock Time</div>
+          </div>
+          <div class="space-y-1">
+            <div class="text-3xl sm:text-4xl font-extrabold text-spectra-teal font-mono">28.1×</div>
+            <div class="text-xs uppercase tracking-wider text-base-content/60 font-medium">Less CPU Consumption</div>
+          </div>
+          <div class="space-y-1">
+            <div class="text-3xl sm:text-4xl font-extrabold text-spectra-purple font-mono">2.9×</div>
+            <div class="text-xs uppercase tracking-wider text-base-content/60 font-medium">Less Peak Memory (RAM)</div>
+          </div>
+          <div class="space-y-1">
+            <div class="text-3xl sm:text-4xl font-extrabold text-spectra-amber font-mono">0.00%</div>
+            <div class="text-xs uppercase tracking-wider text-base-content/60 font-medium">False Positive Goal</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= FEATURES GRID ================= -->
+    <section id="features" class="py-24 relative">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        
+        <div class="text-center max-w-3xl mx-auto mb-16 space-y-4">
+          <h2 class="text-xs font-bold uppercase tracking-widest text-spectra-azure">Engineered for Velocity &amp; Precision</h2>
+          <p class="text-3xl sm:text-4xl font-extrabold text-base-content">Why BEAM developers choose Spectra</p>
+          <p class="text-base text-base-content/70">Static typing on the BEAM shouldn't bring your local loop or CI pipelines to a grinding halt.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          
+          <!-- Card 1 -->
+          <div class="glass-card rounded-2xl p-7 transition-all duration-300 hover:-translate-y-1 hover:border-spectra-azure/40 shadow-sm">
+            <div class="w-12 h-12 rounded-xl bg-spectra-blue/20 text-spectra-azure flex items-center justify-center mb-6">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            </div>
+            <h3 class="text-xl font-bold text-base-content mb-2">Sub-Second Execution</h3>
+            <p class="text-sm text-base-content/70 leading-relaxed">
+              Analyzes hundreds of BEAM modules in under 1 second. On RabbitMQ's primary broker server (245 modules), Spectra finishes in <strong>856 ms</strong> where Dialyzer takes <strong>8.78 seconds</strong>.
+            </p>
+          </div>
+
+          <!-- Card 2 -->
+          <div class="glass-card rounded-2xl p-7 transition-all duration-300 hover:-translate-y-1 hover:border-spectra-azure/40 shadow-sm">
+            <div class="w-12 h-12 rounded-xl bg-spectra-teal/20 text-spectra-teal flex items-center justify-center mb-6">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V7c0-2-1-3-3-3H7c-2 0-3 1-3 3zm0 5h16"/></svg>
+            </div>
+            <h3 class="text-xl font-bold text-base-content mb-2">Modular .splt Architecture</h3>
+            <p class="text-sm text-base-content/70 leading-relaxed">
+              Each package in <code>mix.lock</code> or <code>rebar.lock</code> compiles to an isolated binary <code>.splt</code> lookup file. When dependencies don't change, they are loaded instantly without recompilation.
+            </p>
+          </div>
+
+          <!-- Card 3 -->
+          <div class="glass-card rounded-2xl p-7 transition-all duration-300 hover:-translate-y-1 hover:border-spectra-azure/40 shadow-sm">
+            <div class="w-12 h-12 rounded-xl bg-spectra-amber/20 text-spectra-amber flex items-center justify-center mb-6">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            </div>
+            <h3 class="text-xl font-bold text-base-content mb-2">Zero False Positives</h3>
+            <p class="text-sm text-base-content/70 leading-relaxed">
+              Built on Fernando Benavides &amp; Laura Castro's <em>"Highest Degree of Certainty"</em> principle: if Spectra flags dead code or contract failure, you can <em>kill it with fire</em> with absolute confidence.
+            </p>
+          </div>
+
+          <!-- Card 4 -->
+          <div class="glass-card rounded-2xl p-7 transition-all duration-300 hover:-translate-y-1 hover:border-spectra-azure/40 shadow-sm">
+            <div class="w-12 h-12 rounded-xl bg-spectra-purple/20 text-spectra-purple flex items-center justify-center mb-6">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+            </div>
+            <h3 class="text-xl font-bold text-base-content mb-2">Hybrid Verification</h3>
+            <p class="text-sm text-base-content/70 leading-relaxed">
+              Switch freely between <code>discrepancy</code> (Success Typing fixpoint), <code>gradual</code> (consistency subtyping relation ~ for -spec/@spec contracts), or <code>hybrid</code> for full coverage.
+            </p>
+          </div>
+
+          <!-- Card 5 -->
+          <div class="glass-card rounded-2xl p-7 transition-all duration-300 hover:-translate-y-1 hover:border-spectra-azure/40 shadow-sm">
+            <div class="w-12 h-12 rounded-xl bg-blue-500/20 text-blue-500 flex items-center justify-center mb-6">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+            </div>
+            <h3 class="text-xl font-bold text-base-content mb-2">Native Elixir &amp; Erlang</h3>
+            <p class="text-sm text-base-content/70 leading-relaxed">
+              Full awareness of Elixir SSA variable scoping, struct wildcards <code>%_{}</code>, default argument trampolines, and protocol behaviors alongside classic Erlang records and specs.
+            </p>
+          </div>
+
+          <!-- Card 6 -->
+          <div class="glass-card rounded-2xl p-7 transition-all duration-300 hover:-translate-y-1 hover:border-spectra-azure/40 shadow-sm">
+            <div class="w-12 h-12 rounded-xl bg-pink-500/20 text-pink-500 flex items-center justify-center mb-6">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+            </div>
+            <h3 class="text-xl font-bold text-base-content mb-2">Developer Friendly Outputs</h3>
+            <p class="text-sm text-base-content/70 leading-relaxed">
+              Colorized human-readable diffs with natural Elixir/Erlang type signatures, compact <code>oneline</code> for vim/VSCode diagnostics, and structured <code>json</code> for CI automation with <code>NO_COLOR</code> support.
+            </p>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= ARCHITECTURE & HOW IT WORKS ================= -->
+    <section id="architecture" class="py-24 bg-base-100/60 border-t border-base-content/10">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        
+        <div class="text-center max-w-3xl mx-auto mb-16 space-y-4">
+          <h2 class="text-xs font-bold uppercase tracking-widest text-spectra-azure">Under the Hood</h2>
+          <p class="text-3xl sm:text-4xl font-extrabold text-base-content">How Modular .splt Beats Monolithic PLTs</p>
+          <p class="text-base text-base-content/70">A paradigm shift from monolithic rebuild loops to incremental, isolated binary contracts.</p>
+        </div>
+
+        <!-- Comparative Visual Diagram -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-16">
+          
+          <!-- Dialyzer Flow -->
+          <div class="glass-card rounded-2xl p-6 border-red-500/20 shadow-sm">
+            <div class="flex items-center justify-between pb-4 border-b border-base-content/10 mb-6">
+              <span class="font-bold text-red-500 flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                Traditional Dialyzer (Monolithic PLT)
+              </span>
+              <span class="badge badge-error badge-outline text-xs">High Overhead</span>
+            </div>
+
+            <div class="space-y-4 text-xs">
+              <div class="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                <div class="font-semibold text-red-500 mb-1">1. Massive Monolithic PLT File</div>
+                <p class="text-base-content/70">Single <code>.dialyzer_plt</code> file containing Erlang/OTP base (erts, kernel, stdlib) + all project dependencies combined into one binary blob (often 100MB+).</p>
+              </div>
+
+              <div class="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                <div class="font-semibold text-red-500 mb-1">2. Redundant Full-Scale Rebuilds</div>
+                <p class="text-base-content/70">Bumping or changing a single transitive dependency invalidates the cache, requiring minutes or hours of re-analysis on clean CI runners.</p>
+              </div>
+
+              <div class="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                <div class="font-semibold text-red-500 mb-1">3. Heavy CPU &amp; Memory Consumption</div>
+                <p class="text-base-content/70">Dialyzer loads the entire dependency graph into memory for each analysis (e.g. 1.28 GB RAM and 75.6s CPU on RabbitMQ core).</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Spectra Flow -->
+          <div class="glass-card rounded-2xl p-6 border-spectra-azure/30 shadow-sm">
+            <div class="flex items-center justify-between pb-4 border-b border-base-content/10 mb-6">
+              <span class="font-bold text-spectra-azure flex items-center gap-2">
+                <svg class="w-5 h-5 text-spectra-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                Spectra Architecture (Modular .splt)
+              </span>
+              <span class="badge badge-info badge-outline text-xs">Sub-Second</span>
+            </div>
+
+            <div class="space-y-4 text-xs">
+              <div class="p-3 rounded-lg bg-blue-500/10 border border-spectra-azure/30">
+                <div class="font-semibold text-spectra-azure mb-1">1. Isolated Per-Package .splt Files</div>
+                <p class="text-base-content/70">Every dependency in <code>mix.lock</code>/<code>rebar.lock</code> has its own persistent <code>.splt</code> containing canonical contracts and export types.</p>
+              </div>
+
+              <div class="p-3 rounded-lg bg-blue-500/10 border border-spectra-azure/30">
+                <div class="font-semibold text-spectra-azure mb-1">2. Zero Redundant Work</div>
+                <p class="text-base-content/70">Spectra checks version hashes. Only modified code is analyzed; untouched dependencies are reused directly from local disk.</p>
+              </div>
+
+              <div class="p-3 rounded-lg bg-blue-500/10 border border-spectra-azure/30">
+                <div class="font-semibold text-spectra-azure mb-1">3. Millisecond In-Memory Merging</div>
+                <p class="text-base-content/70">Dependency contracts are dynamically merged into an in-memory ETS lookup table in ~15 ms, focusing CPU cycles purely on application code.</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 5-Stage Pipeline Visual Flow -->
+        <div class="glass-card rounded-2xl p-8 shadow-sm">
+          <h3 class="text-xl font-bold text-base-content mb-6 text-center">The Spectra 5-Stage Verification Pipeline</h3>
+          
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            
+            <div class="p-4 rounded-xl bg-base-200/80 border border-base-content/10 text-center space-y-2">
+              <div class="w-8 h-8 rounded-full bg-spectra-azure/20 text-spectra-azure font-bold text-sm flex items-center justify-center mx-auto">1</div>
+              <div class="font-semibold text-base-content text-sm">AST Extraction</div>
+              <div class="text-[11px] text-base-content/60">Reads <code>abstract_code</code> and Elixir <code>Dbgi</code> chunks without runtime dependency.</div>
+            </div>
+
+            <div class="p-4 rounded-xl bg-base-200/80 border border-base-content/10 text-center space-y-2">
+              <div class="w-8 h-8 rounded-full bg-spectra-azure/20 text-spectra-azure font-bold text-sm flex items-center justify-center mx-auto">2</div>
+              <div class="font-semibold text-base-content text-sm">.splt Resolution</div>
+              <div class="text-[11px] text-base-content/60">Resolves lockfiles, loads cached modular contracts, dynamic in-memory union.</div>
+            </div>
+
+            <div class="p-4 rounded-xl bg-base-200/80 border border-base-content/10 text-center space-y-2">
+              <div class="w-8 h-8 rounded-full bg-spectra-azure/20 text-spectra-azure font-bold text-sm flex items-center justify-center mx-auto">3</div>
+              <div class="font-semibold text-base-content text-sm">Success Typing</div>
+              <div class="text-[11px] text-base-content/60">Fixpoint inference over pattern matches, guards, BIFs, and cross-module calls.</div>
+            </div>
+
+            <div class="p-4 rounded-xl bg-base-200/80 border border-base-content/10 text-center space-y-2">
+              <div class="w-8 h-8 rounded-full bg-spectra-azure/20 text-spectra-azure font-bold text-sm flex items-center justify-center mx-auto">4</div>
+              <div class="font-semibold text-base-content text-sm">Gradual Checking</div>
+              <div class="text-[11px] text-base-content/60">Consistency subtyping (~) verification against <code>-spec</code> and <code>@spec</code>.</div>
+            </div>
+
+            <div class="p-4 rounded-xl bg-base-200/80 border border-base-content/10 text-center space-y-2">
+              <div class="w-8 h-8 rounded-full bg-spectra-azure/20 text-spectra-azure font-bold text-sm flex items-center justify-center mx-auto">5</div>
+              <div class="font-semibold text-base-content text-sm">Oxbow Pruning</div>
+              <div class="text-[11px] text-base-content/60">Detects unused private functions and ignored parameters with highest certainty.</div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ================= BENCHMARK SECTION WITH D3.JS ================= -->
+    <section id="benchmarks" class="py-24 relative">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        
+        <div class="text-center max-w-3xl mx-auto mb-12 space-y-4">
+          <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-spectra-teal/10 border border-spectra-teal/30 text-spectra-teal text-xs font-semibold">
+            <span>🔬 Hyperfine 2.0.0 Measured</span>
+          </div>
+          <h2 class="text-3xl sm:text-4xl font-extrabold text-base-content">RabbitMQ Server Performance Benchmark</h2>
+          <p class="text-base text-base-content/70">
+            Real-world benchmark executed against the official RabbitMQ server monorepo (1,310 Erlang modules, 438,156 LoC) on Apple M1 macOS 27 (Erlang/OTP 29, 64-bit, JIT).
+          </p>
+        </div>
+
+        <!-- Benchmark Controls & Chart Card -->
+        <div class="glass-card rounded-2xl p-6 sm:p-8 mb-12 shadow-sm">
+          
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-base-content/10 mb-6">
+            <!-- Dataset Toggle -->
+            <div class="join bg-base-300 p-1 rounded-xl">
+              <button id="btn-ds-broker" class="btn btn-sm join-item btn-primary text-xs" onclick="switchDataset('broker')">
+                RabbitMQ Broker (245 modules)
+              </button>
+              <button id="btn-ds-core" class="btn btn-sm join-item btn-ghost text-xs" onclick="switchDataset('core')">
+                Monorepo Apps (440 modules)
+              </button>
+            </div>
+
+            <!-- Metric Toggle -->
+            <div class="join bg-base-300 p-1 rounded-xl">
+              <button id="btn-metric-time" class="btn btn-sm join-item btn-active text-xs" onclick="switchMetric('time')">
+                Wall-Clock Time (s)
+              </button>
+              <button id="btn-metric-cpu" class="btn btn-sm join-item btn-ghost text-xs" onclick="switchMetric('cpu')">
+                Total CPU (s)
+              </button>
+              <button id="btn-metric-ram" class="btn btn-sm join-item btn-ghost text-xs" onclick="switchMetric('ram')">
+                Peak RAM (MiB)
+              </button>
+            </div>
+          </div>
+
+          <!-- Chart Area -->
+          <div class="relative w-full">
+            <div id="chart-container" class="w-full h-72 sm:h-80"></div>
+            <!-- D3 Tooltip -->
+            <div id="d3-tooltip" class="d3-tooltip"></div>
+          </div>
+
+          <!-- Context explanation of current chart -->
+          <div id="chart-caption" class="text-center text-xs text-base-content/70 mt-4 font-mono">
+            Loading benchmark metrics...
+          </div>
+
+        </div>
+
+        <!-- Detailed Comparative Table -->
+        <div class="glass-card rounded-2xl overflow-hidden shadow-sm">
+          <div class="p-6 border-b border-base-content/10 flex items-center justify-between">
+            <h3 class="font-bold text-base-content text-base">Comprehensive Telemetry Comparison</h3>
+            <span class="text-xs text-spectra-azure font-mono">Commit 5dacb85 (RabbitMQ)</span>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="table table-zebra w-full text-sm">
+              <thead>
+                <tr class="text-base-content/60 text-xs uppercase border-b border-base-content/10">
+                  <th class="py-4">Benchmark Metric</th>
+                  <th>Spectra (245 mod)</th>
+                  <th>Dialyzer (245 mod)</th>
+                  <th>Spectra (440 mod)</th>
+                  <th>Dialyzer (440 mod)</th>
+                  <th>Spectra Advantage</th>
+                </tr>
+              </thead>
+              <tbody class="font-mono text-xs">
+                <tr>
+                  <td class="font-sans font-semibold text-base-content">Wall-Clock Time (mean)</td>
+                  <td class="text-spectra-teal font-bold">856.2 ms</td>
+                  <td class="text-red-500 font-bold">8,781.6 ms</td>
+                  <td class="text-spectra-teal font-bold">3.922 s</td>
+                  <td class="text-red-500 font-bold">20.722 s</td>
+                  <td class="text-spectra-azure font-bold">5.3× — 10.3× faster</td>
+                </tr>
+                <tr>
+                  <td class="font-sans font-semibold text-base-content">Total CPU Time</td>
+                  <td class="text-spectra-teal font-bold">1.011 s</td>
+                  <td class="text-red-500 font-bold">28.420 s</td>
+                  <td class="text-spectra-teal font-bold">4.046 s</td>
+                  <td class="text-red-500 font-bold">75.648 s</td>
+                  <td class="text-spectra-azure font-bold">18.7× — 28.1× less CPU</td>
+                </tr>
+                <tr>
+                  <td class="font-sans font-semibold text-base-content">Peak Memory (RSS)</td>
+                  <td class="text-spectra-teal font-bold">319.4 MiB</td>
+                  <td class="text-red-500 font-bold">372.5 MiB</td>
+                  <td class="text-spectra-teal font-bold">441.0 MiB</td>
+                  <td class="text-red-500 font-bold">1,286.8 MiB</td>
+                  <td class="text-spectra-azure font-bold">Up to 2.9× less RAM</td>
+                </tr>
+                <tr>
+                  <td class="font-sans font-semibold text-base-content">CPU Cycles</td>
+                  <td class="text-spectra-teal font-bold">2.96 B</td>
+                  <td class="text-red-500 font-bold">74.5 B</td>
+                  <td class="text-spectra-teal font-bold">12.1 B</td>
+                  <td class="text-red-500 font-bold">196.4 B</td>
+                  <td class="text-spectra-azure font-bold">16× — 25× fewer cycles</td>
+                </tr>
+                <tr>
+                  <td class="font-sans font-semibold text-base-content">Instructions Retired</td>
+                  <td class="text-spectra-teal font-bold">7.59 B</td>
+                  <td class="text-red-500 font-bold">177.5 B</td>
+                  <td class="text-spectra-teal font-bold">29.8 B</td>
+                  <td class="text-red-500 font-bold">482.1 B</td>
+                  <td class="text-spectra-azure font-bold">23× fewer instructions</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ================= USAGE & QUICKSTART ================= -->
+    <section id="usage" class="py-24 bg-base-100/60 border-t border-base-content/10">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        
+        <div class="text-center max-w-3xl mx-auto mb-16 space-y-4">
+          <h2 class="text-xs font-bold uppercase tracking-widest text-spectra-azure">Seamless Integration</h2>
+          <p class="text-3xl sm:text-4xl font-extrabold text-base-content">Start Using Spectra in Seconds</p>
+          <p class="text-base text-base-content/70">Add Spectra to your existing Erlang or Elixir project with zero configuration required.</p>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          
+          <!-- Rebar3 Plugin -->
+          <div class="glass-card rounded-2xl p-6 flex flex-col justify-between shadow-sm">
+            <div>
+              <div class="flex items-center justify-between mb-4">
+                <span class="font-bold text-base-content text-lg">Erlang (Rebar3)</span>
+                <span class="badge badge-info badge-outline text-xs">Plugin</span>
+              </div>
+              <p class="text-xs text-base-content/70 mb-4">Add as a project plugin in your <code>rebar.config</code>:</p>
+              
+              <pre class="bg-[#0b101e] text-slate-200 p-3 rounded-lg text-xs font-mono overflow-x-auto mb-4 border border-white/5"><code>{project_plugins, [
+    {spectra, "0.1.0"}
+]}.</code></pre>
+            </div>
+            
+            <div class="pt-2">
+              <div class="text-xs text-base-content/60 mb-2">Run analysis:</div>
+              <pre class="bg-[#0b101e] p-2.5 rounded-lg text-xs font-mono text-spectra-azure border border-white/5"><code>rebar3 spectra</code></pre>
+            </div>
+          </div>
+
+          <!-- Mix Task -->
+          <div class="glass-card rounded-2xl p-6 flex flex-col justify-between shadow-sm">
+            <div>
+              <div class="flex items-center justify-between mb-4">
+                <span class="font-bold text-base-content text-lg">Elixir (Mix)</span>
+                <span class="badge badge-info badge-outline text-xs">Dependency</span>
+              </div>
+              <p class="text-xs text-base-content/70 mb-4">Add to <code>deps</code> in your <code>mix.exs</code>:</p>
+              
+              <pre class="bg-[#0b101e] text-slate-200 p-3 rounded-lg text-xs font-mono overflow-x-auto mb-4 border border-white/5"><code>defp deps do
+  [
+    {:spectra, "~> 0.1.0", only: [:dev, :test], runtime: false}
+  ]
+end</code></pre>
+            </div>
+            
+            <div class="pt-2">
+              <div class="text-xs text-base-content/60 mb-2">Run analysis:</div>
+              <pre class="bg-[#0b101e] p-2.5 rounded-lg text-xs font-mono text-spectra-azure border border-white/5"><code>mix spectra</code></pre>
+            </div>
+          </div>
+
+          <!-- Standalone CLI -->
+          <div class="glass-card rounded-2xl p-6 flex flex-col justify-between shadow-sm">
+            <div>
+              <div class="flex items-center justify-between mb-4">
+                <span class="font-bold text-base-content text-lg">Standalone CLI</span>
+                <span class="badge badge-info badge-outline text-xs">Escript</span>
+              </div>
+              <p class="text-xs text-base-content/70 mb-4">Build or download the standalone escript binary:</p>
+              
+              <pre class="bg-[#0b101e] text-slate-200 p-3 rounded-lg text-xs font-mono overflow-x-auto mb-4 border border-white/5"><code>git clone https://github.com/altenwald/spectra
+cd spectra
+rebar3 escriptize
+sudo cp _build/default/bin/spectra /usr/local/bin/</code></pre>
+            </div>
+            
+            <div class="pt-2">
+              <div class="text-xs text-base-content/60 mb-2">Check any BEAM directory:</div>
+              <pre class="bg-[#0b101e] p-2.5 rounded-lg text-xs font-mono text-spectra-azure border border-white/5"><code>spectra check _build/default/lib/*/ebin</code></pre>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ================= SPONSORS SECTION ================= -->
+    <section id="sponsors" class="py-24 relative overflow-hidden">
+      <!-- Amber ambient accent -->
+      <div class="absolute w-96 h-96 bg-spectra-amber/10 rounded-full blur-3xl -top-20 -right-20 pointer-events-none"></div>
+
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+        
+        <div class="text-center max-w-3xl mx-auto mb-16 space-y-4">
+          <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-spectra-amber/10 border border-spectra-amber/30 text-spectra-amber text-xs font-semibold">
+            <span>❤️ Backed by the Community</span>
+          </div>
+          <h2 class="text-3xl sm:text-4xl font-extrabold text-base-content">Sponsor Spectra Development</h2>
+          <p class="text-base text-base-content/70">
+            Spectra is free, open-source software created by Altenwald. Your sponsorship helps accelerate compiler optimizations, pre-built Hex .splt caches, and enterprise LSP tooling.
+          </p>
+        </div>
+
+        <!-- Featured Sponsor Tier Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto mb-12">
+          
+          <!-- Backer -->
+          <div class="glass-card rounded-2xl p-6 text-center border-base-content/10 hover:border-spectra-amber/40 transition-colors shadow-sm">
+            <h3 class="font-bold text-lg text-base-content mb-1">Individual Backer</h3>
+            <div class="text-3xl font-extrabold text-spectra-azure font-mono my-3">$5 <span class="text-xs text-base-content/50 font-normal">/ mo</span></div>
+            <p class="text-xs text-base-content/70 mb-6">For developers who want to show love and support fast static typing on the BEAM.</p>
+            <a href="https://github.com/sponsors/altenwald" target="_blank" class="btn btn-sm btn-outline border-base-content/20 hover:border-spectra-amber hover:bg-spectra-amber/10 w-full text-xs">
+              Sponsor $5/mo
+            </a>
+          </div>
+
+          <!-- Pro -->
+          <div class="glass-card rounded-2xl p-6 text-center border-spectra-amber/40 bg-spectra-amber/5 relative shadow-xl">
+            <div class="absolute -top-3 left-1/2 -translate-x-1/2 badge badge-warning text-xs font-semibold">Most Popular</div>
+            <h3 class="font-bold text-lg text-base-content mb-1">Pro Contributor</h3>
+            <div class="text-3xl font-extrabold text-spectra-amber font-mono my-3">$25 <span class="text-xs text-base-content/50 font-normal">/ mo</span></div>
+            <p class="text-xs text-base-content/70 mb-6">Name listed in README, release notes, and high priority consideration for feature requests.</p>
+            <a href="https://github.com/sponsors/altenwald" target="_blank" class="btn btn-sm btn-warning bg-spectra-amber text-black hover:bg-amber-500 border-none w-full text-xs font-semibold">
+              Sponsor $25/mo
+            </a>
+          </div>
+
+          <!-- Enterprise -->
+          <div class="glass-card rounded-2xl p-6 text-center border-base-content/10 hover:border-spectra-purple/40 transition-colors shadow-sm">
+            <h3 class="font-bold text-lg text-base-content mb-1">Corporate Sponsor</h3>
+            <div class="text-3xl font-extrabold text-spectra-purple font-mono my-3">$250 <span class="text-xs text-base-content/50 font-normal">/ mo</span></div>
+            <p class="text-xs text-base-content/70 mb-6">Company logo on website, priority commercial support, and tailored CI/CD integration advice.</p>
+            <a href="https://github.com/sponsors/altenwald" target="_blank" class="btn btn-sm btn-outline border-base-content/20 hover:border-spectra-purple hover:bg-spectra-purple/10 w-full text-xs">
+              Sponsor $250/mo
+            </a>
+          </div>
+
+        </div>
+
+        <!-- Altenwald Network Banner -->
+        <div class="glass-card rounded-2xl p-8 max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
+          <div class="space-y-1 text-center md:text-left">
+            <div class="text-xs uppercase tracking-wider text-spectra-azure font-semibold">Part of the Altenwald Ecosystem</div>
+            <h4 class="text-lg font-bold text-base-content">Explore companion developer tools</h4>
+            <p class="text-xs text-base-content/70">Check out <strong>Portolan</strong> (OpenAPI for Phoenix), <strong>Plotto</strong> (pure Elixir charts &amp; SVG/PNG), and <strong>Press</strong> (zero-dependency PDF rendering).</p>
+          </div>
+          <div class="flex items-center gap-3">
+            <a href="https://github.com/altenwald" target="_blank" class="btn btn-sm btn-outline border-base-content/20 hover:border-spectra-azure hover:bg-spectra-azure/10 text-xs">
+              github.com/altenwald
+            </a>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ================= FOOTER ================= -->
+  <footer class="border-t border-base-content/10 bg-base-100 py-12 text-xs">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6">
+      
+      <div class="flex items-center gap-3">
+        <img src="assets/logo.svg" alt="Spectra Logo" class="w-7 h-7">
+        <span class="font-bold text-base-content">Spectra</span>
+        <span class="text-base-content/50">— Released under the Apache-2.0 License.</span>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-6 text-base-content/70">
+        <a href="https://github.com/altenwald/spectra" target="_blank" class="hover:text-base-content transition-colors">GitHub Repository</a>
+        <a href="https://hex.pm/packages/spectra" target="_blank" class="hover:text-base-content transition-colors">Hex Package</a>
+        <a href="https://hexdocs.pm/spectra" target="_blank" class="hover:text-base-content transition-colors">Documentation</a>
+        <a href="https://github.com/altenwald/spectra/blob/main/BENCHMARK.md" target="_blank" class="hover:text-base-content transition-colors">Raw Benchmark Data</a>
+        <a href="https://github.com/sponsors/altenwald" target="_blank" class="text-spectra-amber hover:text-amber-500 font-semibold transition-colors">Sponsor Altenwald</a>
+      </div>
+
+    </div>
+  </footer>
+
+  <!-- ================= INTERACTIVE D3.JS BENCHMARK CODE ================= -->
+  <script>
+    // Theme Switcher Logic
+    const themeToggle = document.getElementById('theme-toggle');
+    themeToggle.addEventListener('change', function() {
+      if (this.checked) {
+        document.documentElement.setAttribute('data-theme', 'corporate');
+      } else {
+        document.documentElement.setAttribute('data-theme', 'night');
+      }
+      renderChart(); // re-render chart to adapt colors
+    });
+
+    // Benchmark Data from BENCHMARK.md
+    const benchmarkData = {
+      broker: {
+        name: "RabbitMQ Core Broker (245 BEAM modules)",
+        time: {
+          title: "Wall-Clock Time (Lower is Better)",
+          unit: "s",
+          spectra: 0.856,
+          dialyzer: 8.782,
+          multiplier: "10.3× faster"
+        },
+        cpu: {
+          title: "Total CPU Time (Lower is Better)",
+          unit: "s",
+          spectra: 1.011,
+          dialyzer: 28.420,
+          multiplier: "28.1× less CPU"
+        },
+        ram: {
+          title: "Peak Memory RSS (Lower is Better)",
+          unit: "MiB",
+          spectra: 319.4,
+          dialyzer: 372.5,
+          multiplier: "16.6% less RAM"
+        }
+      },
+      core: {
+        name: "RabbitMQ Core Apps (440 BEAM modules)",
+        time: {
+          title: "Wall-Clock Time (Lower is Better)",
+          unit: "s",
+          spectra: 3.922,
+          dialyzer: 20.722,
+          multiplier: "5.3× faster"
+        },
+        cpu: {
+          title: "Total CPU Time (Lower is Better)",
+          unit: "s",
+          spectra: 4.046,
+          dialyzer: 75.648,
+          multiplier: "18.7× less CPU"
+        },
+        ram: {
+          title: "Peak Memory RSS (Lower is Better)",
+          unit: "MiB",
+          spectra: 441.0,
+          dialyzer: 1286.8,
+          multiplier: "2.9× less RAM"
+        }
+      }
+    };
+
+    let currentDataset = 'broker';
+    let currentMetric = 'time';
+
+    function switchDataset(ds) {
+      currentDataset = ds;
+      document.getElementById('btn-ds-broker').className = ds === 'broker' ? 'btn btn-sm join-item btn-primary text-xs' : 'btn btn-sm join-item btn-ghost text-xs';
+      document.getElementById('btn-ds-core').className = ds === 'core' ? 'btn btn-sm join-item btn-primary text-xs' : 'btn btn-sm join-item btn-ghost text-xs';
+      renderChart();
+    }
+
+    function switchMetric(m) {
+      currentMetric = m;
+      document.getElementById('btn-metric-time').className = m === 'time' ? 'btn btn-sm join-item btn-active text-xs' : 'btn btn-sm join-item btn-ghost text-xs';
+      document.getElementById('btn-metric-cpu').className = m === 'cpu' ? 'btn btn-sm join-item btn-active text-xs' : 'btn btn-sm join-item btn-ghost text-xs';
+      document.getElementById('btn-metric-ram').className = m === 'ram' ? 'btn btn-sm join-item btn-active text-xs' : 'btn btn-sm join-item btn-ghost text-xs';
+      renderChart();
+    }
+
+    function renderChart() {
+      const container = document.getElementById('chart-container');
+      const tooltip = document.getElementById('d3-tooltip');
+      const caption = document.getElementById('chart-caption');
+      
+      const isDark = document.documentElement.getAttribute('data-theme') === 'night';
+      const textColor = isDark ? '#ffffff' : '#0f172a';
+      const axisColor = isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.5)';
+      
+      const width = container.clientWidth || 800;
+      const height = container.clientHeight || 320;
+      const margin = { top: 30, right: 70, bottom: 40, left: 145 };
+
+      // Clear previous chart
+      container.innerHTML = '';
+
+      const ds = benchmarkData[currentDataset];
+      const dataInfo = ds[currentMetric];
+
+      caption.innerHTML = `<strong>${ds.name}</strong>: ${dataInfo.title} — <span class="text-spectra-azure font-bold">${dataInfo.multiplier} with Spectra</span>`;
+
+      const chartData = [
+        { tool: "Spectra 0.1.0", value: dataInfo.spectra, color: "#38bdf8", fillId: "spectra" },
+        { tool: "Dialyzer (OTP 29)", value: dataInfo.dialyzer, color: "#f87171", fillId: "dialyzer" }
+      ];
+
+      const svg = d3.select("#chart-container")
+        .append("svg")
+        .attr("width", width)
+        .attr("height", height);
+
+      // SVG Gradients
+      const defs = svg.append("defs");
+      
+      const grad = defs.append("linearGradient")
+        .attr("id", "spectra-gradient")
+        .attr("x1", "0%").attr("y1", "0%")
+        .attr("x2", "100%").attr("y2", "0%");
+      grad.append("stop").attr("offset", "0%").attr("stop-color", "#2563eb");
+      grad.append("stop").attr("offset", "100%").attr("stop-color", "#38bdf8");
+
+      const y = d3.scaleBand()
+        .domain(chartData.map(d => d.tool))
+        .range([margin.top, height - margin.bottom])
+        .padding(0.35);
+
+      const x = d3.scaleLinear()
+        .domain([0, d3.max(chartData, d => d.value) * 1.15])
+        .nice()
+        .range([margin.left, width - margin.right]);
+
+      // Grid lines
+      svg.append("g")
+        .attr("stroke", "currentColor")
+        .attr("stroke-opacity", 0.08)
+        .selectAll("line")
+        .data(x.ticks(5))
+        .join("line")
+        .attr("x1", d => x(d))
+        .attr("x2", d => x(d))
+        .attr("y1", margin.top)
+        .attr("y2", height - margin.bottom);
+
+      // Bars with animation
+      svg.append("g")
+        .selectAll("rect")
+        .data(chartData)
+        .join("rect")
+        .attr("y", d => y(d.tool))
+        .attr("x", margin.left)
+        .attr("height", y.bandwidth())
+        .attr("rx", 6)
+        .attr("fill", d => d.fillId === 'spectra' ? 'url(#spectra-gradient)' : d.color)
+        .attr("width", 0)
+        .on("mouseover", (event, d) => {
+          tooltip.style.opacity = 1;
+          tooltip.innerHTML = `<strong>${d.tool}</strong><br/>${d.value.toLocaleString()} ${dataInfo.unit}`;
+        })
+        .on("mousemove", (event) => {
+          const bounds = container.getBoundingClientRect();
+          tooltip.style.left = (event.clientX - bounds.left + 15) + "px";
+          tooltip.style.top = (event.clientY - bounds.top - 20) + "px";
+        })
+        .on("mouseout", () => {
+          tooltip.style.opacity = 0;
+        })
+        .transition()
+        .duration(800)
+        .ease(d3.easeCubicOut)
+        .attr("width", d => x(d.value) - margin.left);
+
+      // Data labels on bars
+      svg.append("g")
+        .selectAll("text")
+        .data(chartData)
+        .join("text")
+        .attr("x", d => x(d.value) + 12)
+        .attr("y", d => y(d.tool) + y.bandwidth() / 2)
+        .attr("dy", "0.35em")
+        .attr("fill", textColor)
+        .attr("font-family", "'JetBrains Mono', monospace")
+        .attr("font-size", "13px")
+        .attr("font-weight", "600")
+        .style("opacity", 0)
+        .text(d => `${d.value.toLocaleString()} ${dataInfo.unit}`)
+        .transition()
+        .delay(400)
+        .duration(500)
+        .style("opacity", 1);
+
+      // Y Axis Labels
+      svg.append("g")
+        .attr("transform", `translate(${margin.left},0)`)
+        .call(d3.axisLeft(y).tickSize(0))
+        .call(g => g.select(".domain").remove())
+        .selectAll("text")
+        .attr("font-family", "'Inter', sans-serif")
+        .attr("font-size", "13px")
+        .attr("font-weight", "600")
+        .attr("fill", d => d.includes("Spectra") ? "#0284c7" : "#ef4444");
+
+      // X Axis
+      svg.append("g")
+        .attr("transform", `translate(0,${height - margin.bottom})`)
+        .call(d3.axisBottom(x).ticks(5).tickFormat(d => `${d} ${dataInfo.unit}`))
+        .call(g => g.select(".domain").attr("stroke", "currentColor").attr("stroke-opacity", 0.15))
+        .selectAll("text")
+        .attr("font-family", "'JetBrains Mono', monospace")
+        .attr("font-size", "10px")
+        .attr("fill", axisColor);
+    }
+
+    // Initial Render & Window Resize Handler
+    window.addEventListener('DOMContentLoaded', renderChart);
+    window.addEventListener('resize', renderChart);
+  </script>
+</body>
+</html>
