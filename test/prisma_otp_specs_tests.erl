@@ -55,3 +55,12 @@ a_call_to_a_function_without_a_spec_does_not_narrow_an_unknown_variable_test() -
           "-spec getk(map()) -> term().\ngetk(M) -> maps:get(k, M, undefined).\n"
           "f(M) -> {active(M), getk(M)}.\n",
     ?assertEqual([], warnings(Src)).
+
+%% The return type of a polymorphic callee (`maps:update/3`: `#{Key := Value, _ => _}`) has type variables for keys. They are unknown,
+%% not "some key": the result is a map, and it can be passed where a map with named keys is expected.
+a_polymorphic_map_return_is_just_a_map_test() ->
+    Src = "-export([f/1]).\n"
+          "-spec upd(Key, Value, #{Key := _, _ => _}) -> #{Key := Value, _ => _}.\nupd(K, V, M) -> maps:put(K, V, M).\n"
+          "-spec need(#{node := atom(), id := integer()}) -> tuple().\nneed(M) -> {ok, M}.\n"
+          "-spec f(map()) -> tuple().\nf(M) -> need(upd(node, a, M)).\n",
+    ?assertEqual([], warnings(Src)).

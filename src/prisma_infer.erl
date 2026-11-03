@@ -1039,7 +1039,13 @@ erase_unresolved({tuple, Elems}) -> {tuple, [erase_unresolved(E) || E <- Elems]}
 erase_unresolved({list, E}) -> {list, erase_unresolved(E)};
 erase_unresolved({nonempty_list, E}) -> {nonempty_list, erase_unresolved(E)};
 erase_unresolved({improper_list, E, T}) -> {improper_list, erase_unresolved(E), erase_unresolved(T)};
-erase_unresolved({map, Fields}) -> {map, [{Kind, erase_unresolved(K), erase_unresolved(V)} || {Kind, K, V} <- Fields]};
+erase_unresolved({map, Fields}) ->
+    Erased = [{Kind, erase_unresolved(K), erase_unresolved(V)} || {Kind, K, V} <- Fields],
+    %% a required key that was a type variable (`#{Key := Value, _ => _}`, maps:update/3) is unknown, not "some key": the map is just a map
+    case lists:any(fun({exact, any, _}) -> true; (_) -> false end, Erased) of
+        true -> any_map;
+        false -> {map, Erased}
+    end;
 erase_unresolved({record, Name, Fields}) -> {record, Name, [{F, erase_unresolved(T)} || {F, T} <- Fields]};
 erase_unresolved({fun_type, Args, Ret}) -> {fun_type, [erase_unresolved(A) || A <- Args], erase_unresolved(Ret)};
 erase_unresolved(Other) -> Other.
