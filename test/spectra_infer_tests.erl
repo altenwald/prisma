@@ -233,7 +233,7 @@ cross_module_splt_discrepancy_test() ->
 additional_patterns_guards_and_bifs_test() ->
     ?assertEqual(float, spectra_type:meet(float, float)),
     ?assertEqual(none, spectra_type:meet(float, integer)),
-    ?assertEqual({binary, 8, 1}, spectra_type:meet({binary, 0, 8}, {binary, 8, 1})),
+    ?assertEqual({binary, 8, 8}, spectra_type:meet({binary, 0, 8}, {binary, 8, 1})),
     ?assertEqual({record, r, []}, spectra_type:meet(any_tuple, {record, r, []})),
     ?assertEqual({record, r, []}, spectra_type:meet({record, r, []}, any_tuple)),
     ?assertEqual({fun_type, [], ok}, spectra_type:meet(any_fun, {fun_type, [], ok})),

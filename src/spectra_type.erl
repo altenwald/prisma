@@ -249,6 +249,24 @@ collapse_members(Members) ->
         Other -> Other
     end.
 
+%% `<<_:B, _:_*U>>` holds the sizes B, B+U, B+2U, ... (only B when U is 0): the meet is the sizes that both allow.
+meet_binary(B1, 0, B2, U2) -> meet_binary_exact(B1, B2, U2);
+meet_binary(B1, U1, B2, 0) -> meet_binary_exact(B2, B1, U1);
+meet_binary(B1, U1, B2, U2) ->
+    Start = erlang:max(B1, B2),
+    Unit = U1 * U2 div gcd(U1, U2),
+    case [S || S <- lists:seq(Start, Start + Unit - 1), (S - B1) rem U1 =:= 0, (S - B2) rem U2 =:= 0] of
+        [First | _] -> {binary, First, Unit};
+        [] -> none
+    end.
+
+meet_binary_exact(Size, B, 0) when Size =:= B -> {binary, Size, 0};
+meet_binary_exact(Size, B, U) when U > 0, Size >= B, (Size - B) rem U =:= 0 -> {binary, Size, 0};
+meet_binary_exact(_, _, _) -> none.
+
+gcd(A, 0) -> A;
+gcd(A, B) -> gcd(B, A rem B).
+
 %% @doc Computes the least upper bound (union) of two types.
 -spec join(stype(), stype()) -> stype().
 join(T1, T2) ->
@@ -512,7 +530,7 @@ meet_non_numeric({atom_lit, B} = Lit, boolean) when is_boolean(B) -> Lit;
 meet_non_numeric(boolean, {atom_lit, _}) -> none;
 meet_non_numeric({atom_lit, _}, boolean) -> none;
 meet_non_numeric({binary, B1, U1}, {binary, B2, U2}) ->
-    {binary, erlang:max(B1, B2), erlang:min(U1, U2)};
+    meet_binary(B1, U1, B2, U2);
 meet_non_numeric(any_tuple, {tuple, _} = T) -> T;
 meet_non_numeric({tuple, _} = T, any_tuple) -> T;
 meet_non_numeric({tuple, [Tag | _]}, {record, Name, _} = Record) ->

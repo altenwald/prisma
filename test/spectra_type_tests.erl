@@ -377,3 +377,15 @@ tuple_with_a_union_element_fits_a_union_of_tuples_test_() ->
                    {union, [{tuple, [{atom_lit, x}, atom]}, {tuple, [{atom_lit, w}, atom]}]}))].
 
 binary_type() -> {binary, 0, 8}.
+
+%% <<_:B, _:_*U>> is the set of sizes B + k*U: the meet keeps what both allow (a binary is a bitstring, not the reverse)
+meet_of_binary_types_test_() ->
+    [?_assertEqual({binary, 0, 8}, spectra_type:meet({binary, 0, 8}, {binary, 0, 1})),
+     ?_assertEqual({binary, 0, 8}, spectra_type:meet({binary, 0, 1}, {binary, 0, 8})),
+     ?_assertEqual({binary, 16, 8}, spectra_type:meet({binary, 16, 8}, {binary, 0, 1})),
+     ?_assertEqual({binary, 0, 24}, spectra_type:meet({binary, 0, 8}, {binary, 0, 3})),
+     ?_assertEqual(none, spectra_type:meet({binary, 0, 2}, {binary, 1, 2})),
+     ?_assertEqual({binary, 24, 0}, spectra_type:meet({binary, 24, 0}, {binary, 0, 8})),
+     ?_assertEqual(none, spectra_type:meet({binary, 20, 0}, {binary, 0, 8})),
+     ?_assertEqual({binary, 8, 0}, spectra_type:meet({binary, 8, 0}, {binary, 8, 0})),
+     ?_assertEqual(none, spectra_type:meet({binary, 8, 0}, {binary, 16, 0}))].
