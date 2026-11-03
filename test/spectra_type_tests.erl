@@ -324,3 +324,33 @@ normalize_union_shortcuts_agree_with_the_general_path_test() ->
     ?assertEqual(integer, spectra_type:normalize_union([integer, integer])),
     ?assertEqual(boolean, spectra_type:normalize_union([{atom_lit, true}, {atom_lit, false}])),
     ?assertEqual(none, spectra_type:normalize_union([])).
+
+%% widen/1 bounds what is inferred (depth and members of a union) by replacing the excess with `any`: always a superset.
+
+widen_leaves_small_types_alone_test_() ->
+    Small = [any, none, integer, {int_lit, 3}, {atom_lit, ok}, boolean,
+             {union, [{atom_lit, ok}, {tuple, [{atom_lit, error}, atom]}]},
+             {list, {tuple, [integer, {list, atom}]}},
+             {map, [{exact, {atom_lit, k}, integer}]},
+             {fun_type, [integer], {union, [{atom_lit, a}, {atom_lit, b}]}},
+             {improper_list, integer, atom}],
+    [?_assertEqual(T, spectra_type:widen(T)) || T <- Small].
+
+widen_cuts_deep_types_test() ->
+    Deep = {tuple, [{tuple, [{tuple, [{tuple, [{tuple, [integer]}]}]}]}]},
+    W = spectra_type:widen(Deep),
+    ?assertEqual({tuple, [{tuple, [{tuple, [{tuple, [any]}]}]}]}, W),
+    %% a union is not a level: the members of a union at the same depth keep theirs
+    ?assertEqual({union, [{atom_lit, a}, {list, {list, {list, {list, any}}}}]},
+                 spectra_type:widen({union, [{atom_lit, a}, {list, {list, {list, {list, {list, integer}}}}}]})).
+
+widen_collapses_unions_with_too_many_members_test() ->
+    Atoms = [{atom_lit, list_to_atom("a" ++ integer_to_list(N))} || N <- lists:seq(1, 30)],
+    ?assertEqual(atom, spectra_type:widen({union, Atoms})),
+    Ints = [{int_lit, N} || N <- lists:seq(1, 30)],
+    ?assertEqual(integer, spectra_type:widen({union, Ints})),
+    Tuples = [{tuple, [{atom_lit, list_to_atom("t" ++ integer_to_list(N))}, integer]} || N <- lists:seq(1, 30)],
+    ?assertEqual(any, spectra_type:widen({union, Tuples})),
+    %% a few atoms are kept as they are
+    Few = [{atom_lit, a}, {atom_lit, b}, {atom_lit, c}],
+    ?assertEqual({union, Few}, spectra_type:widen({union, Few})).

@@ -726,3 +726,46 @@ saved_plt_keeps_contracts_and_drops_the_code_test() ->
     #func_contract{declared_specs = Specs0, inferred_type = Inferred0} = maps:get({plt_lean, f, 1}, Before),
     ?assertEqual(Specs0, Specs),
     ?assertEqual(Inferred0, Inferred).
+
+%% A list built by a recursive function with many clauses must not make its type grow with every pass of the inference:
+%% `[H | f(...)]` where f(...) is `nil | nonempty_list(...)` is one more `nonempty_list`, not one per member of the tail.
+%% (A first version distributed the cons over the members of the tail: 48,000 million words once written out.)
+
+union_members({union, Ms}) -> length(Ms);
+union_members(_) -> 1.
+
+recursive_list_building_keeps_the_type_small_test() ->
+    Clauses = ["f(" ++ integer_to_list(N) ++ ") -> [" ++ [$a + N] ++ " | f(" ++ integer_to_list(N - 1) ++ ")]"
+               || N <- lists:seq(1, 12)],
+    Src = "f(0) -> [];\n" ++ string:join(Clauses, ";\n") ++ ".\n",
+    Ret = inferred_return(Src),
+    ?assert(union_members(Ret) =< 3),
+    ?assert(erts_debug:flat_size(Ret) < 2000).
+
+mutually_recursive_list_builders_keep_the_type_small_test() ->
+    A = ["a(" ++ integer_to_list(N) ++ ") -> [{x, " ++ integer_to_list(N) ++ "} | a(" ++ integer_to_list(N - 1) ++ ")]"
+         || N <- lists:seq(1, 8)] ++ ["a(9) -> [{arr, b(1)} | a(8)]"],
+    B = ["b(" ++ integer_to_list(N) ++ ") -> [{y, " ++ integer_to_list(N) ++ "} | b(" ++ integer_to_list(N - 1) ++ ")]"
+         || N <- lists:seq(1, 8)] ++ ["b(9) -> [{tab, a(1)} | b(8)]"],
+    Src = "a(0) -> [];\n" ++ string:join(A, ";\n") ++ ".\nb(0) -> [];\n" ++ string:join(B, ";\n") ++ ".\n"
+          ++ "f(X) -> {a(X), b(X)}.\n",
+    Ret = inferred_return(Src),
+    ?assert(erts_debug:flat_size(Ret) < 20000).
+
+union_tail_with_a_non_list_member_still_gives_an_improper_list_test() ->
+    %% g/1 returns [] or an integer: `[H | g()]` may be a proper list or an improper one
+    Ret = inferred_return("f(X) -> [a | g(X)].\ng(0) -> [];\ng(_) -> 1.\n"),
+    ?assert(spectra_oracle:member([a], Ret)),
+    ?assert(spectra_oracle:member([a | 1], Ret)),
+    ?assertNot(spectra_oracle:member([a | foo], Ret)).
+
+%% The target of a call is an expression too: `(m:f()):g()`, `m:(f())()` and `(f())(X)` hold calls that must be checked.
+
+call_inside_the_target_of_another_call_test() ->
+    ?assertEqual([4], missing_hits("    (ov_callee:nonexistent(1)):run(2)", discrepancy)),
+    ?assertEqual([4], missing_hits("    ov_callee:(ov_callee:nonexistent(1))(2)", discrepancy)),
+    ?assertEqual([4], missing_hits("    (ov_callee:nonexistent(1))(2)", discrepancy)),
+    ?assertEqual([4], missing_hits("    (fun(X) -> X end)(ov_callee:nonexistent(1))", discrepancy)).
+
+a_dynamic_target_that_is_correct_says_nothing_test() ->
+    ?assertEqual([], missing_hits("    M = ov_callee,\n    M:g(1),\n    (ov_callee:g(1)):anything(2)", discrepancy)).

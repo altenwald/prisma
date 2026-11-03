@@ -8,11 +8,14 @@
 -include("spectra.hrl").
 
 -define(MAX_IMPROPER_MEET_DEPTH, 2).
+-define(WIDEN_DEPTH, 4).
+-define(WIDEN_MEMBERS, 16).
 
 -export([
     from_abstract/1,
     from_type_attr/3,
     normalize_union/1,
+    widen/1,
     join/2,
     meet/2,
     consistent_subtype/2,
@@ -199,6 +202,38 @@ normalize_union_general(Types) ->
                 [Single] -> Single;
                 Many -> {union, Many}
             end
+    end.
+
+%% @doc Bounds an inferred type: nesting deeper than a few levels, and unions with too many members, become `any` (or `atom` /
+%% `integer` for a crowd of literals). The result is always a supertype, so nothing that holds of the original stops holding.
+%% Without it the type that the inference of a recursive function builds can contain the whole previous pass of itself several
+%% times over: one module (an AMQP table parser) reached 48,000 million words once written out, from 9,000 words of memory.
+-spec widen(stype()) -> stype().
+widen(Type) ->
+    widen(Type, ?WIDEN_DEPTH).
+
+widen(_, 0) ->
+    any;
+widen({union, Members}, Depth) ->
+    %% a union is not a level of nesting: its members keep the depth
+    case normalize_union([widen(M, Depth) || M <- Members]) of
+        {union, Many} when length(Many) > ?WIDEN_MEMBERS -> collapse_members(Many);
+        Other -> Other
+    end;
+widen({tuple, Elems}, Depth) -> {tuple, [widen(E, Depth - 1) || E <- Elems]};
+widen({list, Elem}, Depth) -> {list, widen(Elem, Depth - 1)};
+widen({nonempty_list, Elem}, Depth) -> {nonempty_list, widen(Elem, Depth - 1)};
+widen({improper_list, Elem, Tail}, Depth) -> {improper_list, widen(Elem, Depth - 1), widen(Tail, Depth - 1)};
+widen({map, Fields}, Depth) -> {map, [{Kind, widen(K, Depth - 1), widen(V, Depth - 1)} || {Kind, K, V} <- Fields]};
+widen({record, Name, Fields}, Depth) -> {record, Name, [{F, widen(T, Depth - 1)} || {F, T} <- Fields]};
+widen({fun_type, Args, Ret}, Depth) -> {fun_type, [widen(A, Depth - 1) || A <- Args], widen(Ret, Depth - 1)};
+widen(Other, _Depth) -> Other.
+
+collapse_members(Members) ->
+    Collapsed = lists:map(fun({atom_lit, _}) -> atom; ({int_lit, _}) -> integer; (M) -> M end, Members),
+    case normalize_union(Collapsed) of
+        {union, Still} when length(Still) > ?WIDEN_MEMBERS -> any;
+        Other -> Other
     end.
 
 %% @doc Computes the least upper bound (union) of two types.

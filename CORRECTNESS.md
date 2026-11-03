@@ -279,7 +279,8 @@ Same 125 mutants after each fix (the counts for Dialyzer and `erlc` do not chang
 | :--- | :---: | :--- |
 | before | 52 / 125 | |
 | 1. look inside `fun`, `try`, `catch`, `receive`, comprehensions, records and binaries | 57 / 125 | `r2` 21 -> 24, `r3` 6 -> 8; nothing lost |
-| 2. BIFs with arguments of the wrong type inside guards | **74 / 125** | `r3` 8 -> **25 of 25**; nothing lost |
+| 2. BIFs with arguments of the wrong type inside guards | 74 / 125 | `r3` 8 -> **25 of 25**; nothing lost |
+| 3. calls to a function that does not exist, and calls inside the target of another call | **100 / 125** | `r4` 0 -> **25 of 25**, `r2` 24 -> 25; nothing lost |
 
 **Gap 1.** `infer_expr` answered `any` for every construct it did not know without looking inside. It now has a clause each for `fun`
 (and named funs), `try` (body, `of`, `catch`, `after`), `catch`, `receive`, list and binary comprehensions, record creation, update and access,
@@ -320,7 +321,46 @@ that *uses* the result gets a warning that says what does not fit (a `gradual_mi
 That is not Dialyzer's silent cascade, but it is still an effect in the callers; the way to remove it is to let callers trust the declared `-spec`
 of a function over what was inferred from its (wrong) body. Not done.
 
-What this sample does not say: 125 mutants of five kinds, injected on purpose, are not the distribution of real bugs; "must fail" is by contract
+**Gap 3.** The checker looked a callee up in the `.splt` and, if it was not there, kept quiet. Now a call to `m:f/A` where `m` is a module of the PLT (and
+not Elixir) has a warning of its own, `unknown_function`, that says which arities `m` does have. Not reported: modules that are not in the PLT (it proves
+nothing), `erlang:` (the BIFs), what the compiler adds without it being in the code (`module_info/0,1`, `behaviour_info/1`), and a function that exists
+without being exported (a module can export everything with a compile attribute). Three mutants still got through, for a second reason: the log macros
+expand to `(ra_env:logger_mod()):log(...)`, a call in the *module position* of another call, and the target of a call was never looked at unless it was a
+literal. It is now (and that also closed the last `r2`).
+
+### A performance mistake of mine, how it was found, and what changed
+
+The fix for improper cells (commit `04b2e2c`) made the inferred type of some recursive functions grow with every pass of the inference, and I did not see it:
+I had measured `check` on `deps/rabbit` and the PLT of OTP's `compiler`, not **the PLT of the dependencies of RabbitMQ**. Building that one went from 3.9 s to
+**235 s and the operating system killed the process for its memory** (the user guessed it right). A commit bisection found the cause: one module
+(`rabbit_binary_parser`, an AMQP table parser) went from 8,791 words to **48,900 million words once written out** (0.43 million in memory, a factor of
+113,000: Erlang shares equal sub-terms in memory, and `term_to_binary` and any recursion over the type expand them as if it were a tree). Why:
+
+- `[H | T]` where `T` is the result of the same recursive function was a union with one member per clause; distributing the cons over every member gave K,
+  K^2, K^3... members, because `ne(A) | ne(B)` is not merged. Now the members that are proper lists make one `nonempty_list` together.
+- a tail that is `any` (the first pass of any recursive function) now gives an improper list *with its elements*, which embeds the whole type of the previous
+  pass in the next one. Before the fix everything collapsed into `ne(any)`. Fixing one case was not enough, so the inferred types are bounded by
+  `spectra_type:widen/1`: nesting beyond four levels, and unions of more than 16 members, become `any` (or `atom` / `integer` for a crowd of literals). It is a supertype,
+  so what held keeps holding.
+- the `.splt` kept the abstract code of every function (`func_contract.clauses`), only needed while a module is being inferred. It is no longer saved.
+- `normalize_union/1`, called 500,000 times per PLT, has shortcuts for the lists of one or two types it nearly always gets.
+
+Regression tests: two small recursive list builders (a synthetic copy of the parser), `widen/1`, and the equivalence of the shortcuts with the general path.
+Measured after (same machine, other applications running):
+
+| | at the start of the session | after |
+| :--- | :---: | :---: |
+| PLT of the 6 dependency apps of RabbitMQ (206 modules) | 3.9 s, 2.4 MB, 331 MiB | **1.2 s, 434 KiB, 324 MiB** |
+| PLT of OTP `compiler` (60 modules) | 0.51 s, 2065 KiB | **0.40 s, 359 KiB** |
+| `check deps/rabbit` without a PLT | 1.2 s | 1.2 s |
+| `check deps/rabbit` with the PLT of the dependencies | 1.9 - 2.8 s | **1.4 s** |
+| size written out / in memory, the 440 modules | not measured | **10 / 10 million words (factor 1.0)** |
+
+The user's remark that closes this: with the types in a *map from id to type*, each one holding its children by id (hash-consing), traversals would walk the
+graph with a stack and a set of visited ids, without expanding or copying anything; the file would hold the table once and `meet`/`join` could be memoized by
+pair of ids. It is the right fix of the root; what is done above is the bounded one. Not done: it changes the representation of types everywhere.
+
+What this sample does not say:What this sample does not say: 125 mutants of five kinds, injected on purpose, are not the distribution of real bugs; "must fail" is by contract
 or by BIF, so a mutant on code that is never reached still counts; Dialyzer ran with its default warnings and the erts/kernel/stdlib PLT; and the
 new warnings that each tool gives *outside* the mutated function (6 for Spectra, 201 for Dialyzer) were counted but not analyzed (most are probably
 consequences, such as a caller of a function that now returns an atom). One correction made on the way: the first version of the runner

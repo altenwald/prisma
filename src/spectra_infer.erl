@@ -71,7 +71,7 @@ infer_function(Mod, {_M, _F, Arity} = MFA, Clauses, Contract, AllContracts) ->
     ),
     JoinedArgs = join_arg_vectors(Arity, lists:reverse(ArgVectors)),
     JoinedRet = spectra_type:normalize_union(lists:reverse(RetTypes)),
-    InferredType = {fun_type, JoinedArgs, JoinedRet},
+    InferredType = {fun_type, [spectra_type:widen(A) || A <- JoinedArgs], spectra_type:widen(JoinedRet)},
     Contract#func_contract{
         inferred_type = InferredType,
         call_sites = lists:usort(CallSites),
@@ -493,7 +493,8 @@ infer_expr(Mod, MFA, {'if', Anno, Clauses}, Env0, Contracts, Warns0, Sites0) ->
     infer_case(Mod, MFA, Anno, any, Clauses, Env0, Contracts, Warns0, Sites0);
 infer_expr(Mod, MFA, {'block', _Anno, Body}, Env0, Contracts, Warns0, Sites0) ->
     infer_body(Mod, MFA, Body, Env0, Contracts, Warns0, Sites0);
-infer_expr(Mod, MFA, {call, Anno, Target, Args}, Env0, Contracts, Warns0, Sites0) ->
+infer_expr(Mod, MFA, {call, Anno, Target, Args}, Env0, Contracts, Warns00, Sites00) ->
+    {Warns0, Sites0} = infer_target_effects(Mod, MFA, Target, Env0, Contracts, Warns00, Sites00),
     {ArgTypes, Env1, Warns1, Sites1} = infer_expr_list(Mod, MFA, Args, Env0, Contracts, Warns0, Sites0),
     infer_call(Mod, MFA, Anno, Target, Args, ArgTypes, Env1, Contracts, Warns1, Sites1);
 %% The constructs below used to be answered `any` without looking inside, so a call in a fun, a try, a comprehension or a
@@ -542,6 +543,17 @@ infer_expr(Mod, MFA, {record_field, _, Expr, _Name, _Field}, Env, Contracts, War
     {any, Env, Warns, Sites};
 infer_expr(_Mod, _MFA, _Other, Env, _Contracts, Warns, Sites) ->
     {any, Env, Warns, Sites}.
+
+%% What is computed to find out which function is called: the module and the function of `M:F(...)` when they are not literals
+%% (the log macros expand to `(logger_mod()):log(...)`), or the expression that is called, `(f())(X)`.
+infer_target_effects(_Mod, _MFA, {atom, _, _}, _Env, _Contracts, Warns, Sites) ->
+    {Warns, Sites};
+infer_target_effects(_Mod, _MFA, {var, _, _}, _Env, _Contracts, Warns, Sites) ->
+    {Warns, Sites};
+infer_target_effects(Mod, MFA, {remote, _, ModExpr, FunExpr}, Env, Contracts, Warns, Sites) ->
+    infer_effects(Mod, MFA, [ModExpr, FunExpr], Env, Contracts, Warns, Sites);
+infer_target_effects(Mod, MFA, Target, Env, Contracts, Warns, Sites) ->
+    infer_effects(Mod, MFA, [Target], Env, Contracts, Warns, Sites).
 
 %% Infers each expression only for its warnings and call sites, in the same environment (nothing flows between them).
 infer_effects(Mod, MFA, Exprs, Env, Contracts, Warns0, Sites0) ->
@@ -715,21 +727,31 @@ infer_unop(_MFA, _Anno, _Op, _ArgAst, _ArgType, Env, Warns, Sites) ->
 %% [H | T] is a proper list only when T is known to be one. Anything else (an integer, a map, or an unknown term,
 %% which may be one of those) can end the chain in a non-list, as in [Index | Header]: a maybe-improper list.
 cons_type(HType, {union, Members}) ->
-    spectra_type:normalize_union([cons_type(HType, M) || M <- Members]);
+    %% The members that are proper lists make one `nonempty_list` together (their elements joined); only the others (an improper
+    %% list, an integer, `any`...) each give their own type. Distributing over every member made the type grow with each
+    %% pass of the inference of a recursive function: `ne(A) | ne(B)` is not merged, so K clauses gave K, K^2, K^3 members.
+    {Proper, Other} = lists:partition(fun proper_tail/1, Members),
+    ProperPart = case Proper of
+        [] -> [];
+        _ -> [proper_cons(HType, {union, Proper})]
+    end,
+    spectra_type:normalize_union(ProperPart ++ [cons_type(HType, M) || M <- Other]);
 cons_type(HType, {improper_list, TailElem, TailEnd}) ->
     %% [H | improper_list(E, T)] is improper_list(H or E, T): the chain does not nest, however many cells are consed
     {improper_list, spectra_type:join(HType, TailElem), TailEnd};
 cons_type(HType, TType) ->
     case proper_tail(TType) of
-        true ->
-            ElemJoin = case extract_list_elem(TType) of
-                none -> HType;
-                TailElem -> spectra_type:join(HType, TailElem)
-            end,
-            {nonempty_list, ElemJoin};
-        false ->
-            {improper_list, HType, TType}
+        true -> proper_cons(HType, TType);
+        false -> {improper_list, HType, TType}
     end.
+
+%% [H | T] where T is known to be a proper list (or a union of them).
+proper_cons(HType, TType) ->
+    ElemJoin = case extract_list_elem(TType) of
+        none -> HType;
+        TailElem -> spectra_type:join(HType, TailElem)
+    end,
+    {nonempty_list, ElemJoin}.
 
 %% Is every value of the type a proper list? `any` and type variables are not known to be.
 proper_tail(nil) -> true;
