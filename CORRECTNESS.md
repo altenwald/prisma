@@ -365,6 +365,32 @@ The last mutant that Spectra misses (`r1` number 12, `cuttlefish_unit:generate_c
 the same lines and of the same kind (the ones above), and the runner compares (module, line, kind) with the unmodified directory, so the mutant's warning is hidden by
 them.
 
+### Triage of the contract warnings that gap 4 adds
+
+Gap 4 added 62 `gradual_mismatch` warnings in hybrid mode (see above). They were read, and **three false positives of Spectra** came out and were fixed, each with its test:
+
+- **a `case` could not take out what an earlier clause matched when that clause had a variable** (`{ok, State} -> ...; Err -> Err`, so `Err` still held `{ok, _}`: `ra_log_segment:close/1`,
+  `rabbit_ff_controller`). My first version avoided variables altogether, because a variable may be new (a catch-all) or already bound (an equality test, as in `Checksum -> ok; _ -> error`).
+  Now it asks the environment, which holds every variable that a pattern has bound (patterns of records and binaries are recorded too): a pattern whose variables are all new subtracts;
+- **arithmetic on something unknown gave `number`** (`any + 1`), which does not fit a declared `integer()`: it is `any` now (the result is unknown when an operand is);
+- **a function that never returns** (`fun((_, _) -> no_return())`, `none`) **clashed with an expected callback type** because the meet of the two return types was `none`: the bottom type fits any return
+  (`rabbit:stop_apps/1`, a new discrepancy that the change had introduced).
+
+What is left, **55 warnings**, in four kinds (`bench/triage/contract-warnings.json`):
+
+| Kind | n | read in the source | What they are |
+| :--- | :---: | :---: | :--- |
+| the value returned is not in the declared spec | 35 | 11 | **true by contract**: the spec says less than the code (`child_reply(X) -> X` returns the supervisor's error and `rabbit_sup` declares `ok`; `set_log_level` delegates to a function that may return `{error, _}`; `parse_mem_limit` declares `float()` and returns `{absolute, _}`; `ra_kv:put/delete`, `cuttlefish_*`...) |
+| an argument that the callee's spec does not take | 7 | 5 | **true by contract**: `rabbit_exchange:callback/4` declares its third argument `atom()` and is called with the serial (`none \| pos_integer()`), 4 times; `replace_match/2` gets `undefined \| string()` |
+| integer range wider than the declared one | 10 | 6 | by the strict reading of the gradual check: `integer()` for `non_neg_integer()` (`count/0`, `rabbit_db_queue:count/0` is declared `integer()`), `number()` for `integer()` (`Serial + 1` forces a number, not an integer), `non_neg_integer()` for `0..4611686018427387903` |
+| a list where the spec asks for a non-empty one | 3 | 0 | by the same strict reading: a `[atom()]` cannot be proved non-empty |
+
+**Not proved: 35 of the 55 were classified by their shape and not by reading the code.** They look like the ones that were read, but that is a guess until someone reads them.
+
+The 13 of the last two rows are the **policy question** that is left for the author, not a bug: the gradual check says "the inferred type must be a gradual subtype of the declared one", which is stricter
+than Dialyzer (it warns only when the two do not overlap). Accepting a numeric (and non-empty list) over-approximation as consistent would remove them; it would also stop reporting what
+the README advertises (a recursive call that violates `pos_integer()`). It was not decided here.
+
 ### A performance mistake of mine, how it was found, and what changed
 
 The fix for improper cells (commit `04b2e2c`) made the inferred type of some recursive functions grow with every pass of the inference, and I did not see it:

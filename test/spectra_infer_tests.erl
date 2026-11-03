@@ -975,3 +975,67 @@ gradual_warnings(Src) ->
     {ok, cmp_sample, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
     {ok, Ws} = spectra:analyze_beams([Beam], #{oxbow => false}),
     [{K, L} || #spectra_warning{kind = K, line = L} <- Ws].
+
+%% A variable in a pattern is a catch-all when it is new, and an equality test when it is already bound. The environment knows which ones are bound,
+%% so a pattern with only new variables takes its values out of what is left of the scrutinee (`{ok, State} -> ...; Err -> Err`).
+
+fresh_callee() ->
+    "-export([f/0, g/0]).\n"
+    "-spec f() -> {ok, integer()} | {error, atom()}.\nf() -> {ok, 1}.\n"
+    "-spec g() -> ok.\ng() -> ok.\n".
+
+fresh_ret(Body) ->
+    Caller = "-export([f/0]).\n-record(r, {v}).\nf() ->\n" ++ Body ++ ".\n",
+    Compile = fun(Name, Src) ->
+        {ok, Toks, _} = erl_scan:string("-module(" ++ Name ++ ").\n" ++ Src),
+        {ok, _, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+        Beam
+    end,
+    {ok, Plt} = spectra_plt:from_beams([Compile("ov_caller", Caller), Compile("ov_callee", fresh_callee())]),
+    #module_summary{functions = Funcs} = maps:get(ov_caller, Plt#spectra_plt.modules),
+    {fun_type, [], Ret} = (maps:get({ov_caller, f, 0}, Funcs))#func_contract.inferred_type,
+    Ret.
+
+new_variables_take_their_values_out_test() ->
+    Ret = fresh_ret("    case ov_callee:f() of\n        {ok, State} -> {done, State};\n        Err -> Err\n    end"),
+    ?assert(spectra_oracle:member({done, 1}, Ret)),
+    ?assert(spectra_oracle:member({error, x}, Ret)),
+    ?assertNot(spectra_oracle:member({ok, 1}, Ret)).
+
+a_variable_bound_by_a_record_pattern_is_not_new_test() ->
+    %% X comes out of the record: `X ->` compares, it does not catch everything
+    Ret = fresh_ret("    R = #r{v = ok},\n    #r{v = X} = R,\n    case ov_callee:g() of\n        X -> matched;\n        _ -> other\n    end"),
+    ?assert(spectra_oracle:member(matched, Ret)),
+    ?assert(spectra_oracle:member(other, Ret)).
+
+a_variable_bound_in_the_head_is_not_new_test() ->
+    Ret = inferred_return("f(Y) ->\n    case Y of\n        {ok, Z} -> Z;\n        Z -> {other, Z}\n    end.\n"),
+    %% Z is new in both clauses: the second one only sees what the first did not take
+    ?assert(spectra_oracle:member({other, 5}, Ret)),
+    ?assert(spectra_oracle:member(1, Ret)).
+
+arithmetic_on_something_unknown_is_unknown_test() ->
+    ?assertEqual(any, inferred_return("f(X) -> X + 1.\n")),
+    ?assertEqual(integer, inferred_return("f(X) when is_integer(X) -> X + 1.\n")),
+    ?assertEqual(float, inferred_return("f(X) -> X + 1.5.\n")).
+
+%% A function that never returns (`no_return()`, `none`) is a valid callback for any return type: its return is the bottom type, not a clash.
+
+never_returning_callee() ->
+    "-export([mk/0, use/1]).\n"
+    "-spec mk() -> fun((_, _) -> no_return()).\nmk() -> fun(_, _) -> erlang:error(boom) end.\n"
+    "-spec use(fun((atom(), term()) -> ok)) -> ok.\nuse(F) -> F(a, b).\n".
+
+a_function_that_never_returns_is_a_callback_for_anything_test() ->
+    Caller = "-export([f/0]).\nf() ->\n    ov_callee:use(ov_callee:mk()).\n",
+    ?assertEqual([], two_module_warnings(Caller, never_returning_callee(), discrepancy)),
+    ?assertEqual([], two_module_warnings(Caller, never_returning_callee(), hybrid)).
+
+meet_of_fun_types_whose_return_never_comes_back_test_() ->
+    Never = {fun_type, [any, any], none},
+    Wants = {fun_type, [atom, any], {atom_lit, ok}},
+    [?_assertNotEqual(none, spectra_type:meet(Never, Wants)),
+     ?_assertNotEqual(none, spectra_type:meet(Wants, Never)),
+     %% still disjoint when the arguments are, or the arity differs
+     ?_assertEqual(none, spectra_type:meet({fun_type, [integer], none}, {fun_type, [atom], {atom_lit, ok}})),
+     ?_assertEqual(none, spectra_type:meet({fun_type, [any], none}, {fun_type, [any, any], {atom_lit, ok}}))].

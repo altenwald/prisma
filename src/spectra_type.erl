@@ -556,8 +556,14 @@ meet_non_numeric({map, F1}, {map, F2}) ->
     meet_map_fields(F1, F2);
 meet_non_numeric({fun_type, A1, R1}, {fun_type, A2, R2}) when length(A1) =:= length(A2) ->
     ArgMeets = [meet(X, Y) || {X, Y} <- lists:zip(A1, A2)],
-    RetMeet = meet(R1, R2),
-    case lists:member(none, ArgMeets) orelse RetMeet =:= none of
+    %% a function that never returns (`none`, `no_return()`) fits any return type: the bottom type is not a clash
+    RetMeet = case {R1, R2} of
+        {none, _} -> none;
+        {_, none} -> none;
+        _ -> meet(R1, R2)
+    end,
+    ReturnsClash = RetMeet =:= none andalso R1 =/= none andalso R2 =/= none,
+    case lists:member(none, ArgMeets) orelse ReturnsClash of
         true -> none;
         false -> {fun_type, ArgMeets, RetMeet}
     end;

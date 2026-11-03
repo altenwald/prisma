@@ -164,8 +164,8 @@ bind_pattern({atom, _, A}, Expected, Env) ->
     {spectra_type:meet({atom_lit, A}, Expected), Env};
 bind_pattern({nil, _}, Expected, Env) ->
     {spectra_type:meet(nil, Expected), Env};
-bind_pattern({bin, _, _}, Expected, Env) ->
-    {spectra_type:meet({binary, 0, 8}, Expected), Env};
+bind_pattern({bin, _, _} = Pattern, Expected, Env) ->
+    {spectra_type:meet({binary, 0, 8}, Expected), bind_variables_as_any(Pattern, Env)};
 bind_pattern({string, _, S}, Expected, Env) ->
     StrType = case S of
         [] -> nil;
@@ -210,8 +210,22 @@ bind_pattern({map, _, Fields}, Expected, Env0) ->
         _ ->
             bind_map_pat_fields(Fields, Expected, Env0, [])
     end;
+bind_pattern({record, _, _, _} = Pattern, Expected, Env) ->
+    {Expected, bind_variables_as_any(Pattern, Env)};
 bind_pattern(_, Expected, Env) ->
     {Expected, Env}.
+
+%% A pattern that is not looked into still binds its variables: they are recorded (as `any`), so that a later pattern knows that
+%% they are bound and compares instead of catching everything.
+bind_variables_as_any(Pattern, Env) ->
+    lists:foldl(fun(Name, E) -> case maps:is_key(Name, E) of true -> E; false -> E#{Name => any} end end,
+                Env, pattern_variables(Pattern)).
+
+pattern_variables({var, _, '_'}) -> [];
+pattern_variables({var, _, Name}) -> [Name];
+pattern_variables(T) when is_tuple(T) -> pattern_variables(tuple_to_list(T));
+pattern_variables([H | T]) -> pattern_variables(H) ++ pattern_variables(T);
+pattern_variables(_) -> [].
 
 bind_map_pat_fields([], Expected, Env, Acc) ->
     {spectra_type:meet({map, lists:usort(Acc)}, Expected), Env};
@@ -636,7 +650,11 @@ infer_binop(MFA, Anno, Op, LAst, LType, RAst, RType, Env0, Warns, Sites)
             {none, Env0, [make_warning(discrepancy, MFA, Anno, Msg) | Warns], Sites};
         false ->
             Env1 = constrain_ast_var(LAst, number, constrain_ast_var(RAst, number, Env0)),
-            Ret = arith_result_type(Op, LM, RM),
+            %% an operand that is `any` may be a float or an integer: the result is unknown too, not `number`
+            Ret = case LType =:= any orelse RType =:= any of
+                true when LM =/= float, RM =/= float -> any;
+                _ -> arith_result_type(Op, LM, RM)
+            end,
             {Ret, Env1, Warns, Sites}
     end;
 infer_binop(MFA, Anno, '/', LAst, LType, RAst, RType, Env0, Warns, Sites) ->
@@ -835,7 +853,7 @@ infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0) 
                         {ok, CEnv0} ->
                             TestWarns = guard_warnings(MFA, CGuards, CEnv0),
                             Remaining1 = case CGuards of
-                                [] -> subtract_pattern(Remaining, Pats);
+                                [] -> subtract_pattern(Remaining, Pats, Env0);
                                 _ -> Remaining
                             end,
                             case apply_guard_disjunction(CGuards, CEnv0) of
@@ -877,10 +895,10 @@ bind_clause_pattern(_, _Remaining, Env0) ->
     {ok, Env0}.
 
 %% The scrutinee type without what a clause (with no guard) takes whole. Only a type that the pattern surely covers is removed.
-subtract_pattern(Remaining, [SinglePat]) ->
-    case pattern_without_variables(SinglePat) of
+subtract_pattern(Remaining, [SinglePat], Env) ->
+    case closed_pattern(SinglePat, Env) of
         false ->
-            %% a variable may be new or already bound (then it is an equality test): the code does not say, so nothing is taken
+            %% a variable that is already bound is an equality test, not a catch-all: nothing is taken out
             Remaining;
         true ->
             case bind_pattern(SinglePat, any, #{}) of
@@ -888,22 +906,23 @@ subtract_pattern(Remaining, [SinglePat]) ->
                 {PatType, _} -> subtract_covered(Remaining, PatType)
             end
     end;
-subtract_pattern(Remaining, _) ->
+subtract_pattern(Remaining, _, _Env) ->
     Remaining.
 
-%% Atoms, numbers, strings, tuples and lists of those, and `_`.
-pattern_without_variables({var, _, '_'}) -> true;
-pattern_without_variables({var, _, _}) -> false;
-pattern_without_variables({atom, _, _}) -> true;
-pattern_without_variables({integer, _, _}) -> true;
-pattern_without_variables({char, _, _}) -> true;
-pattern_without_variables({float, _, _}) -> true;
-pattern_without_variables({string, _, _}) -> true;
-pattern_without_variables({nil, _}) -> true;
-pattern_without_variables({tuple, _, Elems}) -> lists:all(fun pattern_without_variables/1, Elems);
-pattern_without_variables({cons, _, H, T}) -> pattern_without_variables(H) andalso pattern_without_variables(T);
-pattern_without_variables({op, _, '-', {integer, _, _}}) -> true;
-pattern_without_variables(_) -> false.
+%% Atoms, numbers, strings, tuples and lists of those, `_`, and variables that are new (not bound before: the environment holds
+%% every variable that a pattern has bound).
+closed_pattern({var, _, '_'}, _Env) -> true;
+closed_pattern({var, _, Name}, Env) -> not maps:is_key(Name, Env);
+closed_pattern({atom, _, _}, _Env) -> true;
+closed_pattern({integer, _, _}, _Env) -> true;
+closed_pattern({char, _, _}, _Env) -> true;
+closed_pattern({float, _, _}, _Env) -> true;
+closed_pattern({string, _, _}, _Env) -> true;
+closed_pattern({nil, _}, _Env) -> true;
+closed_pattern({tuple, _, Elems}, Env) -> lists:all(fun(E) -> closed_pattern(E, Env) end, Elems);
+closed_pattern({cons, _, H, T}, Env) -> closed_pattern(H, Env) andalso closed_pattern(T, Env);
+closed_pattern({op, _, '-', {integer, _, _}}, _Env) -> true;
+closed_pattern(_, _Env) -> false.
 
 subtract_covered({union, Members}, PatType) ->
     spectra_type:normalize_union([M || M <- Members, not covers(PatType, M)]);
