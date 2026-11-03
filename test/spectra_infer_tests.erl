@@ -601,3 +601,83 @@ meet_of_a_tuple_and_a_record_test_() ->
      %% arity and field types are not checked: a spec only lists some of the fields
      ?_assertEqual(Rec, spectra_type:meet({tuple, [{atom_lit, r}, integer]}, Rec)),
      ?_assertEqual({record, r, []}, spectra_type:meet({tuple, [{atom_lit, r}, atom, atom]}, {record, r, []}))].
+
+%% A BIF with arguments of the wrong type inside a guard makes the guard fail, so the clause can never match.
+
+guard_bif_dead_clause_test() ->
+    ?assert(lists:member({dead_code, 3}, plain_warnings("-export([f/1]).\nf(X) when length(oops) > X -> yes;\nf(_) -> no.\n"))),
+    ?assert(lists:member({dead_code, 3}, plain_warnings("-export([f/1]).\nf(X) when byte_size(oops) > 0, is_integer(X) -> yes;\nf(_) -> no.\n"))),
+    ?assert(lists:member({dead_code, 3}, plain_warnings("-export([f/1]).\nf(M) when map_size(oops) =:= 0 -> yes;\nf(_) -> no.\n"))),
+    ?assert(lists:member({dead_code, 3}, plain_warnings("-export([f/1]).\nf(X) when X > 0 andalso length(oops) > 1 -> yes;\nf(_) -> no.\n"))),
+    %% and in a case clause
+    ?assert(lists:member({dead_code, 5}, plain_warnings("-export([f/1]).\nf(X) ->\n    case X of\n        _ when hd(oops) =:= 1 -> a;\n        _ -> b\n    end.\n"))).
+
+guard_bif_with_a_known_type_still_fine_test() ->
+    Src = "-export([f/1, g/1, h/1, i/1]).\n"
+          "f(L) when length(L) > 0 -> a;\nf(_) -> b.\n"
+          "g(M) when is_map(M), map_size(M) =:= 0 -> a;\ng(_) -> b.\n"
+          "h(X) when is_integer(X), X > 0, abs(X) < 10 -> a;\nh(_) -> b.\n"
+          "i(B) when byte_size(B) >= 4; is_list(B) -> a;\ni(_) -> b.\n",
+    ?assertEqual([], plain_warnings(Src)).
+
+guard_with_an_alternative_that_fits_is_not_dead_test() ->
+    %% the first alternative fails whenever it is evaluated, the second one does not: that test is reported, the clause is not dead
+    ?assertEqual([{discrepancy, 3}], plain_warnings("-export([f/1]).\nf(X) when length(oops) > 0; is_integer(X) -> yes;\nf(_) -> no.\n")).
+
+comparison_with_an_impossible_operand_is_impossible_test() ->
+    ?assertMatch([{dead_code, _} | _], plain_warnings("-export([f/1]).\nf(X) when length(oops) < length(X) -> a;\nf(_) -> b.\n")).
+
+%% A guard test that fails whenever it is evaluated is reported even when another alternative of the guard can still hold
+%% (the macros of khepri: `Path =:= [] orelse hd(Path) ...`): the clause is not dead, that test is.
+
+failing_guard_test_inside_an_alternative_test() ->
+    Src = "-export([f/1]).\n"
+          "f(P) when P =:= [] orelse hd(oops) =:= a -> yes;\nf(_) -> no.\n",
+    ?assertMatch([{discrepancy, 3}], plain_warnings(Src)),
+    Src2 = "-export([f/1]).\n"
+           "f(P) when is_list(P) andalso (P =:= [] orelse hd(oops) > 1) -> yes;\nf(_) -> no.\n",
+    ?assertMatch([{discrepancy, 3}], plain_warnings(Src2)),
+    %% in a case clause too
+    Src3 = "-export([f/1]).\nf(P) ->\n    case P of\n        _ when P =:= [] orelse length(oops) > 1 -> a;\n        _ -> b\n    end.\n",
+    ?assertMatch([{discrepancy, 5}], plain_warnings(Src3)).
+
+guards_with_fitting_tests_report_nothing_test() ->
+    Src = "-export([f/1, g/1]).\n"
+          "f(P) when P =:= [] orelse hd(P) =:= a -> yes;\nf(_) -> no.\n"
+          "g(P) when is_list(P) andalso (P =:= [] orelse length(P) > 1) -> yes;\ng(_) -> no.\n",
+    ?assertEqual([], plain_warnings(Src)).
+
+%% A failure is reported where it is, and only there. The functions that call the one that fails, however many levels up, are not
+%% named: Dialyzer's "no local return" cascade (a warning in every caller, without saying why) is exactly what Spectra must not do.
+
+failure_is_reported_only_where_it_is_test() ->
+    Src = "-export([top/0, other/1]).\n"
+          "-spec top() -> integer().\n"
+          "top() -> mid() + 1.\n"
+          "-spec mid() -> integer().\n"
+          "mid() ->\n"
+          "    X = low(),\n"
+          "    case X of\n"
+          "        1 -> a;\n"
+          "        _ -> b\n"
+          "    end,\n"
+          "    X.\n"
+          "low() -> length(oops).\n"
+          "other(L) ->\n"
+          "    F = fun() -> low() end,\n"
+          "    try F() of\n"
+          "        N when N > 0 -> N\n"
+          "    catch _:_ -> 0\n"
+          "    end,\n"
+          "    [low() || _ <- L],\n"
+          "    {low(), mid(), top()}.\n",
+    %% line 13 is `low() -> length(oops).`: the only line that is wrong
+    ?assertEqual([{discrepancy, 13}], plain_warnings(Src)).
+
+a_failing_call_in_a_guard_or_a_nested_construct_does_not_name_its_callers_test() ->
+    Src = "-export([f/1, g/1]).\n"
+          "f(P) when P =:= [] orelse hd(oops) > 1 -> yes;\n"
+          "f(_) -> no.\n"
+          "g(X) -> f(X) =:= yes.\n",
+    %% only the guard test of f/1 is named, not g/1 which calls it
+    ?assertEqual([{discrepancy, 3}], plain_warnings(Src)).

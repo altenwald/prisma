@@ -116,6 +116,9 @@ stmt(V, K, Env) ->
     end,
     FloatEq = ?LET({F, X, Y}, {expr(float, Env, 1), expr(int, Env, 1), expr(int, Env, 1)},
                    {fmt("    ~s = if\n        ~s == 0 -> ~s;\n        true -> ~s\n    end", [V, F, X, Y]), int}),
+    %% BIFs in a guard, always on the right type: a guard that Spectra decides cannot succeed has to be really dead
+    GuardBif = ?LET({L, P}, {expr(list, Env, 1), expr(pair, Env, 1)},
+                    {fmt("    ~s = if\n        length(~s) > 1 -> 1;\n        tuple_size(~s) =:= 2 -> 2;\n        true -> 3\n    end", [V, L, P]), int}),
     VarNames = [N || {N, T} <- Env, is_list(N), is_atom(T)],
     IntVars = [N || {N, int} <- Env, is_list(N)],
     CompareFloat = ?LET({F, X, Y, Z}, {expr(float, Env, 1), expr(int, Env, 1), expr(int, Env, 1), expr(int, Env, 1)},
@@ -132,7 +135,7 @@ stmt(V, K, Env) ->
         _ ->
             []
     end,
-    oneof(NonBoolean ++ CallStmts ++ OrelseGuard ++ [CellCase, FloatEq, CompareFloat, CompareAny] ++ [
+    oneof(NonBoolean ++ CallStmts ++ OrelseGuard ++ [CellCase, FloatEq, CompareFloat, CompareAny, GuardBif] ++ [
         ?LET(T, tag(), ?LET(E, expr(T, Env, 2), {line(V, E), T})),
         ?LET({I, X, Y}, {expr(int, Env, 1), expr(int, Env, 1), expr(int, Env, 1)},
              {fmt("    ~s = case ~s of\n        0 -> ~s;\n        _ -> ~s\n    end", [V, I, X, Y]), int}),

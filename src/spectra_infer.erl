@@ -99,17 +99,18 @@ infer_clause(Mod, MFA, {clause, Anno, PatArgs, Guards, Body}, AllContracts) ->
             end,
             {unreachable, ClauseWarns};
         {ok, PatTypes, Env0} ->
+            TestWarns = guard_warnings(MFA, Guards, Env0),
             case apply_guard_disjunction(Guards, Env0) of
                 unreachable ->
                     GuardWarns = case is_generated_function(MFA) of
                         true -> [];
                         false -> [make_warning(dead_code, MFA, Anno, <<"Function clause guard cannot succeed">>)]
                     end,
-                    {unreachable, GuardWarns};
+                    {unreachable, TestWarns ++ GuardWarns};
                 {ok, Env1} ->
                     {RetType, EnvFinal, Warns, Sites} = infer_body(Mod, MFA, Body, Env1, AllContracts, [], []),
                     RefinedArgs = [refine_pat_type(P, T, EnvFinal) || {P, T} <- lists:zip(PatArgs, PatTypes)],
-                    {ok, RefinedArgs, RetType, Warns, Sites}
+                    {ok, RefinedArgs, RetType, TestWarns ++ Warns, Sites}
             end
     end.
 
@@ -286,31 +287,56 @@ apply_guard_conjunction([Test | Rest], Env0) ->
         {ok, Env1} -> apply_guard_conjunction(Rest, Env1)
     end.
 
-apply_guard_test({call, _, {remote, _, {atom, _, erlang}, {atom, _, Fun}}, Args}, Env) ->
+%% What each test of a guard says when it is typed as an expression: a BIF given arguments of the wrong type fails whenever it is
+%% evaluated, even if another alternative of the guard (`P =:= [] orelse hd(P) ...`) can still hold.
+guard_warnings(MFA, Guards, Env) ->
+    case is_generated_function(MFA) of
+        true ->
+            [];
+        false ->
+            lists:append([begin
+                              {_, _, Warns, _} = infer_expr(guard, MFA, Test, Env, #{}, [], []),
+                              Warns
+                          end || Conj <- Guards, Test <- Conj])
+    end.
+
+%% A guard test that cannot succeed (a BIF given arguments of the wrong type, say) makes the guard fail, so the clause can
+%% never match: the test is typed as an expression first, and `none` means that it fails.
+apply_guard_test(Test, Env) ->
+    case guard_test_type(Test, Env) of
+        none -> unreachable;
+        _ -> apply_guard_test_refining(Test, Env)
+    end.
+
+guard_test_type(Test, Env) ->
+    {Type, _, _, _} = infer_expr(guard, {guard, guard, 0}, Test, Env, #{}, [], []),
+    Type.
+
+apply_guard_test_refining({call, _, {remote, _, {atom, _, erlang}, {atom, _, Fun}}, Args}, Env) ->
     apply_guard_bif(Fun, Args, Env);
-apply_guard_test({call, _, {atom, _, Fun}, Args}, Env) ->
+apply_guard_test_refining({call, _, {atom, _, Fun}, Args}, Env) ->
     apply_guard_bif(Fun, Args, Env);
-apply_guard_test({op, _, 'andalso', L, R}, Env0) ->
+apply_guard_test_refining({op, _, 'andalso', L, R}, Env0) ->
     case apply_guard_test(L, Env0) of
         unreachable -> unreachable;
         {ok, Env1} -> apply_guard_test(R, Env1)
     end;
-apply_guard_test({op, _, 'and', L, R}, Env0) ->
+apply_guard_test_refining({op, _, 'and', L, R}, Env0) ->
     apply_guard_test({op, 0, 'andalso', L, R}, Env0);
-apply_guard_test({op, _, 'orelse', L, R}, Env0) ->
+apply_guard_test_refining({op, _, 'orelse', L, R}, Env0) ->
     apply_guard_disjunction([[L], [R]], Env0);
-apply_guard_test({op, _, Op, {var, _, V}, {integer, _, 0}}, Env)
+apply_guard_test_refining({op, _, Op, {var, _, V}, {integer, _, 0}}, Env)
   when Op =:= '>'; Op =:= '>='; Op =:= '<' ->
     refine_compare_zero(V, Op, Env);
-apply_guard_test({op, _, '==', {var, _, V}, {integer, _, I}}, Env) ->
+apply_guard_test_refining({op, _, '==', {var, _, V}, {integer, _, I}}, Env) ->
     %% `==` compares numbers by value: X == 0 also holds for 0.0
     refine_var(V, {union, [{int_lit, I}, float]}, Env);
-apply_guard_test({op, _, Op, {var, _, V}, Lit}, Env)
+apply_guard_test_refining({op, _, Op, {var, _, V}, Lit}, Env)
   when Op =:= '=:='; Op =:= '==' ->
     refine_var(V, literal_or_any(Lit), Env);
-apply_guard_test({atom, _, false}, _Env) ->
+apply_guard_test_refining({atom, _, false}, _Env) ->
     unreachable;
-apply_guard_test(_, Env) ->
+apply_guard_test_refining(_, Env) ->
     {ok, Env}.
 
 %% `V > 0`, `V >= 0`, `V < 0`. Floats qualify as well as integers, and, in the term order (numbers < atoms < ... <
@@ -584,6 +610,9 @@ infer_map_fields(Mod, MFA, [{Tag, _, K, V} | Rest], Env0, Contracts, Warns0, Sit
 infer_map_fields(Mod, MFA, [_ | Rest], Env, Contracts, Warns, Sites, Acc) ->
     infer_map_fields(Mod, MFA, Rest, Env, Contracts, Warns, Sites, Acc).
 
+infer_binop(_MFA, _Anno, Op, _LAst, LType, _RAst, RType, Env, Warns, Sites)
+  when Op =/= 'andalso', Op =/= 'orelse', LType =:= none orelse RType =:= none ->
+    {none, Env, Warns, Sites};
 infer_binop(MFA, Anno, Op, LAst, LType, RAst, RType, Env0, Warns, Sites)
   when Op =:= '+'; Op =:= '-'; Op =:= '*' ->
     LM = spectra_type:meet(LType, number),
@@ -758,15 +787,16 @@ infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0) 
                     end,
                     {RetsAcc, EnvsAcc, PWarns ++ WAcc, SAcc};
                 {_Matched, CEnv0} ->
+                    TestWarns = guard_warnings(MFA, CGuards, CEnv0),
                     case apply_guard_disjunction(CGuards, CEnv0) of
                         unreachable ->
                             GWarns = case is_generated_function(MFA) of
                                 true -> [];
                                 false -> [make_warning(dead_code, MFA, CAnno, <<"Clause guard cannot succeed">>)]
                             end,
-                            {RetsAcc, EnvsAcc, GWarns ++ WAcc, SAcc};
+                            {RetsAcc, EnvsAcc, TestWarns ++ GWarns ++ WAcc, SAcc};
                         {ok, CEnv1} ->
-                            {CRet, CEnv2, WNext, SNext} = infer_body(Mod, MFA, CBody, CEnv1, Contracts, WAcc, SAcc),
+                            {CRet, CEnv2, WNext, SNext} = infer_body(Mod, MFA, CBody, CEnv1, Contracts, TestWarns ++ WAcc, SAcc),
                             {[CRet | RetsAcc], [CEnv2 | EnvsAcc], WNext, SNext}
                     end
             end

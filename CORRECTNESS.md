@@ -278,7 +278,8 @@ Same 125 mutants after each fix (the counts for Dialyzer and `erlc` do not chang
 | Fix | Spectra | what it caught |
 | :--- | :---: | :--- |
 | before | 52 / 125 | |
-| 1. look inside `fun`, `try`, `catch`, `receive`, comprehensions, records and binaries | **57 / 125** | `r2` 21 -> 24, `r3` 6 -> 8; nothing lost |
+| 1. look inside `fun`, `try`, `catch`, `receive`, comprehensions, records and binaries | 57 / 125 | `r2` 21 -> 24, `r3` 6 -> 8; nothing lost |
+| 2. BIFs with arguments of the wrong type inside guards | **74 / 125** | `r3` 8 -> **25 of 25**; nothing lost |
 
 **Gap 1.** `infer_expr` answered `any` for every construct it did not know without looking inside. It now has a clause each for `fun`
 (and named funs), `try` (body, `of`, `catch`, `after`), `catch`, `receive`, list and binary comprehensions, record creation, update and access,
@@ -298,6 +299,26 @@ Three things turned up on the way, none of them in the mutants:
 The generator now puts the call to the module with the overloaded spec in a plain statement, in a fun, in a comprehension, in a record field and
 (with arguments that fit the spec, because a `catch` would hide the failure) in a `try`. It guards against false positives in those places (1500
 programs x 25 runs); it cannot see false negatives, which the unit tests and the mutants measure.
+
+**Gap 2.** Guards only refined variables (`is_list(X)`); the rest of their tests were not evaluated. Now each test is typed as an expression: if it
+cannot succeed the guard cannot, and the clause is reported as dead (the existing "guard cannot succeed"); an operator with an operand that
+cannot be evaluated cannot be evaluated either. The first version gained only **one** of the 17 mutants of this class, and the reason was in
+the mutants themselves: the macros of khepri and ra put the failing BIF on the right of an `orelse` (`Path =:= [] orelse hd(Path) ...`), so the
+clause is *not* dead (it still holds for `[]`) and Spectra was right to keep quiet about it. What Dialyzer says there is narrower and correct:
+"Guard test `hd(mutant_atom)` can never succeed". So the tests of a guard are also checked one by one and each one that fails whenever it is
+evaluated is reported, whether or not another alternative saves the clause. No new warning in the 440 modules except `khepri_sproc` (the defensive
+clause already known, now also named at the test that cannot work on a `fun()`).
+
+### Where a failure is reported
+
+A failure is reported **where it is and only there**. Dialyzer names every function above the faulty one ("no local return"), without saying
+why, even when the problem is not in them; Spectra must not copy that. It is covered by a unit test (a fault three calls deep, with specs on
+the callers, and calls from a fun, a try and a comprehension: the only warning is on the faulty line). Measured on the 125 mutants, the new
+warnings that each tool gives *outside* the mutated function are **6 for Spectra (the same number as before any of the fixes of this section)
+and 201 for Dialyzer**. The 6 are five mutants, all `r1` (the function returns an atom against its own `-spec`), and they are of one kind: a function
+that *uses* the result gets a warning that says what does not fit (a `gradual_mismatch` in a caller with a spec, a call that receives the atom).
+That is not Dialyzer's silent cascade, but it is still an effect in the callers; the way to remove it is to let callers trust the declared `-spec`
+of a function over what was inferred from its (wrong) body. Not done.
 
 What this sample does not say: 125 mutants of five kinds, injected on purpose, are not the distribution of real bugs; "must fail" is by contract
 or by BIF, so a mutant on code that is never reached still counts; Dialyzer ran with its default warnings and the erts/kernel/stdlib PLT; and the
