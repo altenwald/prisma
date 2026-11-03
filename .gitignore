@@ -9,3 +9,4 @@
 /bench/corpus/
 /bench/results/
 /erl_crash.dump
+/bench/tools/

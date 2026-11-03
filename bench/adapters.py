@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Runs one analyzer over BEAM directories and prints its warnings as normalized JSON.
 
-    BENCH_LIBS=dir1:dir2 (xref only: extra code path, e.g. the dependencies) adapters.py <prisma|prisma-discrepancy|dialyzer|xref-unused|xref-undefined> <ebin_dir>...
+    BENCH_LIBS=dir1:dir2 (xref only: extra code path, e.g. the dependencies) adapters.py <prisma|prisma-discrepancy|dialyzer|gradualizer|xref-unused|xref-undefined> <ebin_dir>...
 
 Every warning becomes {"tool", "category", "module", "function", "line", "file", "message"} so that
 tools can be compared per category (never across categories). Categories:
-  discrepancy  a call or clause that cannot succeed          (prisma, dialyzer)
-  contract     declared spec and inferred type disagree      (prisma, dialyzer)
-  dead_code    unreachable clause or branch                  (prisma, dialyzer)
+  discrepancy  a call or clause that cannot succeed          (prisma, dialyzer, gradualizer)
+  contract     declared spec and inferred type disagree      (prisma, dialyzer, gradualizer)
+  dead_code    unreachable clause or branch                  (prisma, dialyzer, gradualizer)
   unused       private function nobody calls                 (prisma oxbow, dialyzer, xref)
   undefined    call to a function that does not exist        (prisma, xref)
 """
@@ -40,6 +40,33 @@ def prisma(dirs, discrepancy_only=False):
         yield dict(tool="prisma-discrepancy" if discrepancy_only else "prisma", category=PRISMA_KINDS.get(w["kind"], w["kind"]),
                    module=w.get("module"), function=w.get("function"), line=w.get("line", 0),
                    file=w.get("file"), message=w.get("message"))
+
+GRADUALIZER = os.path.join(ROOT, "bench/tools/gradualizer/bin/gradualizer")
+
+def gradualizer(dirs):
+    """Gradualizer, one module at a time: an internal error in one module (a `badmatch` in typechecker:expect_record_type)
+    ends the whole run, so a single invocation over a directory stops after the first module that crashes it.
+    A module that crashes it is reported as category `crash` (it was not checked). It also needs the types of everything a
+    module mentions on the code path: without the dependencies every remote type is "undefined" (2558 warnings on `rabbit`,
+    mostly that). BENCH_LIBS=dir1:dir2 adds them."""
+    libs = [x for d in os.environ.get("BENCH_LIBS", "").split(":") if d for x in ("-pa", d)]
+    beams = sorted(b for d in dirs for b in ([d] if os.path.isfile(d) else
+                   [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".beam")]))
+    for beam in beams:
+        out = subprocess.run([GRADUALIZER, "--no_color", "--fmt_location", "brief", *libs, "--", beam],
+                             capture_output=True, text=True)
+        module = os.path.basename(beam)[:-5]
+        if "in function  typechecker:" in out.stdout + out.stderr or "Task reported error" in out.stdout:
+            yield dict(tool="gradualizer", category="crash", module=module, function=None, line=0, file=beam,
+                       message="internal error: the module was not (fully) checked")
+        blocks = re.split(r"\n(?=\S+\.beam:\d+:\d+: )", out.stdout)
+        for b in blocks:
+            m = re.match(r"(\S+?\.beam):(\d+):(\d+): (.*)", b, re.S)
+            if not m:
+                continue
+            msg = " ".join(m.group(4).split())[:300]
+            yield dict(tool="gradualizer", category="contract", module=module, function=None,
+                       line=int(m.group(2)), file=m.group(1), message=msg)
 
 DIALYZER_RULES = [
     (r"Callback info about .* is not available", "note"),
@@ -87,6 +114,7 @@ TOOLS = {
     "prisma": prisma,
     "prisma-discrepancy": lambda dirs: prisma(dirs, discrepancy_only=True),
     "dialyzer": dialyzer,
+    "gradualizer": gradualizer,
     "xref-unused": xref("locals_not_used", "unused"),
     "xref-undefined": xref("undefined_function_calls", "undefined"),
 }
