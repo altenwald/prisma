@@ -27,25 +27,34 @@ Prisma introduces the portable, binary **`.pplt`** format:
 
 ### Publishing a `.pplt` with your library
 
-**Please ship the `.pplt` in your package.** Make it once per release, call it `<app>_<vsn>.pplt` and leave it at the root of the package, next to `mix.exs` or `rebar.config` (not in `priv/`, which is for what ends up in a release, not for checking tools):
+**Please ship the `.pplt` in your package.** One command compiles the project and writes `<app>_<vsn>.pplt` at the root of each application, made from the beams that were just compiled (not in `priv/`, which is for what ends up in a release, not for checking tools):
 
 ```bash
-prisma build --output my_lib_1.2.3.pplt _build/default/lib/my_lib/ebin
+rebar3 prisma build      # Erlang: compiles, then writes my_lib_1.2.3.pplt
+mix prisma.build         # Elixir: the same
+prisma build             # standalone: from what is already compiled in _build
 ```
 
-and add it to what you upload to Hex:
+It also leaves in `_build/` the `.pplt` of the dependencies that nobody shipped, which is what the checks use. Add the file to what you upload to Hex, and make the build part of publishing so that the file can never be from another version:
 
 ```elixir
 # mix.exs
-files: ~w(lib mix.exs README* LICENSE* my_lib_*.pplt)
+defp package, do: [files: ~w(lib mix.exs README* LICENSE* my_lib_*.pplt)]
+defp aliases, do: ["hex.publish": ["prisma.build", "hex.publish"]]
 ```
 
 ```erlang
 %% src/my_lib.app.src
-{files, ["src", "include", "rebar.config", "README.md", "my_lib_1.2.3.pplt"]}
+{files, ["src", "include", "rebar.config", "README.md", "my_lib_*.pplt"]}
+%% rebar.config
+{provider_hooks, [{pre, [{hex_publish, {prisma, build}}]}]}   %% or just run `rebar3 prisma build` before `rebar3 hex publish`
 ```
 
-Whoever depends on the library then gets its contracts without building anything. One or more files, with any names, are read from the root of the dependency; keep them next to the code they were made from: Prisma trusts them as it trusts the beams.
+The file carries a hash of the sources it was made from and the OTP release. Whoever uses your library **checks** it before trusting it, and leaves it out (with a message) and builds the dependency from its beams if:
+- it is **out of date**: the sources of the dependency in `deps/` or `_build/` no longer match the hash (a file from the repository that was not made again, for example);
+- it was made with an OTP release that is **too new or too old**: only the one that runs and the two before are used (the same window in which the VM can load a library's beams).
+
+A library without its sources on disk cannot be compared, and its file is trusted. One or more files, with any names, are read from the root of the dependency.
 
 ---
 

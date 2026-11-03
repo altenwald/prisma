@@ -8,6 +8,7 @@
     main/1,
     version/0,
     build/2,
+    build_project/2,
     analyze_project/1,
     analyze_project/2,
     analyze_dirs/1,
@@ -41,6 +42,91 @@ build(Inputs, OutputFile) ->
         {error, Reason} ->
             {error, Reason}
     end.
+
+%% @doc What the `build` task does, once the project is compiled: writes `<app>_<vsn>.pplt` at the root of each application of the
+%% project (the file a library publishes with its package), made from the beams that were just compiled and with the hash of its sources, and
+%% leaves in `_build/` the `.pplt` of the dependencies that the checks need (the ones nobody shipped).
+-spec build_project(file:filename_all(), map()) -> {ok, [string()]} | {error, term()}.
+build_project(ProjectRoot, Opts) ->
+    Ebins = prisma_lock:discover_project_ebins(ProjectRoot, Opts),
+    case Ebins of
+        [] ->
+            {error, no_compiled_applications};
+        _ ->
+            Results = [build_app_pplt(Ebin, ProjectRoot) || Ebin <- Ebins],
+            case [E || {error, _} = E <- Results] of
+                [] ->
+                    _ = prisma_lock:resolve_project_pplts(ProjectRoot, maps:with([cache_dir, otp_apps, elixir], Opts)),
+                    {ok, [Path || {ok, Path} <- Results]};
+                [Error | _] ->
+                    Error
+            end
+    end.
+
+build_app_pplt(Ebin, ProjectRoot) ->
+    AppLink = filename:dirname(Ebin),
+    App = filename:basename(AppLink),
+    case app_vsn(Ebin, App) of
+        {ok, Vsn} ->
+            AppDir = real_app_dir(AppLink, ProjectRoot),
+            Beams = filelib:wildcard(filename:join(Ebin, "*.beam")),
+            Meta = #{package => list_to_binary(App), package_vsn => list_to_binary(Vsn),
+                     source_hash => prisma_lock:source_hash(AppDir)},
+            case prisma_pplt:from_beams(Beams, Meta) of
+                {ok, Pplt} ->
+                    Path = filename:join(AppDir, App ++ "_" ++ Vsn ++ ".pplt"),
+                    %% one file per application: an older one would be read as well, and it is stale
+                    [file:delete(Old) || Old <- filelib:wildcard(filename:join(AppDir, App ++ "_*.pplt")), Old =/= Path],
+                    case prisma_pplt:save(Pplt, Path) of
+                        ok -> {ok, Path};
+                        {error, Reason} -> {error, {write_failed, Path, Reason}}
+                    end;
+                {error, Reason} ->
+                    {error, Reason}
+            end;
+        error ->
+            {error, {no_version, App}}
+    end.
+
+app_vsn(Ebin, App) ->
+    case file:consult(filename:join(Ebin, App ++ ".app")) of
+        {ok, [{application, _, Props}]} ->
+            case proplists:get_value(vsn, Props) of
+                Vsn when is_list(Vsn) -> {ok, Vsn};
+                _ -> error
+            end;
+        _ ->
+            error
+    end.
+
+normalize(Path) ->
+    Parts = lists:foldl(
+        fun("..", [_ | Up]) -> Up;
+           (".", Acc) -> Acc;
+           (Part, Acc) -> [Part | Acc]
+        end, [], filename:split(Path)),
+    filename:join(lists:reverse(Parts)).
+
+%% The root of the package of an application of the project. rebar3 links the directories of the application into
+%% `_build/<profile>/lib/<app>` (`src`, `include`, ...), Mix links `priv`, and either may link the whole directory: the root is where the links
+%% point. A project with a single application and no link to follow is its own root.
+real_app_dir(AppLink, ProjectRoot) ->
+    Candidates = [AppLink | [filename:join(AppLink, Sub) || Sub <- ["src", "include", "lib", "priv"]]],
+    case [Dir || C <- Candidates, {ok, Target} <- [file:read_link_all(C)],
+                 Dir <- [link_root(C, AppLink, Target)]] of
+        [Root | _] -> Root;
+        [] ->
+            Root0 = unicode:characters_to_list(ProjectRoot),
+            case filelib:is_dir(filename:join(Root0, "src")) orelse filelib:is_dir(filename:join(Root0, "lib")) of
+                true -> normalize(filename:absname(Root0));
+                false -> AppLink
+            end
+    end.
+
+link_root(AppLink, AppLink, Target) ->
+    normalize(filename:absname(Target, filename:dirname(AppLink)));
+link_root(Link, _AppLink, Target) ->
+    filename:dirname(normalize(filename:absname(Target, filename:dirname(Link)))).
 
 %% @doc Analyzes only the project's own applications in `ProjectRoot`, caching locked dependencies as `.pplt` files.
 -spec analyze_project(file:filename_all()) ->
@@ -104,6 +190,15 @@ resolve_lock_pplt(Opts) ->
 main(["version"]) ->
     io:format("prisma ~s (OTP ~s)~n", [version(), erlang:system_info(otp_release)]),
     erlang:halt(0);
+main(["build"]) ->
+    case build_project(".", #{}) of
+        {ok, Paths} ->
+            [io:format("Built ~ts~n", [P]) || P <- Paths],
+            erlang:halt(0);
+        {error, Reason} ->
+            io:format(standard_error, "Failed to build: ~p~n", [Reason]),
+            erlang:halt(1)
+    end;
 main(["build", "--output", OutFile | Inputs]) when Inputs =/= [] ->
     case build(Inputs, OutFile) of
         {ok, Pplt} ->
@@ -144,6 +239,7 @@ main(_) ->
     io:format(
         "Usage:~n"
         "  prisma version~n"
+        "  prisma build~n"
         "  prisma build --output <file.pplt> <ebin_or_beam...>~n"
         "  prisma check [--format <human|pretty|oneline|json>] [--no-color] [--color] [--pplt <file.pplt>...] [<ebin_or_beam...>]~n"
     ),

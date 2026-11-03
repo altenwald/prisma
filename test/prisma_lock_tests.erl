@@ -310,3 +310,83 @@ the_otp_pplt_of_a_project_is_kept_in_build_test() ->
     ?assert(lists:member(compile, prisma_pplt:modules(Resolved))),
     ?assert(filelib:is_regular(filename:join([Proj, "_build", "otp_" ++ erlang:system_info(otp_release) ++ ".pplt"]))),
     os:cmd("rm -rf " ++ Proj).
+
+%% Whoever uses a shipped `.pplt` checks that it serves: same OTP release or one of the two before, and not stale.
+
+write_src(Dir, Body) ->
+    ok = filelib:ensure_dir(filename:join([Dir, "src", "dummy"])),
+    ok = file:write_file(filename:join([Dir, "src", "dep_lib.erl"]), Body).
+
+source_hash_follows_the_sources_test() ->
+    Dir = "/tmp/prisma_dev/tmp_hash",
+    os:cmd("rm -rf " ++ Dir),
+    ?assertEqual(undefined, prisma_lock:source_hash(Dir)),
+    write_src(Dir, "-module(dep_lib).\n"),
+    H1 = prisma_lock:source_hash(Dir),
+    ?assert(is_binary(H1)),
+    ?assertEqual(H1, prisma_lock:source_hash(Dir)),
+    write_src(Dir, "-module(dep_lib).\n-export([f/0]).\n"),
+    ?assertNotEqual(H1, prisma_lock:source_hash(Dir)),
+    os:cmd("rm -rf " ++ Dir).
+
+usable_checks_the_otp_release_test() ->
+    Running = list_to_integer(erlang:system_info(otp_release)),
+    Pplt = fun(Rel) -> (prisma_pplt:new(<<"dep_lib">>, <<"1.2.3">>))#prisma_pplt{otp_release = integer_to_binary(Rel)} end,
+    Check = fun(Rel) -> prisma_lock:usable(Pplt(Rel), "/tmp/prisma_dev/no_such_project", <<"dep_lib">>) end,
+    ?assertEqual(ok, Check(Running)),
+    ?assertEqual(ok, Check(Running - 2)),
+    ?assertMatch({error, {otp_release, _, _}}, Check(Running - 3)),
+    ?assertMatch({error, {otp_release, _, _}}, Check(Running + 1)).
+
+usable_checks_that_the_file_is_not_stale_test() ->
+    Proj = "/tmp/prisma_dev/tmp_stale",
+    os:cmd("rm -rf " ++ Proj),
+    write_src(filename:join([Proj, "deps", "dep_lib"]), "-module(dep_lib).\n"),
+    Hash = prisma_lock:source_hash(filename:join([Proj, "deps", "dep_lib"])),
+    Made = fun(H) -> (prisma_pplt:new(<<"dep_lib">>, <<"1.2.3">>))#prisma_pplt{source_hash = H} end,
+    ?assertEqual(ok, prisma_lock:usable(Made(Hash), Proj, <<"dep_lib">>)),
+    ?assertEqual({error, stale}, prisma_lock:usable(Made(<<"0000">>), Proj, <<"dep_lib">>)),
+    %% nothing to compare with: trusted
+    ?assertEqual(ok, prisma_lock:usable(Made(undefined), Proj, <<"dep_lib">>)),
+    ?assertEqual(ok, prisma_lock:usable(Made(Hash), Proj, <<"another_lib">>)),
+    os:cmd("rm -rf " ++ Proj).
+
+a_stale_shipped_pplt_is_left_out_and_the_dependency_is_built_test() ->
+    Proj = "/tmp/prisma_dev/tmp_stale_build",
+    os:cmd("rm -rf " ++ Proj),
+    LibDir = filename:join([Proj, "deps", "dep_lib"]),
+    write_src(LibDir, "-module(dep_lib).\n"),
+    {ok, Old} = prisma_pplt:from_beams([other_lib_beam()], #{package => <<"dep_lib">>, package_vsn => <<"1.2.3">>,
+                                                            source_hash => <<"out of date">>}),
+    ok = prisma_pplt:save(Old, filename:join(LibDir, "dep_lib_1.2.3.pplt")),
+    Ebin = filename:join([Proj, "_build", "default", "lib", "dep_lib", "ebin"]),
+    ok = filelib:ensure_dir(filename:join(Ebin, "dummy")),
+    ok = file:write_file(filename:join(Ebin, "dep_lib.beam"), dep_lib_beam()),
+    lock_for_dep_lib(Proj),
+    {ok, Resolved} = prisma_lock:resolve_project_pplts(Proj, #{}),
+    %% the stale file said `other_lib`; what is there now is `dep_lib`
+    ?assertEqual([dep_lib], prisma_pplt:modules(Resolved)),
+    os:cmd("rm -rf " ++ Proj).
+
+%% `prisma build`: after compiling, the `.pplt` of each application of the project is written at the root of the package.
+build_project_writes_the_pplt_at_the_root_test() ->
+    Proj = "/tmp/prisma_dev/tmp_build_project",
+    os:cmd("rm -rf " ++ Proj),
+    Ebin = filename:join(Proj, "ebin"),
+    ok = filelib:ensure_dir(filename:join(Ebin, "dummy")),
+    ok = file:write_file(filename:join(Ebin, "dep_lib.beam"), dep_lib_beam()),
+    ok = file:write_file(filename:join(Ebin, "dep_lib.app"),
+                         "{application, dep_lib, [{vsn, \"0.3.0\"}, {modules, [dep_lib]}, {applications, [kernel, stdlib]}]}.\n"),
+    write_src(Proj, "-module(dep_lib).\n"),
+    %% rebar3 links the application into _build/default/lib
+    ok = filelib:ensure_dir(filename:join([Proj, "_build", "default", "lib", "dummy"])),
+    ok = file:make_symlink("../../..", filename:join([Proj, "_build", "default", "lib", "dep_lib"])),
+    ok = file:write_file(filename:join(Proj, "dep_lib_0.2.0.pplt"), <<"an older one">>),
+    {ok, [Path]} = prisma:build_project(Proj, #{}),
+    ?assertEqual(filename:join(Proj, "dep_lib_0.3.0.pplt"), Path),
+    ?assertNot(filelib:is_regular(filename:join(Proj, "dep_lib_0.2.0.pplt"))),
+    {ok, Pplt} = prisma_pplt:load(Path),
+    ?assertEqual([dep_lib], prisma_pplt:modules(Pplt)),
+    ?assertEqual(prisma_lock:source_hash(Proj), Pplt#prisma_pplt.source_hash),
+    ?assertEqual({error, no_compiled_applications}, prisma:build_project("/tmp/prisma_dev/no_such_project", #{})),
+    os:cmd("rm -rf " ++ Proj).

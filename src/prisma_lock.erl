@@ -17,6 +17,8 @@
     default_cache_dir/0,
     project_cache_dir/1,
     shipped_pplts/2,
+    source_hash/1,
+    usable/3,
     cache_path/3,
     otp_cache_path/1,
     ensure_otp_pplt/2,
@@ -176,6 +178,63 @@ shipped_pplts(ProjectRoot, Name) ->
             filelib:wildcard(filename:join([Root, "_build", "*", "lib", App, "*.pplt"])),
     lists:usort([F || F <- Found, filelib:is_regular(F)]).
 
+%% @doc A hash of the sources of an application directory (`src/**/*.erl|hrl`, `include/**/*.hrl`, `lib/**/*.ex`, by relative path),
+%% or `undefined` if it has none. It goes into the `.pplt` when it is made, and tells whoever uses it that the file no longer matches the
+%% code. The beams cannot be compared: a dependency is compiled again by whoever uses it, and the beam of the same source is not the same
+%% with another compiler.
+-spec source_hash(file:filename_all()) -> binary() | undefined.
+source_hash(AppDir) ->
+    Dir = unicode:characters_to_list(AppDir),
+    Files = lists:sort(
+        filelib:wildcard("src/**/*.{erl,hrl}", Dir) ++
+        filelib:wildcard("include/**/*.hrl", Dir) ++
+        filelib:wildcard("lib/**/*.ex", Dir)
+    ),
+    case Files of
+        [] ->
+            undefined;
+        _ ->
+            Parts = [[Rel, 0, case file:read_file(filename:join(Dir, Rel)) of {ok, B} -> B; _ -> <<>> end, 0] || Rel <- Files],
+            binary:encode_hex(erlang:md5(iolist_to_binary(Parts)), lowercase)
+    end.
+
+%% @doc Whether a `.pplt` shipped with a dependency can be trusted for the Erlang that is running and for the code that is there:
+%%   * made with the same OTP release, or one of the two before (the beams of a library cannot be loaded from a newer one, nor from
+%%     one more than two releases older: a `.pplt` outside that window is too old or too new);
+%%   * not stale: if the sources of the dependency are on disk, their hash is the one in the file.
+%% `ok`, or `{error, Reason}` with the reason to tell the user.
+-spec usable(#prisma_pplt{}, file:filename_all(), binary()) -> ok | {error, term()}.
+usable(#prisma_pplt{otp_release = Made, source_hash = Hash}, ProjectRoot, Name) ->
+    case otp_in_window(Made) of
+        false ->
+            {error, {otp_release, binary_to_list(Made), erlang:system_info(otp_release)}};
+        true ->
+            case current_source_hash(ProjectRoot, Name) of
+                undefined -> ok;
+                _ when Hash =:= undefined -> ok;
+                Hash -> ok;
+                _Other -> {error, stale}
+            end
+    end.
+
+otp_in_window(Made) ->
+    try
+        Running = list_to_integer(erlang:system_info(otp_release)),
+        M = binary_to_integer(Made),
+        M =< Running andalso Running - M =< 2
+    catch
+        _:_ -> true
+    end.
+
+current_source_hash(ProjectRoot, Name) ->
+    Root = unicode:characters_to_list(ProjectRoot),
+    App = binary_to_list(Name),
+    Dirs = filelib:wildcard(filename:join([Root, "deps", App])) ++ filelib:wildcard(filename:join([Root, "_build", "*", "lib", App])),
+    case [H || D <- Dirs, H <- [source_hash(D)], H =/= undefined] of
+        [First | _] -> First;
+        [] -> undefined
+    end.
+
 %% @doc `<dir>/otp_<release>.pplt`: the PPLT of the OTP applications, one file for the release that is running.
 -spec otp_cache_path(file:filename_all()) -> string().
 otp_cache_path(CacheDir) ->
@@ -273,9 +332,9 @@ resolve_project_pplts(ProjectRoot, Opts) ->
     {ok, prisma_pplt:merge(Otp ++ Elixir ++ DepPplts)}.
 
 resolve_single_dep(ProjectRoot, CacheDir, Name, Vsn) ->
-    case shipped_pplts(ProjectRoot, Name) of
+    case usable_shipped(ProjectRoot, Name) of
         [_ | _] = Shipped ->
-            [P || {ok, P} <- [prisma_pplt:load(F) || F <- Shipped]];
+            Shipped;
         [] ->
             Path = cache_path(CacheDir, Name, Vsn),
             Result = case filelib:is_regular(Path) of
@@ -284,6 +343,31 @@ resolve_single_dep(ProjectRoot, CacheDir, Name, Vsn) ->
             end,
             [P || {ok, P} <- [Result]]
     end.
+
+%% The shipped files that load and are usable; one that is not is left out, with the reason, and the dependency is built from its beams.
+usable_shipped(ProjectRoot, Name) ->
+    lists:filtermap(
+        fun(File) ->
+            case prisma_pplt:load(File) of
+                {ok, Pplt} ->
+                    case usable(Pplt, ProjectRoot, Name) of
+                        ok ->
+                            {true, Pplt};
+                        {error, Why} ->
+                            io:format(standard_error, "prisma: ignoring ~ts: ~ts~n", [File, why(Why)]),
+                            false
+                    end;
+                {error, Why} ->
+                    io:format(standard_error, "prisma: ignoring ~ts: ~p~n", [File, Why]),
+                    false
+            end
+        end,
+        shipped_pplts(ProjectRoot, Name)
+    ).
+
+why(stale) -> "it does not match the sources of the dependency (it is out of date)";
+why({otp_release, Made, Running}) ->
+    io_lib:format("it was made with OTP ~s and this is OTP ~s (only the same release or the two before are used)", [Made, Running]).
 
 build_and_cache_local_dep(ProjectRoot, CachePath, Name, Vsn) ->
     Root = unicode:characters_to_list(ProjectRoot),

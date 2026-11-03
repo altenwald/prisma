@@ -56,6 +56,22 @@ do(State) ->
     end,
     EbinDirs = resolve_ebins(AppEbins, Root, Targets),
     Opts = ParsedOpts#{project_root => Root},
+    case Targets of
+        ["build" | _] -> build(Root, State);
+        _ -> analyze(EbinDirs, Opts, State)
+    end.
+
+%% `rebar3 prisma build`: the project was compiled first (the provider depends on `compile`), now its `.pplt` is written.
+build(Root, State) ->
+    case prisma:build_project(Root, #{}) of
+        {ok, Paths} ->
+            [io:format("Built ~ts~n", [P]) || P <- Paths],
+            {ok, State};
+        {error, Reason} ->
+            {error, format_error(Reason)}
+    end.
+
+analyze(EbinDirs, Opts, State) ->
     case prisma:analyze_dirs(EbinDirs, Opts) of
         {ok, []} ->
             case maps:get(format, Opts, human) of

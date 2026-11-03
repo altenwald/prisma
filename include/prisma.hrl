@@ -1,8 +1,8 @@
 -ifndef(PRISMA_HRL).
 -define(PRISMA_HRL, true).
 
--define(PRISMA_PPLT_MAGIC, "PRISMA_PPLT_V1").
--define(PRISMA_PPLT_VERSION, 1).
+-define(PRISMA_PPLT_MAGIC, "PRISMA_PPLT_V2").
+-define(PRISMA_PPLT_VERSION, 2).
 
 -type mfa_key() :: {module(), atom(), arity()}.
 -type type_key() :: {module(), atom(), arity()}.
@@ -62,6 +62,8 @@
     package :: binary() | undefined,
     package_vsn :: binary() | undefined,
     otp_release :: binary(),
+    %% md5 of the sources of the package (see prisma_lock:source_hash/1): tells a consumer that the file is stale
+    source_hash :: binary() | undefined,
     modules = #{} :: #{module() => #module_summary{}}
 }).
 

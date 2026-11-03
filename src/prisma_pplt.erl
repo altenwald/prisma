@@ -41,6 +41,7 @@ new(Pkg, PkgVsn) ->
         package = Pkg,
         package_vsn = PkgVsn,
         otp_release = OtpRel,
+        source_hash = undefined,
         modules = #{}
     }.
 
@@ -62,7 +63,7 @@ from_beams(Beams) ->
 from_beams(Beams, Opts0) ->
     Pkg = maps:get(package, Opts0, undefined),
     PkgVsn = maps:get(package_vsn, Opts0, undefined),
-    BasePplt = new(Pkg, PkgVsn),
+    BasePplt = (new(Pkg, PkgVsn))#prisma_pplt{source_hash = maps:get(source_hash, Opts0, undefined)},
     %% first the -specs of every module, so that each one is inferred knowing what the others declare
     Specs = lists:foldl(fun(Beam, Acc) -> maps:merge(Acc, prisma_abstract:specs_of_beam(Beam)) end,
                         maps:get(external_specs, Opts0, #{}), Beams),
