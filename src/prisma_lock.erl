@@ -18,6 +18,7 @@
     project_cache_dir/1,
     shipped_pplts/2,
     source_hash/1,
+    building_notice/2,
     usable/3,
     cache_path/3,
     otp_cache_path/1,
@@ -178,6 +179,15 @@ shipped_pplts(ProjectRoot, Name) ->
             filelib:wildcard(filename:join([Root, "_build", "*", "lib", App, "*.pplt"])),
     lists:usort([F || F <- Found, filelib:is_regular(F)]).
 
+%% @doc The line that tells, on stderr, that a PPLT is being built (the first `check` of a project may build several and would
+%% look hung): plain text, no colors and no progress bar, so `NO_COLOR`, CI logs and the JSON on stdout are not affected.
+-spec building_notice(file:filename_all(), non_neg_integer()) -> iolist().
+building_notice(Path, Modules) ->
+    io_lib:format("prisma: building ~ts (~B modules)...~n", [filename:basename(unicode:characters_to_list(Path)), Modules]).
+
+notice(Path, Modules) ->
+    io:put_chars(standard_error, building_notice(Path, Modules)).
+
 %% @doc A hash of the sources of an application directory (`src/**/*.erl|hrl`, `include/**/*.hrl`, `lib/**/*.ex`, by relative path),
 %% or `undefined` if it has none. It goes into the `.pplt` when it is made, and tells whoever uses it that the file no longer matches the
 %% code. The beams cannot be compared: a dependency is compiled again by whoever uses it, and the beam of the same source is not the same
@@ -299,6 +309,7 @@ build_system_pplt(Apps, Path, Package, Vsn) ->
     case [App || {App, {error, _}} <- Dirs] of
         [] ->
             Beams = lists:append([filelib:wildcard(filename:join([Dir, "ebin", "*.beam"])) || {_, Dir} <- Dirs]),
+            notice(Path, length(Beams)),
             case prisma_pplt:from_beams(Beams, #{package => Package, package_vsn => Vsn}) of
                 {ok, Pplt} ->
                     _ = prisma_pplt:save(Pplt, Path),
@@ -377,6 +388,7 @@ build_and_cache_local_dep(ProjectRoot, CachePath, Name, Vsn) ->
         [] ->
             error;
         Beams ->
+            notice(CachePath, length(Beams)),
             case prisma_pplt:from_beams(Beams, #{package => Name, package_vsn => Vsn}) of
                 {ok, Pplt} ->
                     _ = prisma_pplt:save(Pplt, CachePath),

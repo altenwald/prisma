@@ -390,3 +390,9 @@ build_project_writes_the_pplt_at_the_root_test() ->
     ?assertEqual(prisma_lock:source_hash(Proj), Pplt#prisma_pplt.source_hash),
     ?assertEqual({error, no_compiled_applications}, prisma:build_project("/tmp/prisma_dev/no_such_project", #{})),
     os:cmd("rm -rf " ++ Proj).
+
+building_notice_is_one_plain_line_test() ->
+    Line = lists:flatten(prisma_lock:building_notice("/p/_build/otp_29.pplt", 599)),
+    ?assertEqual("prisma: building otp_29.pplt (599 modules)...\n", Line),
+    %% no escape sequences: nothing for NO_COLOR to switch off
+    ?assertEqual(nomatch, string:find(Line, "\e")).
