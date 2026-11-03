@@ -170,3 +170,19 @@ is therefore only true when dependencies are not analysed at all.
 
 Also observed once: `spectra check` over the 100 modules of OTP `stdlib` took 3 min 34 s (207 s user CPU), far from the
 sub-second figures above. Not yet reproduced with hyperfine or split by module.
+
+
+## Update after the fixes of CORRECTNESS.md
+
+The `.splt` table above was measured at the start; the PLT no longer keeps the abstract code of every function. Single runs, same machine (other applications
+running), `/usr/bin/time -l`:
+
+| | before | after |
+| :--- | :---: | :---: |
+| `build-plt` of the 6 dependency apps (206 modules) | 3.9 s, 2.4 MB, 331 MiB | 1.6 s, 442 KiB, 335 MiB |
+| `check deps/rabbit` without `--plt` | 1.2 - 1.4 s, 360 - 480 MiB | 1.7 s, 430 - 540 MiB |
+| `check deps/rabbit` with the dependencies `.splt` | 1.9 - 2.8 s, 585 MiB | 2.2 s, 490 MiB |
+| PLT of OTP `compiler` (60 modules) | 0.5 s, 2065 KiB | ~0.4 s, ~360 KiB |
+
+A bug made in between (commit `04b2e2c`, found and fixed the same day) took the dependencies' PLT to 235 s and 48,900 million words once written out; the story
+is in CORRECTNESS.md. The stack of types as a map of ids that would have made it impossible is not built.

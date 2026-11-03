@@ -9,7 +9,8 @@
 
 -export([
     infer_module_functions/3,
-    check_call_site/4
+    check_call_site/4,
+    declared_return/2
 ]).
 
 -ifdef(TEST).
@@ -635,7 +636,7 @@ infer_binop(MFA, Anno, Op, LAst, LType, RAst, RType, Env0, Warns, Sites)
             {none, Env0, [make_warning(discrepancy, MFA, Anno, Msg) | Warns], Sites};
         false ->
             Env1 = constrain_ast_var(LAst, number, constrain_ast_var(RAst, number, Env0)),
-            Ret = arith_result_type(LM, RM),
+            Ret = arith_result_type(Op, LM, RM),
             {Ret, Env1, Warns, Sites}
     end;
 infer_binop(MFA, Anno, '/', LAst, LType, RAst, RType, Env0, Warns, Sites) ->
@@ -776,11 +777,28 @@ negate_bound(neg_inf) -> pos_inf;
 negate_bound(pos_inf) -> neg_inf;
 negate_bound(N) when is_integer(N) -> -N.
 
-arith_result_type(float, _) -> float;
-arith_result_type(_, float) -> float;
-arith_result_type(number, _) -> number;
-arith_result_type(_, number) -> number;
-arith_result_type(_, _) -> integer.
+arith_result_type(_Op, float, _) -> float;
+arith_result_type(_Op, _, float) -> float;
+arith_result_type(_Op, number, _) -> number;
+arith_result_type(_Op, _, number) -> number;
+arith_result_type(Op, L, R) -> integer_with_sign(Op, sign(L), sign(R)).
+
+%% What is known of the sign of an integer type: positive, not negative, or nothing.
+sign(pos_integer) -> pos;
+sign(non_neg_integer) -> non_neg;
+sign({int_lit, N}) when N > 0 -> pos;
+sign({int_lit, 0}) -> non_neg;
+sign({int_range, Lo, _}) when is_integer(Lo), Lo > 0 -> pos;
+sign({int_range, Lo, _}) when is_integer(Lo), Lo >= 0 -> non_neg;
+sign(_) -> unknown.
+
+%% 9 + size is positive, two sizes added are not negative, a product of those too; a difference can be anything.
+integer_with_sign('+', pos, S) when S =/= unknown -> pos_integer;
+integer_with_sign('+', S, pos) when S =/= unknown -> pos_integer;
+integer_with_sign('+', non_neg, non_neg) -> non_neg_integer;
+integer_with_sign('*', pos, pos) -> pos_integer;
+integer_with_sign('*', S1, S2) when S1 =/= unknown, S2 =/= unknown -> non_neg_integer;
+integer_with_sign(_, _, _) -> integer.
 
 constrain_ast_var({var, _, '_'}, _Type, Env) ->
     Env;
@@ -794,8 +812,8 @@ constrain_ast_var(_, _Type, Env) ->
     Env.
 
 infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0) ->
-    {BranchRets, BranchEnvs, Warns1, Sites1} = lists:foldl(
-        fun({clause, CAnno, Pats, CGuards, CBody}, {RetsAcc, EnvsAcc, WAcc, SAcc}) ->
+    {BranchRets, BranchEnvs, Warns1, Sites1, _Remaining} = lists:foldl(
+        fun({clause, CAnno, Pats, CGuards, CBody}, {RetsAcc, EnvsAcc, WAcc, SAcc, Remaining}) ->
             PatResult = case Pats of
                 [SinglePat] -> bind_pattern(SinglePat, ScrutType, Env0);
                 [] -> {any, Env0};
@@ -807,23 +825,34 @@ infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0) 
                         true -> [];
                         false -> [make_warning(dead_code, MFA, CAnno, <<"Clause pattern cannot match scrutinee type">>)]
                     end,
-                    {RetsAcc, EnvsAcc, PWarns ++ WAcc, SAcc};
-                {_Matched, CEnv0} ->
-                    TestWarns = guard_warnings(MFA, CGuards, CEnv0),
-                    case apply_guard_disjunction(CGuards, CEnv0) of
-                        unreachable ->
-                            GWarns = case is_generated_function(MFA) of
-                                true -> [];
-                                false -> [make_warning(dead_code, MFA, CAnno, <<"Clause guard cannot succeed">>)]
+                    {RetsAcc, EnvsAcc, PWarns ++ WAcc, SAcc, Remaining};
+                _ ->
+                    %% what is left of the scrutinee for this clause: what the earlier clauses without a guard did not take
+                    case bind_clause_pattern(Pats, Remaining, Env0) of
+                        none ->
+                            %% covered by the clauses before it: nothing is said (a catch-all after exhaustive clauses is common)
+                            {RetsAcc, EnvsAcc, WAcc, SAcc, Remaining};
+                        {ok, CEnv0} ->
+                            TestWarns = guard_warnings(MFA, CGuards, CEnv0),
+                            Remaining1 = case CGuards of
+                                [] -> subtract_pattern(Remaining, Pats);
+                                _ -> Remaining
                             end,
-                            {RetsAcc, EnvsAcc, TestWarns ++ GWarns ++ WAcc, SAcc};
-                        {ok, CEnv1} ->
-                            {CRet, CEnv2, WNext, SNext} = infer_body(Mod, MFA, CBody, CEnv1, Contracts, TestWarns ++ WAcc, SAcc),
-                            {[CRet | RetsAcc], [CEnv2 | EnvsAcc], WNext, SNext}
+                            case apply_guard_disjunction(CGuards, CEnv0) of
+                                unreachable ->
+                                    GWarns = case is_generated_function(MFA) of
+                                        true -> [];
+                                        false -> [make_warning(dead_code, MFA, CAnno, <<"Clause guard cannot succeed">>)]
+                                    end,
+                                    {RetsAcc, EnvsAcc, TestWarns ++ GWarns ++ WAcc, SAcc, Remaining1};
+                                {ok, CEnv1} ->
+                                    {CRet, CEnv2, WNext, SNext} = infer_body(Mod, MFA, CBody, CEnv1, Contracts, TestWarns ++ WAcc, SAcc),
+                                    {[CRet | RetsAcc], [CEnv2 | EnvsAcc], WNext, SNext, Remaining1}
+                            end
                     end
             end
         end,
-        {[], [], Warns0, Sites0},
+        {[], [], Warns0, Sites0, ScrutType},
         Clauses
     ),
     case BranchEnvs of
@@ -837,6 +866,79 @@ infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0) 
             JoinedEnv = join_envs(lists:reverse(BranchEnvs)),
             {JoinedRet, JoinedEnv, Warns1, Sites1}
     end.
+
+%% The environment of a clause whose single pattern is matched against what is left of the scrutinee; `none` if nothing is left.
+bind_clause_pattern([SinglePat], Remaining, Env0) ->
+    case bind_pattern(SinglePat, Remaining, Env0) of
+        {none, _} -> none;
+        {_, Env} -> {ok, Env}
+    end;
+bind_clause_pattern(_, _Remaining, Env0) ->
+    {ok, Env0}.
+
+%% The scrutinee type without what a clause (with no guard) takes whole. Only a type that the pattern surely covers is removed.
+subtract_pattern(Remaining, [SinglePat]) ->
+    case pattern_without_variables(SinglePat) of
+        false ->
+            %% a variable may be new or already bound (then it is an equality test): the code does not say, so nothing is taken
+            Remaining;
+        true ->
+            case bind_pattern(SinglePat, any, #{}) of
+                {none, _} -> Remaining;
+                {PatType, _} -> subtract_covered(Remaining, PatType)
+            end
+    end;
+subtract_pattern(Remaining, _) ->
+    Remaining.
+
+%% Atoms, numbers, strings, tuples and lists of those, and `_`.
+pattern_without_variables({var, _, '_'}) -> true;
+pattern_without_variables({var, _, _}) -> false;
+pattern_without_variables({atom, _, _}) -> true;
+pattern_without_variables({integer, _, _}) -> true;
+pattern_without_variables({char, _, _}) -> true;
+pattern_without_variables({float, _, _}) -> true;
+pattern_without_variables({string, _, _}) -> true;
+pattern_without_variables({nil, _}) -> true;
+pattern_without_variables({tuple, _, Elems}) -> lists:all(fun pattern_without_variables/1, Elems);
+pattern_without_variables({cons, _, H, T}) -> pattern_without_variables(H) andalso pattern_without_variables(T);
+pattern_without_variables({op, _, '-', {integer, _, _}}) -> true;
+pattern_without_variables(_) -> false.
+
+subtract_covered({union, Members}, PatType) ->
+    spectra_type:normalize_union([M || M <- Members, not covers(PatType, M)]);
+subtract_covered(Remaining, PatType) ->
+    case covers(PatType, Remaining) of
+        true -> none;
+        false -> Remaining
+    end.
+
+%% Does a pattern of type P take every value of type M? `any` in the pattern (a variable) takes anything; an unknown in M (an `any`
+%% or an unresolved name) is taken only by an equal one.
+covers(any, _) -> true;
+covers(_, none) -> true;
+covers(_, any) -> false;
+covers(P, {union, Ms}) -> lists:all(fun(M) -> covers(P, M) end, Ms);
+covers({union, Ps}, M) -> lists:any(fun(P) -> covers(P, M) end, Ps);
+covers(P, P) -> true;
+covers({tuple, Ps}, {tuple, Ms}) when length(Ps) =:= length(Ms) ->
+    lists:all(fun({P, M}) -> covers(P, M) end, lists:zip(Ps, Ms));
+covers(P, M) ->
+    not has_unknown(M) andalso spectra_type:consistent_subtype(M, P).
+
+has_unknown(any) -> true;
+has_unknown({var, _}) -> true;
+has_unknown({local_type, _, _}) -> true;
+has_unknown({remote_type, _, _, _}) -> true;
+has_unknown({opaque, _, _, _, _}) -> true;
+has_unknown({recursive_ref, _, _}) -> true;
+has_unknown({union, Ms}) -> lists:any(fun has_unknown/1, Ms);
+has_unknown({tuple, Es}) -> lists:any(fun has_unknown/1, Es);
+has_unknown({list, E}) -> has_unknown(E);
+has_unknown({nonempty_list, E}) -> has_unknown(E);
+has_unknown({improper_list, E, T}) -> has_unknown(E) orelse has_unknown(T);
+has_unknown({map, Fields}) -> lists:any(fun({_, K, V}) -> has_unknown(K) orelse has_unknown(V) end, Fields);
+has_unknown(_) -> false.
 
 infer_call(Mod, CallerMFA, Anno, Target, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites0) ->
     Line = erl_anno:line(Anno),
@@ -856,7 +958,13 @@ infer_call(Mod, CallerMFA, Anno, Target, ArgAsts, ArgTypes, Env0, Contracts, War
         {ok, CalleeMFA} ->
             Sites1 = [{Line, CalleeMFA, ArgTypes} | Sites0],
             case maps:find(CalleeMFA, Contracts) of
-                {ok, #func_contract{inferred_type = {fun_type, ExpectedArgs, RetType}}} ->
+                {ok, #func_contract{inferred_type = {fun_type, ExpectedArgs, Inferred}, declared_specs = Specs}} ->
+                    %% what the callee declares, not what its body happens to give: if the body contradicts the spec the
+                    %% warning belongs to the callee, and its callers are not named for it
+                    RetType = case declared_return(Specs, length(ExpectedArgs)) of
+                        any -> Inferred;
+                        Declared -> Declared
+                    end,
                     apply_callee_signature(CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, ExpectedArgs, RetType, Env0, Warns0, Sites1);
                 _ ->
                     {any, Env0, Warns0, Sites1}
@@ -864,6 +972,31 @@ infer_call(Mod, CallerMFA, Anno, Target, ArgAsts, ArgTypes, Env0, Contracts, War
         dynamic ->
             {any, Env0, Warns0, Sites0}
     end.
+
+%% The return type that the specs of a function declare (`any` if there is none or it says nothing). Names that cannot be resolved
+%% here (`t()`, `other:t()`, an opaque, a type variable) are unknown, not impossible: a pattern does not match against them.
+-spec declared_return([spectra_type:stype()], non_neg_integer()) -> spectra_type:stype().
+declared_return(Specs, Arity) ->
+    Rets = [Ret || Spec <- Specs, {fun_type, Args, Ret} <- [spectra_type:unfold_bounded_fun(Spec)], length(Args) =:= Arity],
+    case Rets of
+        [] -> any;
+        _ -> erase_unresolved(spectra_type:normalize_union(Rets))
+    end.
+
+erase_unresolved({local_type, _, _}) -> any;
+erase_unresolved({remote_type, _, _, _}) -> any;
+erase_unresolved({opaque, _, _, _, _}) -> any;
+erase_unresolved({recursive_ref, _, _}) -> any;
+erase_unresolved({var, _}) -> any;
+erase_unresolved({union, Members}) -> spectra_type:normalize_union([erase_unresolved(M) || M <- Members]);
+erase_unresolved({tuple, Elems}) -> {tuple, [erase_unresolved(E) || E <- Elems]};
+erase_unresolved({list, E}) -> {list, erase_unresolved(E)};
+erase_unresolved({nonempty_list, E}) -> {nonempty_list, erase_unresolved(E)};
+erase_unresolved({improper_list, E, T}) -> {improper_list, erase_unresolved(E), erase_unresolved(T)};
+erase_unresolved({map, Fields}) -> {map, [{Kind, erase_unresolved(K), erase_unresolved(V)} || {Kind, K, V} <- Fields]};
+erase_unresolved({record, Name, Fields}) -> {record, Name, [{F, erase_unresolved(T)} || {F, T} <- Fields]};
+erase_unresolved({fun_type, Args, Ret}) -> {fun_type, [erase_unresolved(A) || A <- Args], erase_unresolved(Ret)};
+erase_unresolved(Other) -> Other.
 
 resolve_call_target(_Mod, {remote, _, {atom, _, M}, {atom, _, F}}, Arity) ->
     {ok, {M, F, Arity}};
@@ -946,6 +1079,13 @@ bif_return_type(_Bif, _ArgTypes, Static) ->
     Static.
 
 bif_signature(length, 1) -> {ok, [{list, any}], non_neg_integer};
+%% BIFs that always return integers. Arguments are left as `any`: their types are checked against the spec of the BIF elsewhere.
+bif_signature(iolist_size, 1) -> {ok, [any], non_neg_integer};
+bif_signature(size, 1) -> {ok, [any], non_neg_integer};
+bif_signature(external_size, 1) -> {ok, [any], non_neg_integer};
+bif_signature(external_size, 2) -> {ok, [any, any], non_neg_integer};
+bif_signature(phash2, 1) -> {ok, [any], non_neg_integer};
+bif_signature(phash2, 2) -> {ok, [any, any], non_neg_integer};
 bif_signature(byte_size, 1) -> {ok, [{binary, 0, 1}], non_neg_integer};
 bif_signature(bit_size, 1) -> {ok, [{binary, 0, 1}], non_neg_integer};
 bif_signature(tuple_size, 1) -> {ok, [any_tuple], non_neg_integer};

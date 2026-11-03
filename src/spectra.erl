@@ -77,7 +77,7 @@ analyze_beams(Beams, Opts) ->
         {ok, ExplicitPlt} ->
             LockPlt = resolve_lock_plt(Opts),
             DepsPlt = spectra_plt:merge(ExplicitPlt, LockPlt),
-            case spectra_plt:from_beams(Beams, Opts) of
+            case spectra_plt:from_beams(Beams, Opts#{external_specs => spectra_plt:declared_specs(DepsPlt)}) of
                 {ok, TargetPlt} ->
                     Warnings = spectra_checker:check_plt(TargetPlt, DepsPlt, Opts),
                     {ok, Warnings};

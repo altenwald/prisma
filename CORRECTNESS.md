@@ -280,7 +280,8 @@ Same 125 mutants after each fix (the counts for Dialyzer and `erlc` do not chang
 | before | 52 / 125 | |
 | 1. look inside `fun`, `try`, `catch`, `receive`, comprehensions, records and binaries | 57 / 125 | `r2` 21 -> 24, `r3` 6 -> 8; nothing lost |
 | 2. BIFs with arguments of the wrong type inside guards | 74 / 125 | `r3` 8 -> **25 of 25**; nothing lost |
-| 3. calls to a function that does not exist, and calls inside the target of another call | **100 / 125** | `r4` 0 -> **25 of 25**, `r2` 24 -> 25; nothing lost |
+| 3. calls to a function that does not exist, and calls inside the target of another call | 100 / 125 | `r4` 0 -> **25 of 25**, `r2` 24 -> 25; nothing lost |
+| 4. the return type of a call comes from the callee's `-spec` (other modules and the same one) | **124 / 125** | `r6` 0 -> **25 of 25**; collateral warnings 6 -> **0** |
 
 **Gap 1.** `infer_expr` answered `any` for every construct it did not know without looking inside. It now has a clause each for `fun`
 (and named funs), `try` (body, `of`, `catch`, `after`), `catch`, `receive`, list and binary comprehensions, record creation, update and access,
@@ -327,6 +328,42 @@ nothing), `erlang:` (the BIFs), what the compiler adds without it being in the c
 without being exported (a module can export everything with a compile attribute). Three mutants still got through, for a second reason: the log macros
 expand to `(ra_env:logger_mod()):log(...)`, a call in the *module position* of another call, and the target of a call was never looked at unless it was a
 literal. It is now (and that also closed the last `r2`).
+
+**Gap 4.** Inference never knew what the other modules return, so `{ok, V} = other:f()` was never compared with the spec of `f/0`. Now the specs of every module
+that is analyzed (and of the dependencies loaded from a `.splt`) are collected first, and the return type that a callee declares is what a call gives. The same is
+done inside a module: a call goes by what the callee *declares*, not by what its body happens to return. That is what removes the effect in the callers: a function
+whose body contradicts its spec is reported there, and nowhere else (the 6 collateral warnings of the mutants are now **0**, Dialyzer's 201 unchanged). Names that
+cannot be resolved while a module is inferred (`t()`, `other:t()`, an opaque, a type variable) are unknown, not impossible (Spectra's own test caught that one).
+
+Things that had to be fixed for it, found one by one by the tests, the property or Spectra's own code:
+- a `case` now takes out of the scrutinee what an earlier clause without a guard matches, so `case f() of ok -> {ok, 1}; Err -> Err end` is `{ok, 1} | {error, _}`
+  (before, `ok` stayed in `Err`). **Only patterns without variables subtract**: a variable may be new (a catch-all) or already bound (an equality test), the abstract
+  code does not say, and treating `Checksum -> ok; _ -> error` as a catch-all made `error` vanish from the type;
+- a tuple with a union element is a union of tuples: `{ok, ready | building}` fits `{ok, ready} | {ok, building}` (the combinations are checked one by one, up to 32);
+- the sign survives `+` and `*` (`9 + iolist_size(D)` is positive), and the BIFs that always return integers (`iolist_size`, `size`, `external_size`, `phash2`) are
+  known. `system_time`, `monotonic_time` and `unique_integer` are deliberately *not*: they are integers that may be negative, and they would only add noise against a
+  declared `non_neg_integer()`;
+- a generated-program bug of mine (a variable name reused between statements that did not compile) that the property found at case 525.
+
+Cost, because it exists: `check` of `deps/rabbit` takes 1.2 s -> ~1.7 s (the specs of every module are read first: ~0.18 s of it) and the PLT of the six dependencies
+1.2 s -> ~1.6 s. And a price that is not a speed one: with more precise types the **strict gradual check says more**. In hybrid mode the seven applications go
+from 307 to 355 warnings (**62 new, all `gradual_mismatch`**, 6 of them gone elsewhere), and the discrepancy mode of the 440 modules does not move (45):
+
+| New contract warnings | n |
+| :--- | :---: |
+| the value returned is not in the declared spec | 45 |
+| an argument `none` / `undefined` where the callee's spec does not take it | 6 |
+| an integer range wider than the declared one (`integer` for `non_neg_integer()`) | 8 |
+| other | 3 |
+
+Of these 62, the ones read one by one (9 in `cuttlefish` and `ra`) are **8 true by contract** (specs that say less than the code does: `cuttlefish_duration:parse/2`,
+`cuttlefish_unit:generate_config/3`, `ra_kv:put/delete`, `ra:leave_and_delete_server`, and a call that passes `undefined | string()` to `replace_match/2`, which
+upgrades that clause from "defensive" to "reachable") and **1 false positive that was fixed** (the `ok` that survived in a `case`). The other 53 have **not been triaged**:
+until they are, the hybrid mode of this version should be read as strict, not as "every warning is a bug".
+
+The last mutant that Spectra misses (`r1` number 12, `cuttlefish_unit:generate_config/3`) is not a miss: the unmutated function already has two real warnings at
+the same lines and of the same kind (the ones above), and the runner compares (module, line, kind) with the unmodified directory, so the mutant's warning is hidden by
+them.
 
 ### A performance mistake of mine, how it was found, and what changed
 

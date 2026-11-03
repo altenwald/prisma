@@ -20,6 +20,7 @@
     decode/1,
     lookup_mfa/2,
     lookup_module/2,
+    declared_specs/1,
     lookup_type/2,
     resolve_type/3,
     resolve_type/4,
@@ -58,14 +59,18 @@ from_beams(Beams) ->
 %% @doc Builds a `#spectra_plt{}` from BEAM inputs and metadata options.
 -spec from_beams([file:filename_all() | binary()], map()) ->
     {ok, #spectra_plt{}} | {error, term()}.
-from_beams(Beams, Opts) ->
-    Pkg = maps:get(package, Opts, undefined),
-    PkgVsn = maps:get(package_vsn, Opts, undefined),
+from_beams(Beams, Opts0) ->
+    Pkg = maps:get(package, Opts0, undefined),
+    PkgVsn = maps:get(package_vsn, Opts0, undefined),
     BasePlt = new(Pkg, PkgVsn),
+    %% first the -specs of every module, so that each one is inferred knowing what the others declare
+    Specs = lists:foldl(fun(Beam, Acc) -> maps:merge(Acc, spectra_abstract:specs_of_beam(Beam)) end,
+                        maps:get(external_specs, Opts0, #{}), Beams),
+    Opts = Opts0#{external_specs => Specs},
     lists:foldl(
         fun
             (Beam, {ok, #spectra_plt{modules = Mods} = Plt}) ->
-                case spectra_abstract:extract_beam(Beam) of
+                case spectra_abstract:extract_beam(Beam, Opts) of
                     {ok, #module_summary{module = Mod} = Summary} ->
                         {ok, Plt#spectra_plt{modules = Mods#{Mod => Summary}}};
                     {error, Reason} ->
@@ -201,6 +206,17 @@ load(FilePath) ->
         {ok, Bin} -> decode(Bin);
         {error, Reason} -> {error, Reason}
     end.
+
+%% @doc The declared `-spec`s of every function in the PLT, `#{{M, F, A} => [stype()]}`.
+-spec declared_specs(#spectra_plt{}) -> #{mfa_key() => [spectra_type:stype()]}.
+declared_specs(#spectra_plt{modules = Mods}) ->
+    maps:fold(
+        fun(_Mod, #module_summary{functions = Funcs}, Acc) ->
+                maps:fold(
+                    fun(Key, #func_contract{declared_specs = [_ | _] = Specs}, A) -> A#{Key => Specs};
+                       (_, _, A) -> A
+                    end, Acc, Funcs)
+        end, #{}, Mods).
 
 %% @doc Looks up what is known about module `Mod` in the PLT.
 -spec lookup_module(module(), #spectra_plt{}) -> {ok, #module_summary{}} | error.

@@ -104,10 +104,12 @@ stmt(V, K, Env) ->
             Shapes = ["    ~s = CALLEE:g(~s)",
                       "    ~s = (fun() -> CALLEE:g(~s) end)()",
                       "    ~s = hd([CALLEE:g(~s) || _ <- [1]])",
-                      "    ~s = element(2, #r{v = CALLEE:g(~s)})"],
+                      "    ~s = element(2, #r{v = CALLEE:g(~s)})",
+                      %% the result goes into patterns that can match (the spec says integer())
+                      "    ~s = case CALLEE:g(~s) of\n        1 -> 10;\n        R@ when is_integer(R@) -> R@\n    end"],
             [?LET({Shape, ArgTags}, {oneof(Shapes), frequency([{4, oneof(Vecs)}, {1, vector(Arity, oneof(?CALLEE_TAGS))}])},
                   ?LET(Args, [expr(T, Env, 1) || T <- ArgTags],
-                       {fmt(Shape, [V, string:join(Args, ", ")]), int})),
+                       {unique_vars(fmt(Shape, [V, string:join(Args, ", ")]), V), int})),
              ?LET(ArgTags, oneof(Vecs),
                   ?LET(Args, [expr(T, Env, 1) || T <- ArgTags],
                        {fmt("    ~s = try CALLEE:g(~s) catch _:_ -> 0 end", [V, string:join(Args, ", ")]), int}))];
@@ -205,6 +207,10 @@ samples([T1, T2], Rec) ->
     vector(?RUNS, [value(T1), ?LET(V2, value(T2), case Rec of true -> {r, V2}; false -> V2 end)]).
 
 fmt(F, A) -> lists:flatten(io_lib:format(F, A)).
+
+%% A variable bound inside a `case` is unsafe afterwards, and a second statement that binds the same name would compare with it:
+%% the `@` of a template is replaced by the name of the variable that the statement binds.
+unique_vars(Line, V) -> lists:flatten(string:replace(Line, "@", V, all)).
 
 %% -------------------------------------------------------------------------
 %% Running the module

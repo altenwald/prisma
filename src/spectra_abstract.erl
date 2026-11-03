@@ -8,18 +8,27 @@
 
 -export([
     extract_beam/1,
+    extract_beam/2,
+    specs_of_beam/1,
     detect_language/2,
-    parse_abstract_forms/3
+    parse_abstract_forms/3,
+    parse_abstract_forms/4
 ]).
 
 %% @doc Extracts a `#module_summary{}` from a BEAM file path or binary.
 -spec extract_beam(file:filename_all() | binary()) ->
     {ok, #module_summary{}} | {error, term()}.
 extract_beam(BeamInput) ->
+    extract_beam(BeamInput, #{}).
+
+%% @doc Like `extract_beam/1`. `Opts` may carry `external_specs`, the `-spec`s of the other modules (`#{MFA => [stype()]}`),
+%% so that the return type of a call to another module is known while this one is inferred.
+-spec extract_beam(file:filename_all() | binary(), map()) -> {ok, #module_summary{}} | {error, term()}.
+extract_beam(BeamInput, Opts) ->
     BeamPathOrBin = normalize_input(BeamInput),
     case beam_lib:md5(BeamPathOrBin) of
         {ok, {Module, Md5}} ->
-            extract_chunks(BeamPathOrBin, Module, Md5);
+            extract_chunks(BeamPathOrBin, Module, Md5, Opts);
         {error, beam_lib, Reason} ->
             {error, Reason}
     end.
@@ -32,7 +41,7 @@ normalize_input(Bin) when is_binary(Bin) ->
 normalize_input(Path) when is_list(Path) ->
     Path.
 
-extract_chunks(Beam, Module, Md5) ->
+extract_chunks(Beam, Module, Md5, Opts) ->
     ChunkNames = [exports, attributes, compile_info, debug_info],
     case beam_lib:chunks(Beam, ChunkNames, [allow_missing_chunks]) of
         {ok, {Module, Chunks}} ->
@@ -53,7 +62,7 @@ extract_chunks(Beam, Module, Md5) ->
                 export_types = ExportTypes,
                 file = SourceFile
             },
-            enrich_from_debug_info(Beam, Module, Dbgi, Exports, BaseSummary);
+            enrich_from_debug_info(Beam, Module, Dbgi, Exports, BaseSummary, Opts);
         {error, beam_lib, Reason} ->
             {error, Reason}
     end.
@@ -92,18 +101,56 @@ detect_language(Module, Dbgi) ->
             end
     end.
 
-enrich_from_debug_info(Beam, Module, Dbgi, Exports, Summary) ->
+enrich_from_debug_info(Beam, Module, Dbgi, Exports, Summary, Opts) ->
     case beam_lib:chunks(Beam, [abstract_code]) of
         {ok, {_Mod, [{abstract_code, {raw_abstract_v1, Forms}}]}} ->
-            {ok, parse_abstract_forms(Forms, Exports, Summary)};
+            {ok, parse_abstract_forms(Forms, Exports, Summary, Opts)};
         _ ->
             {ok, spectra_elixir:from_elixir_dbgi(Module, Dbgi, Exports, Summary)}
     end.
 
+%% @doc The `-spec`s of a BEAM file, `#{{M, F, A} => [stype()]}` (nothing if it has no abstract code).
+-spec specs_of_beam(file:filename_all() | binary()) -> #{mfa_key() => [spectra_type:stype()]}.
+specs_of_beam(BeamInput) ->
+    case beam_lib:chunks(normalize_input(BeamInput), [abstract_code]) of
+        {ok, {Mod, [{abstract_code, {raw_abstract_v1, Forms}}]}} ->
+            lists:foldl(
+                fun({attribute, _, spec, {{F, A}, Clauses}}, Acc) ->
+                        Acc#{{Mod, F, A} => [spectra_type:from_abstract(C) || C <- Clauses]};
+                   ({attribute, _, spec, {{M, F, A}, Clauses}}, Acc) ->
+                        Acc#{{M, F, A} => [spectra_type:from_abstract(C) || C <- Clauses]};
+                   (_, Acc) ->
+                        Acc
+                end, #{}, Forms);
+        _ ->
+            #{}
+    end.
+
+%% What the inference of a module may assume about the functions of the others: the return type their `-spec` declares
+%% (the contract is the interface, not whatever their body happens to give). The arguments are left alone: they are checked
+%% against the spec by the checker. A function without a spec, or whose spec returns anything, adds nothing.
+external_contracts(Mod, ExternalSpecs) ->
+    maps:fold(
+        fun({M, _F, A} = Key, Specs, Acc) when M =/= Mod ->
+                case spectra_infer:declared_return(Specs, A) of
+                    any -> Acc;
+                    Ret -> Acc#{Key => #func_contract{mfa = Key, declared_specs = Specs,
+                                                      inferred_type = {fun_type, lists:duplicate(A, any), Ret}}}
+                end;
+           (_, _, Acc) ->
+                Acc
+        end, #{}, ExternalSpecs).
+
 %% @doc Populates a `#module_summary{}` from Erlang Abstract Format forms.
 -spec parse_abstract_forms([term()], [{atom(), arity()}], #module_summary{}) ->
     #module_summary{}.
-parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types = AttrExpTypes} = Summary) ->
+parse_abstract_forms(Forms, Exports, Summary) ->
+    parse_abstract_forms(Forms, Exports, Summary, #{}).
+
+%% @doc Like `parse_abstract_forms/3`, with the options of `extract_beam/2`.
+-spec parse_abstract_forms([term()], [{atom(), arity()}], #module_summary{}, map()) ->
+    #module_summary{}.
+parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types = AttrExpTypes} = Summary, Opts) ->
     ExportSet = maps:from_list([{FA, true} || FA <- Exports]),
     {RawTypes, FormExpTypes, Specs, InitialFuncs, ClausesByMFA, _GenSet} = lists:foldl(
         fun(Form, {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc}) ->
@@ -157,7 +204,9 @@ parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types 
         RawTypes
     ),
     WithSpecs = merge_specs_into_funcs(Mod, ExportSet, Specs, InitialFuncs),
-    InferredFuncs = spectra_infer:infer_module_functions(Mod, ClausesByMFA, WithSpecs),
+    External = external_contracts(Mod, maps:get(external_specs, Opts, #{})),
+    Inferred = spectra_infer:infer_module_functions(Mod, ClausesByMFA, maps:merge(External, WithSpecs)),
+    InferredFuncs = maps:filter(fun({M, _, _}, _) -> M =:= Mod end, Inferred),
     ResolvedFile = case Summary#module_summary.file of
         undefined ->
             case [FPath || {attribute, _Anno, file, {FPath, _Line}} <- Forms, is_list(FPath), FPath =/= ""] of

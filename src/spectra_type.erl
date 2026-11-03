@@ -289,6 +289,20 @@ consistent_subtype(_, none) -> false;
 consistent_subtype(Same, Same) -> true;
 consistent_subtype({union, SubMembers}, Super) ->
     lists:all(fun(M) -> consistent_subtype(M, Super) end, SubMembers);
+consistent_subtype({tuple, Elems} = Sub, {union, SuperMembers} = Super) ->
+    case lists:any(fun is_union/1, Elems) of
+        false ->
+            lists:any(fun(M) -> consistent_subtype(Sub, M) end, SuperMembers);
+        true ->
+            %% {ok, a | b} is {ok, a} | {ok, b}: the whole tuple may need several members of the union to be covered, so each
+            %% combination is checked on its own (up to a few; beyond that the tuple has to fit one member)
+            case tuple_combinations(Elems) of
+                too_many ->
+                    lists:any(fun(M) -> consistent_subtype(Sub, M) end, SuperMembers);
+                Combinations ->
+                    lists:all(fun(Combination) -> consistent_subtype({tuple, Combination}, Super) end, Combinations)
+            end
+    end;
 consistent_subtype(Sub, {union, SuperMembers}) ->
     lists:any(fun(M) -> consistent_subtype(Sub, M) end, SuperMembers);
 consistent_subtype(Sub, Super) ->
@@ -605,6 +619,22 @@ meet_tuple_with_record(Tag, Name, Record) ->
         none -> none;
         _ -> Record
     end.
+
+is_union({union, _}) -> true;
+is_union(_) -> false.
+
+%% Every way of choosing one member of each union element of a tuple, or `too_many` past 32.
+tuple_combinations(Elems) ->
+    Options = [case E of {union, Ms} -> Ms; _ -> [E] end || E <- Elems],
+    case lists:foldl(fun(Os, N) -> N * length(Os) end, 1, Options) =< 32 of
+        true -> combinations(Options);
+        false -> too_many
+    end.
+
+combinations([]) -> [[]];
+combinations([Options | Rest]) ->
+    Tails = combinations(Rest),
+    [[O | Tail] || O <- Options, Tail <- Tails].
 
 improper_chain(E, none) -> {list, E};
 improper_chain(E, Tail) -> {improper_list, E, Tail}.

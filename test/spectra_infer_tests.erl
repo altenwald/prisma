@@ -769,3 +769,209 @@ call_inside_the_target_of_another_call_test() ->
 
 a_dynamic_target_that_is_correct_says_nothing_test() ->
     ?assertEqual([], missing_hits("    M = ov_callee,\n    M:g(1),\n    (ov_callee:g(1)):anything(2)", discrepancy)).
+
+%% The return type of a call to another module comes from that module's -spec, so a pattern that the spec says can never match is reported.
+
+return_callee() ->
+    "-export([f/0, g/1, h/0, t/0]).\n"
+    "-spec f() -> ok | {error, atom()}.\nf() -> ok.\n"
+    "-spec g(integer()) -> {ok, integer()} | {error, term()}.\ng(_) -> {ok, 1}.\n"
+    "h() -> ok.\n"
+    "-spec t() -> term().\nt() -> ok.\n".
+
+return_hits(Body) ->
+    Caller = "-export([f/0]).\nf() ->\n" ++ Body ++ ".\n",
+    two_module_warnings(Caller, return_callee(), discrepancy).
+
+pattern_that_the_spec_of_the_callee_rules_out_test() ->
+    ?assertEqual([{discrepancy, 4}], return_hits("    {ok, V} = ov_callee:f(),\n    V")),
+    ?assertEqual([{discrepancy, 4}], return_hits("    {okk, V} = ov_callee:g(1),\n    V")),
+    ?assertEqual([{discrepancy, 4}], return_hits("    {ok, _, _} = ov_callee:g(1)")).
+
+pattern_that_the_spec_of_the_callee_allows_test() ->
+    ?assertEqual([], return_hits("    ok = ov_callee:f()")),
+    ?assertEqual([], return_hits("    {error, E} = ov_callee:f(),\n    E")),
+    ?assertEqual([], return_hits("    {ok, V} = ov_callee:g(1),\n    V")),
+    ?assertEqual([], return_hits("    {error, _} = ov_callee:g(1)")).
+
+case_clause_that_the_spec_of_the_callee_rules_out_test() ->
+    Body = "    case ov_callee:g(1) of\n        {ok, V} -> V;\n        {error, _} -> 0;\n        {oops, _} -> 1\n    end",
+    ?assertEqual([{dead_code, 7}], return_hits(Body) ),
+    %% no clause can match at all
+    Warnings = return_hits("    case ov_callee:f() of\n        {ok, _} -> 1;\n        {nope, _} -> 2\n    end"),
+    ?assert(lists:member({discrepancy, 4}, Warnings)),
+    ?assert(lists:member({dead_code, 5}, Warnings)),
+    ?assert(lists:member({dead_code, 6}, Warnings)).
+
+callee_without_a_useful_spec_says_nothing_test() ->
+    %% no -spec, and -spec ... -> term()
+    ?assertEqual([], return_hits("    {ok, V} = ov_callee:h(),\n    V")),
+    ?assertEqual([], return_hits("    {ok, V} = ov_callee:t(),\n    V")).
+
+the_result_of_a_remote_call_only_names_the_caller_test() ->
+    Caller = "-export([top/0]).\n"
+             "top() -> mid() + 1.\n"
+             "mid() ->\n"
+             "    {ok, V} = ov_callee:f(),\n"
+             "    V.\n",
+    ?assertEqual([{discrepancy, 5}], two_module_warnings(Caller, return_callee(), discrepancy)).
+
+spec_of_a_dependency_loaded_from_a_plt_is_used_test() ->
+    Compile = fun(Name, Src) ->
+        {ok, Toks, _} = erl_scan:string("-module(" ++ Name ++ ").\n" ++ Src),
+        {ok, _, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+        Beam
+    end,
+    CalleeBeam = Compile("ov_callee", return_callee()),
+    {ok, DepPlt} = spectra_plt:from_beams([CalleeBeam]),
+    File = "ext_specs_test.splt",
+    ok = file:write_file(File, spectra_plt:encode(DepPlt)),
+    try
+        Caller = Compile("ov_caller", "-export([f/0]).\nf() ->\n    {ok, V} = ov_callee:f(),\n    V.\n"),
+        {ok, Ws} = spectra:analyze_beams([Caller], #{plts => [File], mode => discrepancy, oxbow => false}),
+        ?assertEqual([{discrepancy, 4}], [{K, L} || #spectra_warning{kind = K, line = L} <- Ws])
+    after
+        file:delete(File)
+    end.
+
+%% A declared return type that names a type of the other module (`-type t() :: ...`, `-spec f() -> t()`) cannot be resolved while the caller
+%% is inferred: it is unknown, not impossible. (Spectra's own code showed it: `unfold_bounded_fun/1` returns `stype()`.)
+
+named_type_callee() ->
+    "-export([f/0, g/0]).\n-type t() :: {ok, integer()} | error.\n"
+    "-spec f() -> t().\nf() -> error.\n"
+    "-spec g() -> {ok, t()} | {error, term()}.\ng() -> {error, x}.\n".
+
+named_hits(Body) ->
+    Caller = "-export([f/0]).\nf() ->\n" ++ Body ++ ".\n",
+    two_module_warnings(Caller, named_type_callee(), discrepancy).
+
+return_type_that_names_a_type_of_the_callee_is_unknown_test() ->
+    ?assertEqual([], named_hits("    case ov_callee:f() of\n        {ok, V} -> V;\n        error -> 0\n    end")),
+    ?assertEqual([], named_hits("    {ok, {ok, V}} = ov_callee:g(),\n    V")),
+    ?assertEqual([], named_hits("    {ok, T} = ov_callee:g(),\n    T")),
+    %% what is spelled out in the spec is still known
+    ?assertEqual([{discrepancy, 4}], named_hits("    {nope, T} = ov_callee:g(),\n    T")).
+
+%% After a clause without a guard, what it matches is no longer in the type of the scrutinee for the clauses that follow:
+%% `case f() of ok -> {ok, 1}; Err -> Err end` returns `{ok, 1} | {error, _}`, not `ok` as well.
+
+case_negation_callee() ->
+    "-export([f/0, g/0]).\n"
+    "-spec f() -> ok | {error, atom()}.\nf() -> ok.\n"
+    "-spec g() -> ok | {error, atom()} | {badrpc, term()}.\ng() -> ok.\n".
+
+case_ret(Body) ->
+    Caller = "-export([f/0]).\nf() ->\n" ++ Body ++ ".\n",
+    Compile = fun(Name, Src) ->
+        {ok, Toks, _} = erl_scan:string("-module(" ++ Name ++ ").\n" ++ Src),
+        {ok, _, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+        Beam
+    end,
+    {ok, Plt} = spectra_plt:from_beams([Compile("ov_caller", Caller), Compile("ov_callee", case_negation_callee())]),
+    #module_summary{functions = Funcs} = maps:get(ov_caller, Plt#spectra_plt.modules),
+    {fun_type, [], Ret} = (maps:get({ov_caller, f, 0}, Funcs))#func_contract.inferred_type,
+    Ret.
+
+variable_clause_after_a_covering_clause_is_precise_test() ->
+    Ret = case_ret("    case ov_callee:f() of\n        ok -> {ok, 1};\n        Err -> Err\n    end"),
+    ?assert(spectra_oracle:member({ok, 1}, Ret)),
+    ?assert(spectra_oracle:member({error, x}, Ret)),
+    ?assertNot(spectra_oracle:member(ok, Ret)).
+
+several_covering_clauses_are_subtracted_test() ->
+    Ret = case_ret("    case ov_callee:g() of\n        ok -> 1;\n        {error, _} -> 2;\n        Other -> Other\n    end"),
+    ?assert(spectra_oracle:member(1, Ret)),
+    ?assert(spectra_oracle:member(2, Ret)),
+    ?assert(spectra_oracle:member({badrpc, x}, Ret)),
+    ?assertNot(spectra_oracle:member(ok, Ret)),
+    ?assertNot(spectra_oracle:member({error, x}, Ret)).
+
+a_clause_with_a_guard_subtracts_nothing_test() ->
+    Ret = case_ret("    case ov_callee:f() of\n        ok when 1 > 2 -> 1;\n        Other -> Other\n    end"),
+    ?assert(spectra_oracle:member(ok, Ret)),
+    ?assert(spectra_oracle:member({error, x}, Ret)).
+
+a_clause_that_covers_only_part_subtracts_only_that_part_test() ->
+    Ret = case_ret("    case ov_callee:g() of\n        {error, not_found} -> 1;\n        Other -> Other\n    end"),
+    %% {error, atom()} is not covered by {error, not_found}: it stays
+    ?assert(spectra_oracle:member({error, other}, Ret)),
+    ?assert(spectra_oracle:member(ok, Ret)).
+
+catch_all_after_exhaustive_clauses_stays_quiet_test() ->
+    ?assertEqual([], two_module_warnings("-export([f/0]).\nf() ->\n    case ov_callee:f() of\n        ok -> 1;\n        {error, _} -> 2;\n        _ -> 3\n    end.\n",
+                                         case_negation_callee(), discrepancy)).
+
+%% A variable in a pattern may be new (a catch-all) or already bound (an equality test): the code does not say, so only patterns without
+%% variables take their values out of the type that is left. (`case X of Checksum -> ok; _ -> error end` made `error` disappear.)
+
+a_variable_that_is_already_bound_is_not_a_catch_all_test() ->
+    Ret = inferred_return("f(X) ->\n    Y = 1,\n    case X of\n        Y -> ok;\n        _ -> error\n    end.\n"),
+    ?assert(spectra_oracle:member(ok, Ret)),
+    ?assert(spectra_oracle:member(error, Ret)),
+    %% and as the head of a function: Checksum is compared, not bound
+    Ret2 = inferred_return("f(Checksum) -> g(Checksum, 5).\ng(Checksum, Computed) ->\n    case Computed of\n        Checksum -> ok;\n        _ -> error\n    end.\n"),
+    ?assert(spectra_oracle:member(ok, Ret2)),
+    ?assert(spectra_oracle:member(error, Ret2)).
+
+a_pattern_with_a_variable_subtracts_nothing_test() ->
+    Ret = case_ret("    case ov_callee:g() of\n        {error, E} -> E;\n        Other -> Other\n    end"),
+    %% {error, E} might be an equality test on E: nothing is taken out, `{error, _}` stays possible in the second clause
+    ?assert(spectra_oracle:member({error, x}, Ret)),
+    ?assert(spectra_oracle:member(ok, Ret)).
+
+%% A BIF that is not in the table gives `any`, and `9 + any` is `number`: it may be a float, so it does not fit `non_neg_integer()`.
+%% The BIFs that always return integers are known.
+
+integer_returning_bifs_test() ->
+    lists:foreach(
+        fun(Expr) ->
+            Ret = inferred_return("f(D) -> 9 + " ++ Expr ++ ".\n"),
+            ?assert({Expr, spectra_oracle:member(10, Ret)} =:= {Expr, true}),
+            ?assert({Expr, spectra_oracle:member(1.5, Ret)} =:= {Expr, false})
+        end,
+        ["iolist_size(D)", "erlang:external_size(D)", "erlang:phash2(D)", "erlang:phash2(D, 100)", "size(D)"]).
+
+%% The sign survives addition and multiplication: 9 + size is positive, not just an integer.
+
+arithmetic_keeps_the_sign_test_() ->
+    Infer = fun(Src) -> inferred_return("f(N) when is_integer(N), N >= 0 -> " ++ Src ++ ".\n") end,
+    Is = fun(Type, V) -> spectra_oracle:member(V, Type) end,
+    [?_assert(Is(Infer("9 + iolist_size(N)"), 9)),
+     ?_assertNot(Is(Infer("9 + iolist_size(N)"), 0)),          %% positive
+     ?_assertNot(Is(Infer("9 + iolist_size(N)"), -1)),
+     ?_assert(Is(Infer("iolist_size(N) + N"), 0)),              %% two non-negative: may be 0
+     ?_assertNot(Is(Infer("iolist_size(N) + N"), -1)),
+     ?_assertNot(Is(Infer("iolist_size(N) * 3"), -3)),
+     ?_assert(Is(Infer("iolist_size(N) - 1"), -1)),             %% a subtraction can go below 0
+     ?_assert(Is(Infer("N - N"), -5))].
+
+time_bifs_are_not_assumed_to_be_non_negative_test() ->
+    %% erlang:system_time/0 may be negative: it stays `any`, so a declared non_neg_integer() is not contradicted
+    Ret = inferred_return("f(_) -> erlang:system_time(millisecond).\n"),
+    ?assertEqual(any, Ret).
+
+%% Inside a module too, a call goes by what the callee's -spec declares: `{ok, V} = g()` when g/0 is `ok | {error, _}`, and a callee whose body
+%% contradicts its spec does not make its callers wrong.
+
+own_module_contracts_test() ->
+    Spec = "-export([f/0, h/0]).\n-spec g() -> ok | {error, atom()}.\ng() -> ok.\n",
+    ?assertEqual([{discrepancy, 6}], plain_warnings(Spec ++ "f() ->\n    {ok, V} = g(),\n    V.\nh() -> ok.\n")),
+    ?assertEqual([{discrepancy, 6}], plain_warnings(Spec ++ "f() ->\n    {ok, V} = cmp_sample:g(),\n    V.\nh() -> ok.\n")),
+    ?assertEqual([], plain_warnings(Spec ++ "f() ->\n    {error, E} = g(),\n    E.\nh() -> ok.\n")).
+
+a_callee_that_contradicts_its_spec_does_not_make_callers_wrong_test() ->
+    Src = "-export([top/0]).\n"
+          "-spec g() -> integer().\n"
+          "g() -> oops.\n"                  %% line 4 of the file: the only wrong function
+          "-spec f() -> integer().\n"
+          "f() -> g() + 1.\n"
+          "top() -> {f(), g()}.\n",
+    ?assertEqual([{gradual_mismatch, 4}], gradual_warnings(Src)).
+
+gradual_warnings(Src) ->
+    Text = "-module(cmp_sample).\n" ++ Src,
+    {ok, Toks, _} = erl_scan:string(Text),
+    {ok, cmp_sample, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+    {ok, Ws} = spectra:analyze_beams([Beam], #{oxbow => false}),
+    [{K, L} || #spectra_warning{kind = K, line = L} <- Ws].

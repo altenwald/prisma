@@ -354,3 +354,23 @@ widen_collapses_unions_with_too_many_members_test() ->
     %% a few atoms are kept as they are
     Few = [{atom_lit, a}, {atom_lit, b}, {atom_lit, c}],
     ?assertEqual({union, Few}, spectra_type:widen({union, Few})).
+
+%% A tuple whose element is a union is a union of tuples: {ok, a | b} fits {ok, a} | {ok, b}.
+
+tuple_with_a_union_element_fits_a_union_of_tuples_test_() ->
+    Sub = {tuple, [{atom_lit, ok}, {union, [{atom_lit, a}, {atom_lit, b}, {atom_lit, c}]}, binary_type()]},
+    Super = {union, [{tuple, [{atom_lit, ok}, {atom_lit, a}, binary_type()]},
+                     {tuple, [{atom_lit, ok}, {union, [{atom_lit, b}, {atom_lit, c}]}, binary_type()]}]},
+    [?_assert(spectra_type:consistent_subtype(Sub, Super)),
+     %% not when one of the combinations is missing
+     ?_assertNot(spectra_type:consistent_subtype(
+                   {tuple, [{atom_lit, ok}, {union, [{atom_lit, a}, {atom_lit, z}]}, binary_type()]}, Super)),
+     %% two unions in one tuple: every combination has to fit
+     ?_assert(spectra_type:consistent_subtype(
+                {tuple, [{union, [{atom_lit, x}, {atom_lit, y}]}, {union, [{atom_lit, a}, {atom_lit, b}]}]},
+                {union, [{tuple, [{atom_lit, x}, atom]}, {tuple, [{atom_lit, y}, atom]}]})),
+     ?_assertNot(spectra_type:consistent_subtype(
+                   {tuple, [{union, [{atom_lit, x}, {atom_lit, y}]}, atom]},
+                   {union, [{tuple, [{atom_lit, x}, atom]}, {tuple, [{atom_lit, w}, atom]}]}))].
+
+binary_type() -> {binary, 0, 8}.
