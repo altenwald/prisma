@@ -493,7 +493,11 @@ infer_expr(Mod, MFA, {cons, _, H, T}, Env0, Contracts, Warns0, Sites0) ->
     end;
 infer_expr(Mod, MFA, {map, _, Fields}, Env0, Contracts, Warns0, Sites0) ->
     {MapFields, Env1, Warns1, Sites1} = infer_map_fields(Mod, MFA, Fields, Env0, Contracts, Warns0, Sites0, []),
-    {{map, lists:usort(MapFields)}, Env1, Warns1, Sites1};
+    %% `#{k => V}` has the key k: a literal key is a required field of the type, not an optional one
+    Exact = [case F of {assoc, {atom_lit, _} = K, V} -> {exact, K, V};
+                       {assoc, {int_lit, _} = K, V} -> {exact, K, V};
+                       _ -> F end || F <- MapFields],
+    {{map, lists:usort(Exact)}, Env1, Warns1, Sites1};
 infer_expr(Mod, MFA, {map, Anno, Base, Fields}, Env0, Contracts, Warns0, Sites0) ->
     {BaseType, Env1, Warns1, Sites1} = infer_expr(Mod, MFA, Base, Env0, Contracts, Warns0, Sites0),
     case prisma_type:meet(BaseType, any_map) of
@@ -1006,7 +1010,8 @@ infer_call(Mod, CallerMFA, Anno, Target, ArgAsts, ArgTypes, Env0, Contracts, War
                         any -> Inferred;
                         Declared -> Declared
                     end,
-                    apply_callee_signature(CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, ExpectedArgs, RetType, Env0, Warns0, Sites1);
+                    apply_callee_signature(CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, ExpectedArgs, RetType, Env0, Warns0, Sites1,
+                                           Specs =/= []);
                 _ ->
                     {any, Env0, Warns0, Sites1}
             end;
@@ -1050,10 +1055,26 @@ resolve_call_target(_Mod, _Dynamic, _Arity) ->
     dynamic.
 
 apply_callee_signature(CallerMFA, Line, CalleeMFA, ArgAsts, ActualArgs, ExpectedArgs, RetType, Env0, Warns0, Sites) ->
+    apply_callee_signature(CallerMFA, Line, CalleeMFA, ArgAsts, ActualArgs, ExpectedArgs, RetType, Env0, Warns0, Sites, true).
+
+is_union_type({union, _}) -> true;
+is_union_type(_) -> false.
+
+%% `Narrow`: an argument that is a variable takes the type the callee expects. When the callee has no `-spec` and what it expects is a
+%% union (a function with clauses for a tuple, `none` and a map), that was inferred from the callee's own clauses and is wider than
+%% what the caller really passes: a variable that nothing is known of must not become that union, because a later call that
+%% needs a map would find `none` and a tuple in it. A single type (`integer`) is still taken: it is how the parameters of a function
+%% are inferred.
+apply_callee_signature(CallerMFA, Line, CalleeMFA, ArgAsts, ActualArgs, ExpectedArgs, RetType, Env0, Warns0, Sites, Narrow) ->
     case check_call_site(CallerMFA, Line, CalleeMFA, lists:zip(ActualArgs, ExpectedArgs)) of
         [] ->
             Env1 = lists:foldl(
-                fun({Ast, Exp}, EAcc) -> constrain_ast_var(Ast, Exp, EAcc) end,
+                fun({Ast, Exp}, EAcc) ->
+                    case Narrow orelse not is_union_type(Exp) of
+                        true -> constrain_ast_var(Ast, Exp, EAcc);
+                        false -> EAcc
+                    end
+                end,
                 Env0,
                 lists:zip(ArgAsts, ExpectedArgs)
             ),

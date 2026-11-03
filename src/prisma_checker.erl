@@ -178,6 +178,9 @@ unproven_gap(number, Expected) ->
     Expected =:= integer orelse narrower_integer(Expected);
 unproven_gap(non_neg_integer, {int_range, 0, _}) ->
     true;
+%% a binary known only as `binary()` or `bitstring()` against `<<_:8, _:_*8>>` (a non-empty binary) or `<<_:_*16>>`: it may well be one
+unproven_gap({binary, _, _} = Actual, {binary, _, _} = Expected) ->
+    prisma_type:meet(Actual, Expected) =/= none;
 unproven_gap({list, Elem}, {nonempty_list, ExpectedElem}) ->
     prisma_type:consistent_subtype(Elem, ExpectedElem);
 unproven_gap(_, _) ->

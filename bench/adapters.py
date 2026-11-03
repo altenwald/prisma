@@ -34,7 +34,9 @@ def prisma(dirs, discrepancy_only=False):
     if discrepancy_only:
         cmd = ["erl", "-noshell", "-pa", PRISMA_EBIN, "-eval", API, "-extra", *dirs]
     else:
-        cmd = [PRISMA, "check", "--format", "json", "--no-color", *dirs]
+        # BENCH_PPLTS=a.pplt:b.pplt gives it the contracts of OTP and of the dependencies (what Gradualizer reads from the code path)
+        plts = [x for p in os.environ.get("BENCH_PPLTS", "").split(":") if p for x in ("--pplt", p)]
+        cmd = [PRISMA, "check", "--format", "json", "--no-color", *plts, *dirs]
     out = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
     for w in json.loads(out.stdout or "[]"):
         yield dict(tool="prisma-discrepancy" if discrepancy_only else "prisma", category=PRISMA_KINDS.get(w["kind"], w["kind"]),

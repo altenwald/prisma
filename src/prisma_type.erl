@@ -323,6 +323,8 @@ consistent_subtype({local_type, _, _}, _) -> true;
 consistent_subtype(_, {local_type, _, _}) -> true;
 consistent_subtype({remote_type, _, _, _}, _) -> true;
 consistent_subtype(_, {remote_type, _, _, _}) -> true;
+consistent_subtype(any_fun, {fun_type, _, _}) -> true;
+consistent_subtype(any_fun, {fun_any_args, _}) -> true;
 consistent_subtype(none, _) -> true;
 consistent_subtype(_, none) -> false;
 consistent_subtype(Same, Same) -> true;
