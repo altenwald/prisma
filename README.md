@@ -46,9 +46,9 @@ defp aliases, do: ["hex.publish": ["prisma.build", "hex.publish"]]
 ```erlang
 %% src/my_lib.app.src
 {files, ["src", "include", "rebar.config", "README.md", "my_lib_*.pplt"]}
-%% rebar.config
-{provider_hooks, [{pre, [{hex_publish, {prisma, build}}]}]}   %% or just run `rebar3 prisma build` before `rebar3 hex publish`
 ```
+
+In rebar3, run `rebar3 prisma build` right before `rebar3 hex publish`.
 
 The file carries a hash of the sources it was made from and the OTP release. Whoever uses your library **checks** it before trusting it, and leaves it out (with a message) and builds the dependency from its beams if:
 - it is **out of date**: the sources of the dependency in `deps/` or `_build/` no longer match the hash (a file from the repository that was not made again, for example);
