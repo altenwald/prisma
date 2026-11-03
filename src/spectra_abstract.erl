@@ -102,29 +102,47 @@ detect_language(Module, Dbgi) ->
     end.
 
 enrich_from_debug_info(Beam, Module, Dbgi, Exports, Summary, Opts) ->
-    case beam_lib:chunks(Beam, [abstract_code]) of
-        {ok, {_Mod, [{abstract_code, {raw_abstract_v1, Forms}}]}} ->
+    case abstract_forms(Beam, Dbgi) of
+        {ok, Forms} ->
             {ok, parse_abstract_forms(Forms, Exports, Summary, Opts)};
-        _ ->
+        error ->
             {ok, spectra_elixir:from_elixir_dbgi(Module, Dbgi, Exports, Summary)}
+    end.
+
+%% The abstract forms of a module. The debug_info chunk of an Erlang module already holds them, in the same form that
+%% `beam_lib:chunks(Beam, [abstract_code])` returns; asking for `abstract_code` decodes the chunk again and rebuilds every
+%% annotation (`erl_parse:anno_from_term` was a fifth of the time of building a PLT).
+abstract_forms(_Beam, {debug_info_v1, erl_abstract_code, {Forms, _Opts}}) when is_list(Forms) ->
+    {ok, Forms};
+abstract_forms(Beam, _Dbgi) ->
+    case beam_lib:chunks(Beam, [abstract_code]) of
+        {ok, {_Mod, [{abstract_code, {raw_abstract_v1, Forms}}]}} -> {ok, Forms};
+        _ -> error
     end.
 
 %% @doc The `-spec`s of a BEAM file, `#{{M, F, A} => [stype()]}` (nothing if it has no abstract code).
 -spec specs_of_beam(file:filename_all() | binary()) -> #{mfa_key() => [spectra_type:stype()]}.
 specs_of_beam(BeamInput) ->
-    case beam_lib:chunks(normalize_input(BeamInput), [abstract_code]) of
-        {ok, {Mod, [{abstract_code, {raw_abstract_v1, Forms}}]}} ->
-            lists:foldl(
-                fun({attribute, _, spec, {{F, A}, Clauses}}, Acc) ->
-                        Acc#{{Mod, F, A} => [spectra_type:from_abstract(C) || C <- Clauses]};
-                   ({attribute, _, spec, {{M, F, A}, Clauses}}, Acc) ->
-                        Acc#{{M, F, A} => [spectra_type:from_abstract(C) || C <- Clauses]};
-                   (_, Acc) ->
-                        Acc
-                end, #{}, Forms);
+    Beam = normalize_input(BeamInput),
+    case beam_lib:chunks(Beam, [debug_info], [allow_missing_chunks]) of
+        {ok, {Mod, [{debug_info, Dbgi}]}} ->
+            case abstract_forms(Beam, Dbgi) of
+                {ok, Forms} -> specs_in(Mod, Forms);
+                error -> #{}
+            end;
         _ ->
             #{}
     end.
+
+specs_in(Mod, Forms) ->
+    lists:foldl(
+        fun({attribute, _, spec, {{F, A}, Clauses}}, Acc) ->
+                Acc#{{Mod, F, A} => [spectra_type:from_abstract(C) || C <- Clauses]};
+           ({attribute, _, spec, {{M, F, A}, Clauses}}, Acc) ->
+                Acc#{{M, F, A} => [spectra_type:from_abstract(C) || C <- Clauses]};
+           (_, Acc) ->
+                Acc
+        end, #{}, Forms).
 
 %% What the inference of a module may assume about the functions of the others: the return type their `-spec` declares
 %% (the contract is the interface, not whatever their body happens to give). The arguments are left alone: they are checked
