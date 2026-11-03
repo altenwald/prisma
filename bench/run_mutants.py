@@ -3,7 +3,7 @@
 
     run_mutants.py <mutants-dir> [--workers N]
 
-For each mutant the mutated .beam replaces the original in a scratch copy of its ebin directory, and Spectra
+For each mutant the mutated .beam replaces the original in a scratch copy of its ebin directory, and Prisma
 (contracts on, oxbow off) and Dialyzer (default warnings) analyze that directory. A tool detects the mutant when it
 gives, inside the mutated function, a warning that it did not give for the unmodified directory (module, line, kind).
 erlc counts as a third tool, but only warnings that say the code fails (not unused variables, which the mutation causes).
@@ -17,8 +17,8 @@ import adapters  # noqa: E402
 COMPILER_FAILS = re.compile(r"failed|eval_failure|nomatch|never|no_clause|bad_")
 
 
-def spectra(directory):
-    out = subprocess.run([adapters.SPECTRA, "check", "--format", "json", "--no-color", "--no-oxbow", directory],
+def prisma(directory):
+    out = subprocess.run([adapters.PRISMA, "check", "--format", "json", "--no-color", "--no-oxbow", directory],
                          capture_output=True, text=True)
     try:
         return [(w.get("module"), w.get("line", 0), w["kind"]) for w in json.loads(out.stdout or "[]")]
@@ -30,7 +30,7 @@ def dialyzer(directory):
     return [(w["module"], w["line"], w["category"]) for w in adapters.dialyzer([directory])]
 
 
-TOOLS = {"spectra": spectra, "dialyzer": dialyzer}
+TOOLS = {"prisma": prisma, "dialyzer": dialyzer}
 
 
 def scratch_copy(ebin):
@@ -89,18 +89,18 @@ def main():
 
 def summarize(results):
     ops = sorted({r["operator"] for r in results})
-    tools = ["spectra", "dialyzer", "erlc"]
-    print("\noperator  mutants  " + "  ".join(f"{t:>9}" for t in tools) + "   union  only-spectra  only-dialyzer")
+    tools = ["prisma", "dialyzer", "erlc"]
+    print("\noperator  mutants  " + "  ".join(f"{t:>9}" for t in tools) + "   union  only-prisma  only-dialyzer")
     for op in ops + ["all"]:
         rs = [r for r in results if op == "all" or r["operator"] == op]
         hit = {t: sum(1 for r in rs if r.get(t)) for t in tools}
         union = sum(1 for r in rs if any(r.get(t) for t in tools))
-        only_s = sum(1 for r in rs if r.get("spectra") and not r.get("dialyzer"))
-        only_d = sum(1 for r in rs if r.get("dialyzer") and not r.get("spectra"))
+        only_s = sum(1 for r in rs if r.get("prisma") and not r.get("dialyzer"))
+        only_d = sum(1 for r in rs if r.get("dialyzer") and not r.get("prisma"))
         print(f"{op:8}  {len(rs):7}  " + "  ".join(f"{hit[t]:9}" for t in tools) + f"   {union:5}  {only_s:12}  {only_d:13}")
     collateral = collections.Counter()
     for r in results:
-        for t in ("spectra", "dialyzer"):
+        for t in ("prisma", "dialyzer"):
             collateral[t] += r.get(t + "_collateral", 0)
     print("\nnew warnings outside the mutated function (collateral):", dict(collateral))
 

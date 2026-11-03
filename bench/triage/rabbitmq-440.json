@@ -1,5 +1,5 @@
 {
- "_doc": "Manual verdicts for Spectra warnings (discrepancy mode) on the 440 modules of rabbitmq-server 5dacb85 that are not in deps/rabbit (see rabbitmq-core.json for those). key = module:function:line:kind.",
+ "_doc": "Manual verdicts for Prisma warnings (discrepancy mode) on the 440 modules of rabbitmq-server 5dacb85 that are not in deps/rabbit (see rabbitmq-core.json for those). key = module:function:line:kind.",
  "_summary": "44 warnings at the end: 5 in rabbit (wrong specs, see rabbitmq-core.json) + 39 here. 0 false positives left. 4 false positives were found and fixed on the way: comparison with 0 (3), environment join of an orelse guard (1).",
  "cuttlefish_error:xlate:*": {
   "verdict": "true_positive",

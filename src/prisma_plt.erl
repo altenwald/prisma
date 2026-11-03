@@ -1,10 +1,10 @@
-%% @doc Manages portable, path-independent Spectra PLT files (`.splt`).
+%% @doc Manages portable, path-independent Prisma PLT files (`.splt`).
 %%
 %% Supports building a PLT from BEAM files, encoding/decoding compressed
 %% binaries, merging multiple PLTs in memory, and resolving remote/opaque types.
--module(spectra_plt).
+-module(prisma_plt).
 
--include("spectra.hrl").
+-include("prisma.hrl").
 
 -export([
     new/0,
@@ -27,52 +27,52 @@
     modules/1
 ]).
 
-%% @doc Creates an empty `#spectra_plt{}` for the current OTP release.
--spec new() -> #spectra_plt{}.
+%% @doc Creates an empty `#prisma_plt{}` for the current OTP release.
+-spec new() -> #prisma_plt{}.
 new() ->
     new(undefined, undefined).
 
-%% @doc Creates an empty `#spectra_plt{}` with package metadata.
--spec new(binary() | undefined, binary() | undefined) -> #spectra_plt{}.
+%% @doc Creates an empty `#prisma_plt{}` with package metadata.
+-spec new(binary() | undefined, binary() | undefined) -> #prisma_plt{}.
 new(Pkg, PkgVsn) ->
     OtpRel = list_to_binary(erlang:system_info(otp_release)),
-    #spectra_plt{
-        version = ?SPECTRA_PLT_VERSION,
+    #prisma_plt{
+        version = ?PRISMA_PLT_VERSION,
         package = Pkg,
         package_vsn = PkgVsn,
         otp_release = OtpRel,
         modules = #{}
     }.
 
-%% @doc Builds a `#spectra_plt{}` from all `.beam` files in `Dir`.
--spec from_dir(file:filename_all()) -> {ok, #spectra_plt{}} | {error, term()}.
+%% @doc Builds a `#prisma_plt{}` from all `.beam` files in `Dir`.
+-spec from_dir(file:filename_all()) -> {ok, #prisma_plt{}} | {error, term()}.
 from_dir(Dir) ->
     Pattern = filename:join(unicode:characters_to_list(Dir), "*.beam"),
     Beams = filelib:wildcard(Pattern),
     from_beams(Beams).
 
-%% @doc Builds a `#spectra_plt{}` from a list of BEAM paths or binaries.
--spec from_beams([file:filename_all() | binary()]) -> {ok, #spectra_plt{}} | {error, term()}.
+%% @doc Builds a `#prisma_plt{}` from a list of BEAM paths or binaries.
+-spec from_beams([file:filename_all() | binary()]) -> {ok, #prisma_plt{}} | {error, term()}.
 from_beams(Beams) ->
     from_beams(Beams, #{}).
 
-%% @doc Builds a `#spectra_plt{}` from BEAM inputs and metadata options.
+%% @doc Builds a `#prisma_plt{}` from BEAM inputs and metadata options.
 -spec from_beams([file:filename_all() | binary()], map()) ->
-    {ok, #spectra_plt{}} | {error, term()}.
+    {ok, #prisma_plt{}} | {error, term()}.
 from_beams(Beams, Opts0) ->
     Pkg = maps:get(package, Opts0, undefined),
     PkgVsn = maps:get(package_vsn, Opts0, undefined),
     BasePlt = new(Pkg, PkgVsn),
     %% first the -specs of every module, so that each one is inferred knowing what the others declare
-    Specs = lists:foldl(fun(Beam, Acc) -> maps:merge(Acc, spectra_abstract:specs_of_beam(Beam)) end,
+    Specs = lists:foldl(fun(Beam, Acc) -> maps:merge(Acc, prisma_abstract:specs_of_beam(Beam)) end,
                         maps:get(external_specs, Opts0, #{}), Beams),
     Opts = Opts0#{external_specs => Specs},
     lists:foldl(
         fun
-            (Beam, {ok, #spectra_plt{modules = Mods} = Plt}) ->
-                case spectra_abstract:extract_beam(Beam, Opts) of
+            (Beam, {ok, #prisma_plt{modules = Mods} = Plt}) ->
+                case prisma_abstract:extract_beam(Beam, Opts) of
                     {ok, #module_summary{module = Mod} = Summary} ->
-                        {ok, Plt#spectra_plt{modules = Mods#{Mod => Summary}}};
+                        {ok, Plt#prisma_plt{modules = Mods#{Mod => Summary}}};
                     {error, Reason} ->
                         {error, {beam_extract_failed, Beam, Reason}}
                 end;
@@ -83,24 +83,24 @@ from_beams(Beams, Opts0) ->
         Beams
     ).
 
-%% @doc Merges a list of `#spectra_plt{}` records into one.
--spec merge([#spectra_plt{}]) -> #spectra_plt{}.
+%% @doc Merges a list of `#prisma_plt{}` records into one.
+-spec merge([#prisma_plt{}]) -> #prisma_plt{}.
 merge([]) ->
     new();
 merge([First | Rest]) ->
     lists:foldl(fun(Plt, Acc) -> merge(Acc, Plt) end, First, Rest).
 
-%% @doc Merges two `#spectra_plt{}` records.
--spec merge(#spectra_plt{}, #spectra_plt{}) -> #spectra_plt{}.
-merge(#spectra_plt{modules = M1} = Plt1, #spectra_plt{modules = M2}) ->
-    Plt1#spectra_plt{modules = maps:merge(M1, M2)}.
+%% @doc Merges two `#prisma_plt{}` records.
+-spec merge(#prisma_plt{}, #prisma_plt{}) -> #prisma_plt{}.
+merge(#prisma_plt{modules = M1} = Plt1, #prisma_plt{modules = M2}) ->
+    Plt1#prisma_plt{modules = maps:merge(M1, M2)}.
 
-%% @doc Serializes a `#spectra_plt{}` into a compressed binary with header magic.
--spec encode(#spectra_plt{}) -> binary().
-encode(#spectra_plt{modules = Modules} = Plt) ->
-    Lean = Plt#spectra_plt{modules = maps:map(fun(_Mod, Summary) -> without_code(Summary) end, Modules)},
+%% @doc Serializes a `#prisma_plt{}` into a compressed binary with header magic.
+-spec encode(#prisma_plt{}) -> binary().
+encode(#prisma_plt{modules = Modules} = Plt) ->
+    Lean = Plt#prisma_plt{modules = maps:map(fun(_Mod, Summary) -> without_code(Summary) end, Modules)},
     Payload = term_to_binary(Lean, [compressed, {minor_version, 2}]),
-    <<?SPECTRA_PLT_MAGIC, Payload/binary>>.
+    <<?PRISMA_PLT_MAGIC, Payload/binary>>.
 
 %% What is saved are the contracts. The abstract code of every function (`clauses`) is only needed while the module itself is
 %% inferred and by the oxbow detector, which runs on the modules being analyzed and never on a dependency loaded from a .splt:
@@ -110,16 +110,16 @@ without_code(#module_summary{functions = Funcs} = Summary) ->
                                                    (_MFA, Other) -> Other
                                                 end, Funcs)}.
 
-%% @doc Decodes a `.splt` binary into a `#spectra_plt{}` record.
--spec decode(binary()) -> {ok, #spectra_plt{}} | {error, term()}.
-decode(<<?SPECTRA_PLT_MAGIC, Payload/binary>>) ->
+%% @doc Decodes a `.splt` binary into a `#prisma_plt{}` record.
+-spec decode(binary()) -> {ok, #prisma_plt{}} | {error, term()}.
+decode(<<?PRISMA_PLT_MAGIC, Payload/binary>>) ->
     try binary_to_term(Payload, [safe]) of
-        #spectra_plt{} = Plt -> {ok, upgrade_plt(Plt)};
+        #prisma_plt{} = Plt -> {ok, upgrade_plt(Plt)};
         _ -> {error, invalid_plt_record}
     catch
         error:badarg ->
             try binary_to_term(Payload) of
-                #spectra_plt{} = Plt -> {ok, upgrade_plt(Plt)};
+                #prisma_plt{} = Plt -> {ok, upgrade_plt(Plt)};
                 _ -> {error, invalid_plt_record}
             catch
                 _:Reason -> {error, {corrupt_plt, Reason}}
@@ -128,7 +128,7 @@ decode(<<?SPECTRA_PLT_MAGIC, Payload/binary>>) ->
 decode(_) ->
     {error, invalid_plt_magic}.
 
-upgrade_plt(#spectra_plt{modules = Mods} = Plt) ->
+upgrade_plt(#prisma_plt{modules = Mods} = Plt) ->
     NewMods = maps:map(
         fun(_M, Summary0) ->
             Summary = upgrade_module_summary(Summary0),
@@ -143,7 +143,7 @@ upgrade_plt(#spectra_plt{modules = Mods} = Plt) ->
         end,
         Mods
     ),
-    Plt#spectra_plt{modules = NewMods}.
+    Plt#prisma_plt{modules = NewMods}.
 
 upgrade_module_summary(#module_summary{} = MS) ->
     MS;
@@ -193,14 +193,14 @@ upgrade_func_contract({func_contract, MFA, Exp, Specs, Inferred, Calls, Sites, W
 upgrade_func_contract(Other) ->
     Other.
 
-%% @doc Writes a `#spectra_plt{}` to `FilePath`.
--spec save(#spectra_plt{}, file:filename_all()) -> ok | {error, term()}.
-save(#spectra_plt{} = Plt, FilePath) ->
+%% @doc Writes a `#prisma_plt{}` to `FilePath`.
+-spec save(#prisma_plt{}, file:filename_all()) -> ok | {error, term()}.
+save(#prisma_plt{} = Plt, FilePath) ->
     ok = filelib:ensure_dir(FilePath),
     file:write_file(FilePath, encode(Plt)).
 
-%% @doc Reads a `#spectra_plt{}` from `FilePath`.
--spec load(file:filename_all()) -> {ok, #spectra_plt{}} | {error, term()}.
+%% @doc Reads a `#prisma_plt{}` from `FilePath`.
+-spec load(file:filename_all()) -> {ok, #prisma_plt{}} | {error, term()}.
 load(FilePath) ->
     case file:read_file(FilePath) of
         {ok, Bin} -> decode(Bin);
@@ -208,8 +208,8 @@ load(FilePath) ->
     end.
 
 %% @doc The declared `-spec`s of every function in the PLT, `#{{M, F, A} => [stype()]}`.
--spec declared_specs(#spectra_plt{}) -> #{mfa_key() => [spectra_type:stype()]}.
-declared_specs(#spectra_plt{modules = Mods}) ->
+-spec declared_specs(#prisma_plt{}) -> #{mfa_key() => [prisma_type:stype()]}.
+declared_specs(#prisma_plt{modules = Mods}) ->
     maps:fold(
         fun(_Mod, #module_summary{functions = Funcs}, Acc) ->
                 maps:fold(
@@ -219,13 +219,13 @@ declared_specs(#spectra_plt{modules = Mods}) ->
         end, #{}, Mods).
 
 %% @doc Looks up what is known about module `Mod` in the PLT.
--spec lookup_module(module(), #spectra_plt{}) -> {ok, #module_summary{}} | error.
-lookup_module(Mod, #spectra_plt{modules = Mods}) ->
+-spec lookup_module(module(), #prisma_plt{}) -> {ok, #module_summary{}} | error.
+lookup_module(Mod, #prisma_plt{modules = Mods}) ->
     maps:find(Mod, Mods).
 
 %% @doc Looks up a function contract `{M, F, A}` in the PLT.
--spec lookup_mfa(mfa_key(), #spectra_plt{}) -> {ok, #func_contract{}} | error.
-lookup_mfa({M, _F, _A} = MFA, #spectra_plt{modules = Mods}) ->
+-spec lookup_mfa(mfa_key(), #prisma_plt{}) -> {ok, #func_contract{}} | error.
+lookup_mfa({M, _F, _A} = MFA, #prisma_plt{modules = Mods}) ->
     case maps:find(M, Mods) of
         {ok, #module_summary{functions = Funcs}} ->
             case maps:find(MFA, Funcs) of
@@ -237,8 +237,8 @@ lookup_mfa({M, _F, _A} = MFA, #spectra_plt{modules = Mods}) ->
     end.
 
 %% @doc Looks up a type declaration `{M, Name, Arity}` in the PLT.
--spec lookup_type(type_key(), #spectra_plt{}) -> {ok, #type_decl{}} | error.
-lookup_type({M, _Name, _Arity} = Key, #spectra_plt{modules = Mods}) ->
+-spec lookup_type(type_key(), #prisma_plt{}) -> {ok, #type_decl{}} | error.
+lookup_type({M, _Name, _Arity} = Key, #prisma_plt{modules = Mods}) ->
     case maps:find(M, Mods) of
         {ok, #module_summary{types = Types}} ->
             maps:find(Key, Types);
@@ -247,19 +247,19 @@ lookup_type({M, _Name, _Arity} = Key, #spectra_plt{modules = Mods}) ->
     end.
 
 %% @doc Expands local, remote, recursive, and opaque types in `Type` relative to `CallerMod`.
--spec resolve_type(module(), spectra_type:stype(), #spectra_plt{}) ->
-    {ok, spectra_type:stype()} | {error, term()}.
+-spec resolve_type(module(), prisma_type:stype(), #prisma_plt{}) ->
+    {ok, prisma_type:stype()} | {error, term()}.
 resolve_type(CallerMod, Type, Plt) ->
     resolve_type(CallerMod, CallerMod, Type, Plt).
 
 %% @doc Expands `Type` defined in `DefiningMod` as seen from `CallerMod`.
--spec resolve_type(module(), module(), spectra_type:stype(), #spectra_plt{}) ->
-    {ok, spectra_type:stype()} | {error, term()}.
+-spec resolve_type(module(), module(), prisma_type:stype(), #prisma_plt{}) ->
+    {ok, prisma_type:stype()} | {error, term()}.
 resolve_type(CallerMod, DefiningMod, Type, Plt) ->
     LookupFun = fun(Key) -> lookup_type(Key, Plt) end,
-    spectra_type:expand(CallerMod, DefiningMod, Type, LookupFun).
+    prisma_type:expand(CallerMod, DefiningMod, Type, LookupFun).
 
 %% @doc Returns the sorted list of modules stored in the PLT.
--spec modules(#spectra_plt{}) -> [module()].
-modules(#spectra_plt{modules = Mods}) ->
+-spec modules(#prisma_plt{}) -> [module()].
+modules(#prisma_plt{modules = Mods}) ->
     lists:sort(maps:keys(Mods)).

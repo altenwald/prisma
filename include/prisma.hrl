@@ -1,8 +1,8 @@
--ifndef(SPECTRA_HRL).
--define(SPECTRA_HRL, true).
+-ifndef(PRISMA_HRL).
+-define(PRISMA_HRL, true).
 
--define(SPECTRA_PLT_MAGIC, "SPECTRA_PLT_V1").
--define(SPECTRA_PLT_VERSION, 1).
+-define(PRISMA_PLT_MAGIC, "PRISMA_PLT_V1").
+-define(PRISMA_PLT_VERSION, 1).
 
 -type mfa_key() :: {module(), atom(), arity()}.
 -type type_key() :: {module(), atom(), arity()}.
@@ -14,32 +14,32 @@
     kind = type :: type | opaque | nominal,
     exported = false :: boolean(),
     params = [] :: [atom()],
-    body :: spectra_type:stype()
+    body :: prisma_type:stype()
 }).
 
--record(spectra_warning, {
+-record(prisma_warning, {
     kind :: gradual_mismatch | discrepancy | unknown_function | dead_code | oxbow_code | opacity_violation,
     mfa :: mfa_key(),
     line = 0 :: non_neg_integer(),
     message :: binary(),
-    declared = undefined :: undefined | spectra_type:stype(),
-    actual = undefined :: undefined | spectra_type:stype(),
-    expected = undefined :: undefined | spectra_type:stype(),
+    declared = undefined :: undefined | prisma_type:stype(),
+    actual = undefined :: undefined | prisma_type:stype(),
+    expected = undefined :: undefined | prisma_type:stype(),
     callee = undefined :: undefined | mfa_key(),
     arg_idx = undefined :: undefined | pos_integer(),
     file = undefined :: undefined | string()
 }).
 
--type call_site() :: {non_neg_integer(), mfa_key(), [spectra_type:stype()]}.
+-type call_site() :: {non_neg_integer(), mfa_key(), [prisma_type:stype()]}.
 
 -record(func_contract, {
     mfa :: mfa_key(),
     exported = false :: boolean(),
-    declared_specs = [] :: [spectra_type:stype()],
-    inferred_type = any :: spectra_type:stype(),
+    declared_specs = [] :: [prisma_type:stype()],
+    inferred_type = any :: prisma_type:stype(),
     calls = [] :: [mfa_key()],
     call_sites = [] :: [call_site()],
-    local_warnings = [] :: [#spectra_warning{}],
+    local_warnings = [] :: [#prisma_warning{}],
     clauses = [] :: [term()],
     compiler_generated = false :: boolean(),
     line = 0 :: non_neg_integer()
@@ -57,8 +57,8 @@
     file = undefined :: undefined | string()
 }).
 
--record(spectra_plt, {
-    version = ?SPECTRA_PLT_VERSION :: pos_integer(),
+-record(prisma_plt, {
+    version = ?PRISMA_PLT_VERSION :: pos_integer(),
     package :: binary() | undefined,
     package_vsn :: binary() | undefined,
     otp_release :: binary(),

@@ -1,5 +1,5 @@
 {
- "_doc": "Manual verdicts for Spectra warnings on rabbitmq-server 5dacb85, deps/rabbit. key = module:function:line:kind. verdict: real | false_positive | debatable.",
+ "_doc": "Manual verdicts for Prisma warnings on rabbitmq-server 5dacb85, deps/rabbit. key = module:function:line:kind. verdict: real | false_positive | debatable.",
  "rabbit_khepri:get_effective_topic_binding_projection_version:1888:discrepancy": {
   "verdict": "false_positive",
   "cause": "overloaded -spec clauses: only the first clause is used (rabbit_feature_flags:is_enabled/2, blocking | non_blocking)",

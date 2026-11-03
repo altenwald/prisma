@@ -1,7 +1,7 @@
-%% @doc Public API and CLI entrypoint for Spectra.
--module(spectra).
+%% @doc Public API and CLI entrypoint for Prisma.
+-module(prisma).
 
--include("spectra.hrl").
+-include("prisma.hrl").
 
 -export([
     init/1,
@@ -20,21 +20,21 @@
 %% @doc Rebar3 plugin entrypoint.
 -spec init(term()) -> {ok, term()}.
 init(State) ->
-    spectra_prv:init(State).
+    prisma_prv:init(State).
 
-%% @doc Returns the current Spectra version.
+%% @doc Returns the current Prisma version.
 -spec version() -> binary().
 version() ->
     <<"0.1.0">>.
 
 %% @doc Builds a portable `.splt` file from BEAM directories or files.
 -spec build_plt([file:filename_all()], file:filename_all()) ->
-    {ok, #spectra_plt{}} | {error, term()}.
+    {ok, #prisma_plt{}} | {error, term()}.
 build_plt(Inputs, OutputFile) ->
     Beams = expand_beams(Inputs),
-    case spectra_plt:from_beams(Beams) of
+    case prisma_plt:from_beams(Beams) of
         {ok, Plt} ->
-            case spectra_plt:save(Plt, OutputFile) of
+            case prisma_plt:save(Plt, OutputFile) of
                 ok -> {ok, Plt};
                 {error, Reason} -> {error, Reason}
             end;
@@ -44,42 +44,42 @@ build_plt(Inputs, OutputFile) ->
 
 %% @doc Analyzes only the project's own applications in `ProjectRoot`, caching locked dependencies as `.splt` files.
 -spec analyze_project(file:filename_all()) ->
-    {ok, [#spectra_warning{}]} | {error, term()}.
+    {ok, [#prisma_warning{}]} | {error, term()}.
 analyze_project(ProjectRoot) ->
     analyze_project(ProjectRoot, #{}).
 
 %% @doc Analyzes only the project's own applications in `ProjectRoot` with `Opts`.
 -spec analyze_project(file:filename_all(), map()) ->
-    {ok, [#spectra_warning{}]} | {error, term()}.
+    {ok, [#prisma_warning{}]} | {error, term()}.
 analyze_project(ProjectRoot, Opts) ->
-    ProjectEbins = spectra_lock:discover_project_ebins(ProjectRoot, Opts),
+    ProjectEbins = prisma_lock:discover_project_ebins(ProjectRoot, Opts),
     analyze_dirs(ProjectEbins, Opts#{project_root => ProjectRoot}).
 
 %% @doc Analyzes all BEAM files in `Dirs`.
 -spec analyze_dirs([file:filename_all()]) ->
-    {ok, [#spectra_warning{}]} | {error, term()}.
+    {ok, [#prisma_warning{}]} | {error, term()}.
 analyze_dirs(Dirs) ->
     analyze_dirs(Dirs, #{}).
 
 %% @doc Analyzes all BEAM files in `Dirs` with `Opts`.
 -spec analyze_dirs([file:filename_all()], map()) ->
-    {ok, [#spectra_warning{}]} | {error, term()}.
+    {ok, [#prisma_warning{}]} | {error, term()}.
 analyze_dirs(Dirs, Opts) ->
     Beams = expand_beams(Dirs),
     analyze_beams(Beams, Opts).
 
 %% @doc Analyzes a list of BEAM paths or binaries with `Opts`.
 -spec analyze_beams([file:filename_all() | binary()], map()) ->
-    {ok, [#spectra_warning{}]} | {error, term()}.
+    {ok, [#prisma_warning{}]} | {error, term()}.
 analyze_beams(Beams, Opts) ->
     PltFiles = maps:get(plts, Opts, []),
     case load_plts(PltFiles) of
         {ok, ExplicitPlt} ->
             LockPlt = resolve_lock_plt(Opts),
-            DepsPlt = spectra_plt:merge(ExplicitPlt, LockPlt),
-            case spectra_plt:from_beams(Beams, Opts#{external_specs => spectra_plt:declared_specs(DepsPlt)}) of
+            DepsPlt = prisma_plt:merge(ExplicitPlt, LockPlt),
+            case prisma_plt:from_beams(Beams, Opts#{external_specs => prisma_plt:declared_specs(DepsPlt)}) of
                 {ok, TargetPlt} ->
-                    Warnings = spectra_checker:check_plt(TargetPlt, DepsPlt, Opts),
+                    Warnings = prisma_checker:check_plt(TargetPlt, DepsPlt, Opts),
                     {ok, Warnings};
                 {error, Reason} ->
                     {error, Reason}
@@ -91,23 +91,23 @@ analyze_beams(Beams, Opts) ->
 resolve_lock_plt(Opts) ->
     case maps:find(project_root, Opts) of
         {ok, Root} ->
-            case spectra_lock:resolve_project_plts(Root, Opts) of
+            case prisma_lock:resolve_project_plts(Root, Opts) of
                 {ok, Plt} -> Plt;
-                _ -> spectra_plt:new()
+                _ -> prisma_plt:new()
             end;
         error ->
-            spectra_plt:new()
+            prisma_plt:new()
     end.
 
 %% @doc Escript CLI entrypoint.
 -spec main([string()]) -> no_return().
 main(["version"]) ->
-    io:format("spectra ~s (OTP ~s)~n", [version(), erlang:system_info(otp_release)]),
+    io:format("prisma ~s (OTP ~s)~n", [version(), erlang:system_info(otp_release)]),
     erlang:halt(0);
 main(["build-plt", "--output", OutFile | Inputs]) when Inputs =/= [] ->
     case build_plt(Inputs, OutFile) of
         {ok, Plt} ->
-            Mods = spectra_plt:modules(Plt),
+            Mods = prisma_plt:modules(Plt),
             io:format("Built portable PLT ~s (~B modules)~n", [OutFile, length(Mods)]),
             erlang:halt(0);
         {error, Reason} ->
@@ -127,29 +127,29 @@ main(["check" | Rest]) ->
             case Format of
                 json -> io:format("[]~n");
                 _ ->
-                    UseColor = spectra_checker:should_color(Opts),
-                    Msg = spectra_checker:colorize("Spectra: 0 warnings found.", "\e[1;32m", UseColor),
+                    UseColor = prisma_checker:should_color(Opts),
+                    Msg = prisma_checker:colorize("Prisma: 0 warnings found.", "\e[1;32m", UseColor),
                     io:format("~ts~n", [Msg])
             end,
             erlang:halt(0);
         {ok, Warnings} ->
-            Formatted = spectra_checker:format_warnings(Warnings, Opts),
+            Formatted = prisma_checker:format_warnings(Warnings, Opts),
             io:format("~ts~n", [Formatted]),
             erlang:halt(1);
         {error, Reason} ->
-            io:format(standard_error, "Spectra check failed: ~p~n", [Reason]),
+            io:format(standard_error, "Prisma check failed: ~p~n", [Reason]),
             erlang:halt(1)
     end;
 main(_) ->
     io:format(
         "Usage:~n"
-        "  spectra version~n"
-        "  spectra build-plt --output <file.splt> <ebin_or_beam...>~n"
-        "  spectra check [--format <human|pretty|oneline|json>] [--no-color] [--color] [--plt <file.splt>...] [<ebin_or_beam...>]~n"
+        "  prisma version~n"
+        "  prisma build-plt --output <file.splt> <ebin_or_beam...>~n"
+        "  prisma check [--format <human|pretty|oneline|json>] [--no-color] [--color] [--plt <file.splt>...] [<ebin_or_beam...>]~n"
     ),
     erlang:halt(1).
 
-%% @doc Parses CLI options for `spectra check` into a map.
+%% @doc Parses CLI options for `prisma check` into a map.
 -spec parse_check_opts([string()]) -> map().
 parse_check_opts(Args) ->
     parse_check_opts_loop(Args, #{plts => [], targets => [], format => human, color => auto}).
@@ -181,7 +181,7 @@ parse_format("pretty") -> human;
 parse_format("human") -> human;
 parse_format(_) -> human.
 
-%% @doc Parses CLI arguments for `spectra check` into `{Plts, Targets}` tuple.
+%% @doc Parses CLI arguments for `prisma check` into `{Plts, Targets}` tuple.
 -spec parse_check_args([string()]) -> {[string()], [string()]}.
 parse_check_args(Args) ->
     Opts = parse_check_opts(Args),
@@ -191,14 +191,14 @@ load_plts(PltFiles) ->
     lists:foldl(
         fun
             (File, {ok, Acc}) ->
-                case spectra_plt:load(File) of
-                    {ok, Plt} -> {ok, spectra_plt:merge(Acc, Plt)};
+                case prisma_plt:load(File) of
+                    {ok, Plt} -> {ok, prisma_plt:merge(Acc, Plt)};
                     {error, Reason} -> {error, {plt_load_failed, File, Reason}}
                 end;
             (_File, {error, _} = Err) ->
                 Err
         end,
-        {ok, spectra_plt:new()},
+        {ok, prisma_plt:new()},
         PltFiles
     ).
 

@@ -1,7 +1,7 @@
 {
   "_doc": "Pinned corpora. `ebins` are relative to the checkout (or to the repo root for `self`). Checkouts live in bench/corpus/<name> (ignored by git) or wherever `path` points.",
   "corpora": [
-    {"name": "self", "path": ".", "ebins": ["_build/default/lib/spectra/ebin"], "language": "erlang"},
+    {"name": "self", "path": ".", "ebins": ["_build/default/lib/prisma/ebin"], "language": "erlang"},
     {"name": "rabbitmq-core", "git": "https://github.com/rabbitmq/rabbitmq-server",
      "commit": "5dacb8531807bc4162ce36b210d50bc85b15801e", "language": "erlang",
      "ebins": ["deps/rabbit/ebin"]},

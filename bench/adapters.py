@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """Runs one analyzer over BEAM directories and prints its warnings as normalized JSON.
 
-    BENCH_LIBS=dir1:dir2 (xref only: extra code path, e.g. the dependencies) adapters.py <spectra|spectra-discrepancy|dialyzer|xref-unused|xref-undefined> <ebin_dir>...
+    BENCH_LIBS=dir1:dir2 (xref only: extra code path, e.g. the dependencies) adapters.py <prisma|prisma-discrepancy|dialyzer|xref-unused|xref-undefined> <ebin_dir>...
 
 Every warning becomes {"tool", "category", "module", "function", "line", "file", "message"} so that
 tools can be compared per category (never across categories). Categories:
-  discrepancy  a call or clause that cannot succeed          (spectra, dialyzer)
-  contract     declared spec and inferred type disagree      (spectra, dialyzer)
-  dead_code    unreachable clause or branch                  (spectra, dialyzer)
-  unused       private function nobody calls                 (spectra oxbow, dialyzer, xref)
-  undefined    call to a function that does not exist        (spectra, xref)
+  discrepancy  a call or clause that cannot succeed          (prisma, dialyzer)
+  contract     declared spec and inferred type disagree      (prisma, dialyzer)
+  dead_code    unreachable clause or branch                  (prisma, dialyzer)
+  unused       private function nobody calls                 (prisma oxbow, dialyzer, xref)
+  undefined    call to a function that does not exist        (prisma, xref)
 """
 import json, os, re, subprocess, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SPECTRA = os.path.join(ROOT, "_build/default/bin/spectra")
+PRISMA = os.path.join(ROOT, "_build/default/bin/prisma")
 
-SPECTRA_KINDS = {
+PRISMA_KINDS = {
     "discrepancy": "discrepancy",
     "gradual_mismatch": "contract",
     "dead_code": "dead_code",
@@ -25,19 +25,19 @@ SPECTRA_KINDS = {
     "opacity_violation": "contract",
 }
 
-SPECTRA_EBIN = os.path.join(ROOT, "_build/default/lib/spectra/ebin")
-API = """{ok, W} = spectra:analyze_dirs(init:get_plain_arguments(), #{mode => discrepancy, oxbow => false}),
-io:format("~ts", [spectra_checker:format_warnings(W, #{format => json, color => never})]), halt()."""
+PRISMA_EBIN = os.path.join(ROOT, "_build/default/lib/prisma/ebin")
+API = """{ok, W} = prisma:analyze_dirs(init:get_plain_arguments(), #{mode => discrepancy, oxbow => false}),
+io:format("~ts", [prisma_checker:format_warnings(W, #{format => json, color => never})]), halt()."""
 
-def spectra(dirs, discrepancy_only=False):
+def prisma(dirs, discrepancy_only=False):
     # The escript has no --mode (it would be read as a path), so the discrepancy-only run goes through the API.
     if discrepancy_only:
-        cmd = ["erl", "-noshell", "-pa", SPECTRA_EBIN, "-eval", API, "-extra", *dirs]
+        cmd = ["erl", "-noshell", "-pa", PRISMA_EBIN, "-eval", API, "-extra", *dirs]
     else:
-        cmd = [SPECTRA, "check", "--format", "json", "--no-color", *dirs]
+        cmd = [PRISMA, "check", "--format", "json", "--no-color", *dirs]
     out = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
     for w in json.loads(out.stdout or "[]"):
-        yield dict(tool="spectra-discrepancy" if discrepancy_only else "spectra", category=SPECTRA_KINDS.get(w["kind"], w["kind"]),
+        yield dict(tool="prisma-discrepancy" if discrepancy_only else "prisma", category=PRISMA_KINDS.get(w["kind"], w["kind"]),
                    module=w.get("module"), function=w.get("function"), line=w.get("line", 0),
                    file=w.get("file"), message=w.get("message"))
 
@@ -84,8 +84,8 @@ def xref(query, category):
     return run
 
 TOOLS = {
-    "spectra": spectra,
-    "spectra-discrepancy": lambda dirs: spectra(dirs, discrepancy_only=True),
+    "prisma": prisma,
+    "prisma-discrepancy": lambda dirs: prisma(dirs, discrepancy_only=True),
     "dialyzer": dialyzer,
     "xref-unused": xref("locals_not_used", "unused"),
     "xref-undefined": xref("undefined_function_calls", "undefined"),

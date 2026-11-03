@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Spectra Logo" width="160">
+  <img src="assets/logo.png" alt="Prisma Logo" width="160">
 </p>
 
-# Spectra
+# Prisma
 
 > *"If a static analysis tool produces false positives, developers lose confidence and stop using it or disable the checks. When code is flagged as dead, you should be able to kill it with fire with absolute certainty."*  
 > — **Fernando "Brujo" Benavides & Laura M. Castro** (*Detecting Oxbow Code in Erlang Codebases with the Highest Degree of Certainty*)
 
-**Spectra** is a fast, hybrid static type analyzer for **Erlang** and **Elixir** that combines the sound pragmatism of **Success Typing**, the contract enforcement of **Gradual Typing**, and portable, modular **`.splt` (Spectra Persistent Lookup Table)** files.
+**Prisma** is a fast, hybrid static type analyzer for **Erlang** and **Elixir** that combines the sound pragmatism of **Success Typing**, the contract enforcement of **Gradual Typing**, and portable, modular **`.splt` (Prisma Persistent Lookup Table)** files.
 
 ---
 
@@ -17,12 +17,12 @@ One of the greatest points of friction when running static type analysis on the 
 - **Monolithic & Slow:** Building PLTs for large Erlang/OTP releases and third-party dependencies can take minutes or even hours.
 - **Cache Invalidation:** A small change or rebuilding in a clean CI environment often triggers redundant, full-scale PLT re-analysis.
 
-### The Spectra SPLT Architecture
-Spectra introduces the portable, binary **`.splt`** format:
+### The Prisma SPLT Architecture
+Prisma introduces the portable, binary **`.splt`** format:
 - **Modular & Granular:** Every dependency in `rebar.lock` or `mix.lock`, as well as base Erlang/OTP modules, is compiled into its own isolated `.splt` cache.
 - **Zero Redundant Rebuilds:** If a dependency's package name and version have not changed, its `.splt` is loaded directly from the local cache.
-- **Sub-Second Merging:** At analysis time, Spectra dynamically merges dependency `.splt` files in-memory in milliseconds, focusing analysis purely on your project's application code.
-- **Spectra Hub Ready:** Built-in client support for fetching pre-compiled `.splt` files on-demand for Hex.pm packages and target OTP versions, eliminating the need to compile dependency PLTs locally.
+- **Sub-Second Merging:** At analysis time, Prisma dynamically merges dependency `.splt` files in-memory in milliseconds, focusing analysis purely on your project's application code.
+- **Prisma Hub Ready:** Built-in client support for fetching pre-compiled `.splt` files on-demand for Hex.pm packages and target OTP versions, eliminating the need to compile dependency PLTs locally.
 
 ---
 
@@ -47,17 +47,17 @@ Spectra introduces the portable, binary **`.splt`** format:
 
 ## 🛠️ Usage
 
-Spectra is designed to integrate seamlessly into both **Erlang** (via Rebar3) and **Elixir** (via Mix) workflows, as well as running as a standalone command-line executable.
+Prisma is designed to integrate seamlessly into both **Erlang** (via Rebar3) and **Elixir** (via Mix) workflows, as well as running as a standalone command-line executable.
 
 ---
 
 ### 1. Rebar3 Plugin (Erlang)
 
-Add Spectra to your `rebar.config` under `project_plugins`:
+Add Prisma to your `rebar.config` under `project_plugins`:
 
 ```erlang
 {project_plugins, [
-    {spectra, "~> 0.1.0"}
+    {prisma, "~> 0.1.0"}
 ]}.
 ```
 
@@ -65,40 +65,40 @@ Or reference the Git repository directly:
 
 ```erlang
 {project_plugins, [
-    {spectra, {git, "https://github.com/altenwald/spectra.git", {branch, "main"}}}
+    {prisma, {git, "https://github.com/altenwald/prisma.git", {branch, "main"}}}
 ]}.
 ```
 
 #### Running Analysis
 
-Run `rebar3 spectra` inside your project:
+Run `rebar3 prisma` inside your project:
 
 ```bash
 # Basic check (automatically compiles and analyzes project apps against locked .splt deps)
-rebar3 spectra
+rebar3 prisma
 
 # Output format: human (default), oneline (for editor linters), or json (for CI)
-rebar3 spectra --format oneline
-rebar3 spectra --format json
+rebar3 prisma --format oneline
+rebar3 prisma --format json
 
 # Analysis mode: hybrid (default), gradual, or discrepancy
-rebar3 spectra --mode gradual
-rebar3 spectra --mode discrepancy
+rebar3 prisma --mode gradual
+rebar3 prisma --mode discrepancy
 
 # Color control
-rebar3 spectra --no-color
-rebar3 spectra --color
+rebar3 prisma --no-color
+rebar3 prisma --color
 
 # Oxbow code detection (unused private functions and ignored parameters)
-rebar3 spectra --no-oxbow
+rebar3 prisma --no-oxbow
 ```
 
 #### Project Configuration (`rebar.config`)
 
-You can set project-wide defaults under the `{spectra, [...]}` key in `rebar.config`. CLI arguments override these settings:
+You can set project-wide defaults under the `{prisma, [...]}` key in `rebar.config`. CLI arguments override these settings:
 
 ```erlang
-{spectra, [
+{prisma, [
     {mode, hybrid},         %% hybrid | gradual | discrepancy
     {format, human},        %% human | oneline | json
     {oxbow, true},          %% true | false (detect dead functions and ignored parameters)
@@ -116,12 +116,12 @@ You can set project-wide defaults under the `{spectra, [...]}` key in `rebar.con
 
 ### 2. Mix Task (Elixir)
 
-Add Spectra to your `mix.exs` dependencies:
+Add Prisma to your `mix.exs` dependencies:
 
 ```elixir
 def deps do
   [
-    {:spectra, "~> 0.1.0", only: [:dev, :test], runtime: false}
+    {:prisma, "~> 0.1.0", only: [:dev, :test], runtime: false}
   ]
 end
 ```
@@ -131,35 +131,35 @@ Or reference the Git repository:
 ```elixir
 def deps do
   [
-    {:spectra, github: "altenwald/spectra", only: [:dev, :test], runtime: false}
+    {:prisma, github: "altenwald/prisma", only: [:dev, :test], runtime: false}
   ]
 end
 ```
 
 #### Running Analysis
 
-Run `mix spectra` inside your Elixir project:
+Run `mix prisma` inside your Elixir project:
 
 ```bash
 # Basic check (automatically ensures compilation and analyzes your app)
-mix spectra
+mix prisma
 
 # Output format: human (default), oneline (for editor diagnostics), or json (for CI tools)
-mix spectra --format oneline
-mix spectra --format json
+mix prisma --format oneline
+mix prisma --format json
 
 # Analysis mode: hybrid (default), gradual, or discrepancy
-mix spectra --mode gradual
+mix prisma --mode gradual
 
 # Color control
-mix spectra --no-color
-mix spectra --color
+mix prisma --no-color
+mix prisma --color
 
 # Oxbow code detection
-mix spectra --no-oxbow
+mix prisma --no-oxbow
 
 # Target specific Mix environment (defaults to dev or $MIX_ENV)
-mix spectra --env test
+mix prisma --env test
 ```
 
 #### Project Configuration (`mix.exs`)
@@ -171,7 +171,7 @@ def project do
   [
     app: :my_app,
     version: "0.1.0",
-    spectra: [
+    prisma: [
       mode: :hybrid,        # :hybrid | :gradual | :discrepancy
       format: :human,       # :human | :oneline | :json
       oxbow: true,          # true | false
@@ -185,42 +185,42 @@ end
 
 #### Built-in Task Documentation
 
-Spectra integrates with Mix's help system. View options directly in your terminal:
+Prisma integrates with Mix's help system. View options directly in your terminal:
 
 ```bash
-mix help spectra
+mix help prisma
 ```
 
 ---
 
 ### 3. Standalone CLI Executable
 
-You can also build and install Spectra as a standalone escript:
+You can also build and install Prisma as a standalone escript:
 
 ```bash
-git clone https://github.com/altenwald/spectra.git
-cd spectra
+git clone https://github.com/altenwald/prisma.git
+cd prisma
 rebar3 escriptize
-./_build/default/bin/spectra check
+./_build/default/bin/prisma check
 ```
 
 #### CLI Options
 
 ```bash
 # Check current directory (auto-detects rebar.lock or mix.lock)
-spectra check
+prisma check
 
 # Formats
-spectra check --format human
-spectra check --format oneline
-spectra check --format json
+prisma check --format human
+prisma check --format oneline
+prisma check --format json
 
 # Color control (also respects standard NO_COLOR environment variable)
-spectra check --no-color
-NO_COLOR=1 spectra check
+prisma check --no-color
+NO_COLOR=1 prisma check
 
 # Analyze specific BEAM directories against a custom SPLT
-spectra check --splt /path/to/project.splt _build/default/lib/*/ebin
+prisma check --splt /path/to/project.splt _build/default/lib/*/ebin
 ```
 
 ---
@@ -229,7 +229,7 @@ spectra check --splt /path/to/project.splt _build/default/lib/*/ebin
 
 Real-world benchmark on **RabbitMQ** (438,000+ lines of Erlang, 440 core modules tested with `hyperfine 2.0.0` on Apple M1, macOS, Erlang/OTP 29):
 
-| Suite | Spectra Wall Time | Dialyzer Wall Time | Speedup | Peak RAM (Spectra vs Dialyzer) |
+| Suite | Prisma Wall Time | Dialyzer Wall Time | Speedup | Peak RAM (Prisma vs Dialyzer) |
 | :--- | :---: | :---: | :---: | :---: |
 | **Broker Core** (`rabbit`, 245 modules) | **856.2 ms** | 8,781.6 ms | **10.3× faster** | **319.4 MiB** vs 372.5 MiB |
 | **Full Core** (440 modules across 7 apps) | **3.922 s** | 20.722 s | **5.3× faster** | **441.0 MiB** vs **1,286.8 MiB** (2.9× less RAM) |
@@ -251,4 +251,4 @@ rebar3 cover
 
 ## 📄 License
 
-Spectra is licensed under the Apache 2.0 License.
+Prisma is licensed under the Apache 2.0 License.

@@ -1,10 +1,10 @@
 %% @doc Extracts portable type and contract summaries from Erlang and Elixir BEAM files.
 %%
-%% Uses BEAM debug_info chunks and normalizes types via `spectra_type` without
+%% Uses BEAM debug_info chunks and normalizes types via `prisma_type` without
 %% storing absolute filesystem paths.
--module(spectra_abstract).
+-module(prisma_abstract).
 
--include("spectra.hrl").
+-include("prisma.hrl").
 
 -export([
     extract_beam/1,
@@ -106,7 +106,7 @@ enrich_from_debug_info(Beam, Module, Dbgi, Exports, Summary, Opts) ->
         {ok, Forms} ->
             {ok, parse_abstract_forms(Forms, Exports, Summary, Opts)};
         error ->
-            {ok, spectra_elixir:from_elixir_dbgi(Module, Dbgi, Exports, Summary)}
+            {ok, prisma_elixir:from_elixir_dbgi(Module, Dbgi, Exports, Summary)}
     end.
 
 %% The abstract forms of a module. The debug_info chunk of an Erlang module already holds them, in the same form that
@@ -121,7 +121,7 @@ abstract_forms(Beam, _Dbgi) ->
     end.
 
 %% @doc The `-spec`s of a BEAM file, `#{{M, F, A} => [stype()]}` (nothing if it has no abstract code).
--spec specs_of_beam(file:filename_all() | binary()) -> #{mfa_key() => [spectra_type:stype()]}.
+-spec specs_of_beam(file:filename_all() | binary()) -> #{mfa_key() => [prisma_type:stype()]}.
 specs_of_beam(BeamInput) ->
     Beam = normalize_input(BeamInput),
     case beam_lib:chunks(Beam, [debug_info], [allow_missing_chunks]) of
@@ -137,9 +137,9 @@ specs_of_beam(BeamInput) ->
 specs_in(Mod, Forms) ->
     lists:foldl(
         fun({attribute, _, spec, {{F, A}, Clauses}}, Acc) ->
-                Acc#{{Mod, F, A} => [spectra_type:from_abstract(C) || C <- Clauses]};
+                Acc#{{Mod, F, A} => [prisma_type:from_abstract(C) || C <- Clauses]};
            ({attribute, _, spec, {{M, F, A}, Clauses}}, Acc) ->
-                Acc#{{M, F, A} => [spectra_type:from_abstract(C) || C <- Clauses]};
+                Acc#{{M, F, A} => [prisma_type:from_abstract(C) || C <- Clauses]};
            (_, Acc) ->
                 Acc
         end, #{}, Forms).
@@ -150,7 +150,7 @@ specs_in(Mod, Forms) ->
 external_contracts(Mod, ExternalSpecs) ->
     maps:fold(
         fun({M, _F, A} = Key, Specs, Acc) when M =/= Mod ->
-                case spectra_infer:declared_return(Specs, A) of
+                case prisma_infer:declared_return(Specs, A) of
                     any -> Acc;
                     Ret -> Acc#{Key => #func_contract{mfa = Key, declared_specs = Specs,
                                                       inferred_type = {fun_type, lists:duplicate(A, any), Ret}}}
@@ -179,16 +179,16 @@ parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types 
                     {TAcc, ExpList ++ ETAcc, SAcc, FAcc, CAcc, GAcc};
                 {attribute, _Anno, Kind, {_TypeName, _TypeDef, _TypeArgs} = TypeAttr}
                   when Kind =:= type; Kind =:= opaque; Kind =:= nominal ->
-                    Decl = spectra_type:from_type_attr(Mod, Kind, TypeAttr),
+                    Decl = prisma_type:from_type_attr(Mod, Kind, TypeAttr),
                     Key = Decl#type_decl.key,
                     {TAcc#{Key => Decl}, ETAcc, SAcc, FAcc, CAcc, GAcc};
                 {attribute, _Anno, spec, {{F, A}, SpecClauses}} ->
                     Key = {Mod, F, A},
-                    NormSpecs = [spectra_type:from_abstract(S) || S <- SpecClauses],
+                    NormSpecs = [prisma_type:from_abstract(S) || S <- SpecClauses],
                     {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc, CAcc, GAcc};
                 {attribute, _Anno, spec, {{M, F, A}, SpecClauses}} ->
                     Key = {M, F, A},
-                    NormSpecs = [spectra_type:from_abstract(S) || S <- SpecClauses],
+                    NormSpecs = [prisma_type:from_abstract(S) || S <- SpecClauses],
                     {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc, CAcc, GAcc};
                 {function, Anno, F, A, Clauses} ->
                     Key = {Mod, F, A},
@@ -223,7 +223,7 @@ parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types 
     ),
     WithSpecs = merge_specs_into_funcs(Mod, ExportSet, Specs, InitialFuncs),
     External = external_contracts(Mod, maps:get(external_specs, Opts, #{})),
-    Inferred = spectra_infer:infer_module_functions(Mod, ClausesByMFA, maps:merge(External, WithSpecs)),
+    Inferred = prisma_infer:infer_module_functions(Mod, ClausesByMFA, maps:merge(External, WithSpecs)),
     InferredFuncs = maps:filter(fun({M, _, _}, _) -> M =:= Mod end, Inferred),
     ResolvedFile = case Summary#module_summary.file of
         undefined ->

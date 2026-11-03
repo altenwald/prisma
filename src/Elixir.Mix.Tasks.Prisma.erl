@@ -1,11 +1,11 @@
-%% @doc Mix task (`mix spectra`) compiled directly as a BEAM module for Elixir projects.
+%% @doc Mix task (`mix prisma`) compiled directly as a BEAM module for Elixir projects.
 %%
 %% Automatically resolves `_build/<env>/lib/<app>/ebin` paths for the project's
 %% own applications while caching locked dependencies as `.splt` files.
--module('Elixir.Mix.Tasks.Spectra').
+-module('Elixir.Mix.Tasks.Prisma').
 
 -moduledoc """
-Runs Spectra hybrid type and discrepancy analysis on compiled BEAM files.
+Runs Prisma hybrid type and discrepancy analysis on compiled BEAM files.
 
 ## Command line options
 
@@ -26,7 +26,7 @@ In `mix.exs`:
 def project do
   [
     ...,
-    spectra: [
+    prisma: [
       mode: :hybrid,
       format: :human,
       oxbow: true,
@@ -52,7 +52,7 @@ end
 '__info__'(attributes) ->
     [
         {behaviour, ['Elixir.Mix.Task']},
-        {shortdoc, [<<"Runs Spectra hybrid type and discrepancy analysis">>]}
+        {shortdoc, [<<"Runs Prisma hybrid type and discrepancy analysis">>]}
     ];
 '__info__'(compile) ->
     [];
@@ -73,7 +73,7 @@ end
 '__mix_recompile__?'() ->
     false.
 
-%% @doc Runs Spectra analysis within an Elixir Mix project.
+%% @doc Runs Prisma analysis within an Elixir Mix project.
 -spec run([binary() | string()]) -> ok.
 run(RawArgs) ->
     case code:ensure_loaded('Elixir.Mix.Task') of
@@ -93,33 +93,33 @@ run(RawArgs) ->
     Root = maps:get(root, Opts, "."),
     Dirs = resolve_ebin_dirs(maps:get(targets, Opts, []), Opts),
     Format = maps:get(format, Opts, human),
-    case spectra:analyze_dirs(Dirs, Opts#{project_root => Root}) of
+    case prisma:analyze_dirs(Dirs, Opts#{project_root => Root}) of
         {ok, []} ->
             case Format of
                 json -> io:format("[]~n");
                 _ ->
-                    UseColor = spectra_checker:should_color(Opts),
-                    Msg = spectra_checker:colorize("Spectra: 0 warnings found.", "\e[1;32m", UseColor),
+                    UseColor = prisma_checker:should_color(Opts),
+                    Msg = prisma_checker:colorize("Prisma: 0 warnings found.", "\e[1;32m", UseColor),
                     io:format("~ts~n", [Msg])
             end,
             ok;
         {ok, Warnings} ->
-            Formatted = spectra_checker:format_warnings(Warnings, Opts),
+            Formatted = prisma_checker:format_warnings(Warnings, Opts),
             io:format("~ts~n", [Formatted]),
             erlang:halt(1);
         {error, Reason} ->
-            io:format(standard_error, "Spectra error: ~p~n", [Reason]),
+            io:format(standard_error, "Prisma error: ~p~n", [Reason]),
             erlang:halt(1)
     end.
 
-%% @private Reads `:spectra` options from `mix.exs` project config if loaded.
+%% @private Reads `:prisma` options from `mix.exs` project config if loaded.
 read_mix_project_config() ->
     case code:ensure_loaded('Elixir.Mix.Project') of
         {module, MixProject} ->
             try
                 ProjectConfig = MixProject:config(),
-                case lists:keyfind(spectra, 1, ProjectConfig) of
-                    {spectra, Conf} when is_list(Conf) -> parse_mix_config(Conf);
+                case lists:keyfind(prisma, 1, ProjectConfig) of
+                    {prisma, Conf} when is_list(Conf) -> parse_mix_config(Conf);
                     _ -> #{}
                 end
             catch
@@ -129,7 +129,7 @@ read_mix_project_config() ->
             #{}
     end.
 
-%% @doc Parses `:spectra` configuration keyword list from `mix.exs`.
+%% @doc Parses `:prisma` configuration keyword list from `mix.exs`.
 -spec parse_mix_config([term()]) -> map().
 parse_mix_config(Conf) ->
     lists:foldl(
@@ -151,7 +151,7 @@ parse_mix_config(Conf) ->
         Conf
     ).
 
-%% @doc Parses CLI arguments passed to `mix spectra`.
+%% @doc Parses CLI arguments passed to `mix prisma`.
 -spec parse_args([binary() | string()]) -> map().
 parse_args(RawArgs) ->
     StrArgs = [unicode:characters_to_list(A) || A <- RawArgs],
@@ -216,4 +216,4 @@ resolve_ebin_dirs([_ | _] = ExplicitTargets, _Opts) ->
     [unicode:characters_to_list(T) || T <- ExplicitTargets];
 resolve_ebin_dirs([], Opts) ->
     Root = unicode:characters_to_list(maps:get(root, Opts, ".")),
-    spectra_lock:discover_project_ebins(Root, Opts).
+    prisma_lock:discover_project_ebins(Root, Opts).

@@ -2,9 +2,9 @@
 %%
 %% Translates `{elixir_v1, Map, Specs}` chunks directly into Erlang Abstract Format
 %% so Elixir modules can be analyzed even without the Elixir runtime loaded.
--module(spectra_elixir).
+-module(prisma_elixir).
 
--include("spectra.hrl").
+-include("prisma.hrl").
 
 -export([
     from_elixir_dbgi/4,
@@ -17,7 +17,7 @@
 from_elixir_dbgi(Mod, {debug_info_v1, elixir_erl, {elixir_v1, Map, SpecsForms}}, Exports, Summary)
   when is_map(Map), is_list(SpecsForms) ->
     Forms = to_abstract_forms(Mod, Map, SpecsForms),
-    spectra_abstract:parse_abstract_forms(Forms, Exports, Summary);
+    prisma_abstract:parse_abstract_forms(Forms, Exports, Summary);
 from_elixir_dbgi(_Mod, _Dbgi, Exports, #module_summary{module = Mod} = Summary) ->
     Funcs = maps:from_list([
         {{Mod, F, A}, #func_contract{mfa = {Mod, F, A}, exported = true}}

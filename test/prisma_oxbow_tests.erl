@@ -1,7 +1,7 @@
--module(spectra_oxbow_tests).
+-module(prisma_oxbow_tests).
 
 -include_lib("eunit/include/eunit.hrl").
--include("spectra.hrl").
+-include("prisma.hrl").
 
 unused_private_function_detection_test() ->
     %% Forms corresponding to:
@@ -27,20 +27,20 @@ unused_private_function_detection_test() ->
             {clause, 6, [], [], [{atom, 6, ok}]}
         ]}
     ],
-    Summary = spectra_abstract:parse_abstract_forms(Forms, [{main, 0}], #module_summary{module = test_oxbow_unused}),
-    Warns = spectra_oxbow:check_module(Summary),
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{main, 0}], #module_summary{module = test_oxbow_unused}),
+    Warns = prisma_oxbow:check_module(Summary),
     ?assertEqual(2, length(Warns)),
-    [W1, W2] = lists:sort(fun(A, B) -> A#spectra_warning.line =< B#spectra_warning.line end, Warns),
+    [W1, W2] = lists:sort(fun(A, B) -> A#prisma_warning.line =< B#prisma_warning.line end, Warns),
 
-    ?assertEqual(oxbow_code, W1#spectra_warning.kind),
-    ?assertEqual({test_oxbow_unused, dead1, 0}, W1#spectra_warning.mfa),
-    ?assertEqual(5, W1#spectra_warning.line),
-    ?assert(binary:match(W1#spectra_warning.message, <<"dead1/0 is never called">>) =/= nomatch),
+    ?assertEqual(oxbow_code, W1#prisma_warning.kind),
+    ?assertEqual({test_oxbow_unused, dead1, 0}, W1#prisma_warning.mfa),
+    ?assertEqual(5, W1#prisma_warning.line),
+    ?assert(binary:match(W1#prisma_warning.message, <<"dead1/0 is never called">>) =/= nomatch),
 
-    ?assertEqual(oxbow_code, W2#spectra_warning.kind),
-    ?assertEqual({test_oxbow_unused, dead2, 0}, W2#spectra_warning.mfa),
-    ?assertEqual(6, W2#spectra_warning.line),
-    ?assert(binary:match(W2#spectra_warning.message, <<"dead2/0 is never called">>) =/= nomatch).
+    ?assertEqual(oxbow_code, W2#prisma_warning.kind),
+    ?assertEqual({test_oxbow_unused, dead2, 0}, W2#prisma_warning.mfa),
+    ?assertEqual(6, W2#prisma_warning.line),
+    ?assert(binary:match(W2#prisma_warning.message, <<"dead2/0 is never called">>) =/= nomatch).
 
 fun_capture_reachability_test() ->
     %% An unexported function referenced via `fun helper/1` in an exported function
@@ -60,8 +60,8 @@ fun_capture_reachability_test() ->
             {clause, 4, [{var, 4, 'X'}], [], [{var, 4, 'X'}]}
         ]}
     ],
-    Summary = spectra_abstract:parse_abstract_forms(Forms, [{runner, 0}], #module_summary{module = test_fun_reach}),
-    Warns = spectra_oxbow:check_module(Summary),
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{runner, 0}], #module_summary{module = test_fun_reach}),
+    Warns = prisma_oxbow:check_module(Summary),
     ?assertEqual([], Warns).
 
 unused_ignored_parameter_test() ->
@@ -84,14 +84,14 @@ unused_ignored_parameter_test() ->
             ]}
         ]}
     ],
-    Summary = spectra_abstract:parse_abstract_forms(Forms, [{entry, 1}], #module_summary{module = test_oxbow_params}),
-    Warns = spectra_oxbow:check_module(Summary),
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{entry, 1}], #module_summary{module = test_oxbow_params}),
+    Warns = prisma_oxbow:check_module(Summary),
     ?assertEqual(1, length(Warns)),
     [W] = Warns,
-    ?assertEqual(oxbow_code, W#spectra_warning.kind),
-    ?assertEqual({test_oxbow_params, private_worker, 2}, W#spectra_warning.mfa),
-    ?assertEqual(2, W#spectra_warning.arg_idx),
-    ?assert(binary:match(W#spectra_warning.message, <<"argument #2 is ignored across all clauses">>) =/= nomatch).
+    ?assertEqual(oxbow_code, W#prisma_warning.kind),
+    ?assertEqual({test_oxbow_params, private_worker, 2}, W#prisma_warning.mfa),
+    ?assertEqual(2, W#prisma_warning.arg_idx),
+    ?assert(binary:match(W#prisma_warning.message, <<"argument #2 is ignored across all clauses">>) =/= nomatch).
 
 used_underscore_param_not_flagged_test() ->
     %% An argument named `_Used` that is actually referenced in body must NOT be flagged.
@@ -105,8 +105,8 @@ used_underscore_param_not_flagged_test() ->
             {clause, 4, [{var, 4, '_Used'}], [], [{var, 4, '_Used'}]}
         ]}
     ],
-    Summary = spectra_abstract:parse_abstract_forms(Forms, [{run, 0}], #module_summary{module = test_oxbow_used_var}),
-    Warns = spectra_oxbow:check_module(Summary),
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{run, 0}], #module_summary{module = test_oxbow_used_var}),
+    Warns = prisma_oxbow:check_module(Summary),
     ?assertEqual([], Warns).
 
 compiler_generated_and_exported_exemptions_test() ->
@@ -125,8 +125,8 @@ compiler_generated_and_exported_exemptions_test() ->
             {clause, 5, [], [], [{atom, 5, ok}]}
         ]}
     ],
-    Summary = spectra_abstract:parse_abstract_forms(Forms, [{public_api, 2}], #module_summary{module = test_oxbow_exempt}),
-    Warns = spectra_oxbow:check_module(Summary),
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{public_api, 2}], #module_summary{module = test_oxbow_exempt}),
+    Warns = prisma_oxbow:check_module(Summary),
     ?assertEqual([], Warns).
 
 oxbow_disable_option_test() ->
@@ -136,9 +136,9 @@ oxbow_disable_option_test() ->
         {function, 3, entry, 0, [{clause, 3, [], [], [{atom, 3, ok}]}]},
         {function, 4, dead, 0, [{clause, 4, [], [], [{atom, 4, ok}]}]}
     ],
-    Summary = spectra_abstract:parse_abstract_forms(Forms, [{entry, 0}], #module_summary{module = test_oxbow_opt}),
-    Plt = spectra_plt:new(),
-    WithOxbow = spectra_checker:check_module(Summary, Plt, #{oxbow => true}),
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{entry, 0}], #module_summary{module = test_oxbow_opt}),
+    Plt = prisma_plt:new(),
+    WithOxbow = prisma_checker:check_module(Summary, Plt, #{oxbow => true}),
     ?assertEqual(1, length(WithOxbow)),
-    WithoutOxbow = spectra_checker:check_module(Summary, Plt, #{oxbow => false}),
+    WithoutOxbow = prisma_checker:check_module(Summary, Plt, #{oxbow => false}),
     ?assertEqual([], WithoutOxbow).

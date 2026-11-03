@@ -3,9 +3,9 @@
 %% Infers function argument domains and return types without false positives,
 %% detecting guaranteed runtime failures (badarith, badmatch, case_clause,
 %% unreachable branches, and incompatible calls).
--module(spectra_infer).
+-module(prisma_infer).
 
--include("spectra.hrl").
+-include("prisma.hrl").
 
 -export([
     infer_module_functions/3,
@@ -71,8 +71,8 @@ infer_function(Mod, {_M, _F, Arity} = MFA, Clauses, Contract, AllContracts) ->
         Clauses
     ),
     JoinedArgs = join_arg_vectors(Arity, lists:reverse(ArgVectors)),
-    JoinedRet = spectra_type:normalize_union(lists:reverse(RetTypes)),
-    InferredType = {fun_type, [spectra_type:widen(A) || A <- JoinedArgs], spectra_type:widen(JoinedRet)},
+    JoinedRet = prisma_type:normalize_union(lists:reverse(RetTypes)),
+    InferredType = {fun_type, [prisma_type:widen(A) || A <- JoinedArgs], prisma_type:widen(JoinedRet)},
     Contract#func_contract{
         inferred_type = InferredType,
         call_sites = lists:usort(CallSites),
@@ -85,7 +85,7 @@ join_arg_vectors(Arity, Vectors) ->
     lists:map(
         fun(Idx) ->
             Col = [lists:nth(Idx, V) || V <- Vectors],
-            spectra_type:normalize_union(Col)
+            prisma_type:normalize_union(Col)
         end,
         lists:seq(1, Arity)
     ).
@@ -118,9 +118,9 @@ infer_clause(Mod, MFA, {clause, Anno, PatArgs, Guards, Body}, AllContracts) ->
 refine_pat_type({var, _, '_'}, PatType, _Env) ->
     PatType;
 refine_pat_type({var, _, V}, PatType, Env) ->
-    spectra_type:meet(PatType, maps:get(V, Env, any));
+    prisma_type:meet(PatType, maps:get(V, Env, any));
 refine_pat_type({match, _, P1, P2}, PatType, Env) ->
-    spectra_type:meet(refine_pat_type(P1, PatType, Env), refine_pat_type(P2, PatType, Env));
+    prisma_type:meet(refine_pat_type(P1, PatType, Env), refine_pat_type(P2, PatType, Env));
 refine_pat_type(_, PatType, _Env) ->
     PatType.
 
@@ -141,7 +141,7 @@ bind_pattern({var, _, '_'}, Expected, Env) ->
     {Expected, Env};
 bind_pattern({var, _, V}, Expected, Env) ->
     Prev = maps:get(V, Env, any),
-    M = spectra_type:meet(Prev, Expected),
+    M = prisma_type:meet(Prev, Expected),
     {M, Env#{V => M}};
 bind_pattern({match, _, P1, P2}, Expected, Env0) ->
     case bind_pattern(P1, Expected, Env0) of
@@ -153,25 +153,25 @@ bind_pattern({match, _, P1, P2}, Expected, Env0) ->
             end
     end;
 bind_pattern({integer, _, I}, Expected, Env) ->
-    {spectra_type:meet({int_lit, I}, Expected), Env};
+    {prisma_type:meet({int_lit, I}, Expected), Env};
 bind_pattern({char, _, C}, Expected, Env) ->
-    {spectra_type:meet({int_lit, C}, Expected), Env};
+    {prisma_type:meet({int_lit, C}, Expected), Env};
 bind_pattern({op, _, '-', {integer, _, I}}, Expected, Env) ->
-    {spectra_type:meet({int_lit, -I}, Expected), Env};
+    {prisma_type:meet({int_lit, -I}, Expected), Env};
 bind_pattern({float, _, _}, Expected, Env) ->
-    {spectra_type:meet(float, Expected), Env};
+    {prisma_type:meet(float, Expected), Env};
 bind_pattern({atom, _, A}, Expected, Env) ->
-    {spectra_type:meet({atom_lit, A}, Expected), Env};
+    {prisma_type:meet({atom_lit, A}, Expected), Env};
 bind_pattern({nil, _}, Expected, Env) ->
-    {spectra_type:meet(nil, Expected), Env};
+    {prisma_type:meet(nil, Expected), Env};
 bind_pattern({bin, _, _} = Pattern, Expected, Env) ->
-    {spectra_type:meet({binary, 0, 8}, Expected), bind_variables_as_any(Pattern, Env)};
+    {prisma_type:meet({binary, 0, 8}, Expected), bind_variables_as_any(Pattern, Env)};
 bind_pattern({string, _, S}, Expected, Env) ->
     StrType = case S of
         [] -> nil;
         _ -> {nonempty_list, {int_range, 0, 16#10ffff}}
     end,
-    {spectra_type:meet(StrType, Expected), Env};
+    {prisma_type:meet(StrType, Expected), Env};
 bind_pattern({cons, _, H, T}, Expected, Env0) ->
     ElemExpected = extract_list_elem(Expected),
     case ElemExpected of
@@ -189,7 +189,7 @@ bind_pattern({cons, _, H, T}, Expected, Env0) ->
                                 true -> {nonempty_list, HT};
                                 false -> {improper_list, HT, TT}
                             end,
-                            {spectra_type:meet(Cell, Expected), Env2}
+                            {prisma_type:meet(Cell, Expected), Env2}
                     end
             end
     end;
@@ -199,7 +199,7 @@ bind_pattern({tuple, _, _} = Pattern, {union, Members}, Env0) ->
     Bound = [R || {Type, _} = R <- [bind_pattern(Pattern, M, Env0) || M <- Members], Type =/= none],
     case Bound of
         [] -> {none, Env0};
-        _ -> {spectra_type:normalize_union([T || {T, _} <- Bound]), join_envs([E || {_, E} <- Bound])}
+        _ -> {prisma_type:normalize_union([T || {T, _} <- Bound]), join_envs([E || {_, E} <- Bound])}
     end;
 bind_pattern({tuple, _, PatElems}, Expected, Env0) ->
     case extract_tuple_elems(length(PatElems), Expected) of
@@ -208,11 +208,11 @@ bind_pattern({tuple, _, PatElems}, Expected, Env0) ->
         ElemExpecteds ->
             case bind_patterns(PatElems, ElemExpecteds, Env0) of
                 unreachable -> {none, Env0};
-                {ok, BoundElems, Env1} -> {spectra_type:meet({tuple, BoundElems}, Expected), Env1}
+                {ok, BoundElems, Env1} -> {prisma_type:meet({tuple, BoundElems}, Expected), Env1}
             end
     end;
 bind_pattern({map, _, Fields}, Expected, Env0) ->
-    case spectra_type:meet(any_map, Expected) of
+    case prisma_type:meet(any_map, Expected) of
         none ->
             {none, Env0};
         _ ->
@@ -239,7 +239,7 @@ bind_map_pat_fields([], Expected, Env, Acc) ->
     %% the keys of the pattern are not all the keys: with nothing known of the scrutinee it is a map, not a map with only those
     Type = case unresolved(Expected) of
         true -> any_map;
-        false -> spectra_type:meet({map, lists:usort(Acc)}, Expected)
+        false -> prisma_type:meet({map, lists:usort(Acc)}, Expected)
     end,
     {Type, Env};
 bind_map_pat_fields([{map_field_exact, _, KAst, VP} | Rest], Expected, Env0, Acc) ->
@@ -268,7 +268,7 @@ extract_list_elem({list, E}) -> E;
 extract_list_elem({nonempty_list, E}) -> E;
 extract_list_elem({improper_list, E, _}) -> E;
 extract_list_elem({union, Members}) ->
-    spectra_type:normalize_union([extract_list_elem(M) || M <- Members]);
+    prisma_type:normalize_union([extract_list_elem(M) || M <- Members]);
 extract_list_elem(_) -> none.
 
 %% The type of Tail in [H | Tail] when the whole cell has the given type. An unknown cell has an unknown tail (it may
@@ -276,8 +276,8 @@ extract_list_elem(_) -> none.
 list_tail_type(any) -> any;
 list_tail_type({list, E}) -> {list, E};
 list_tail_type({nonempty_list, E}) -> {list, E};
-list_tail_type({improper_list, _, T} = Improper) -> spectra_type:normalize_union([Improper, T]);
-list_tail_type({union, Members}) -> spectra_type:normalize_union([list_tail_type(M) || M <- Members]);
+list_tail_type({improper_list, _, T} = Improper) -> prisma_type:normalize_union([Improper, T]);
+list_tail_type({union, Members}) -> prisma_type:normalize_union([list_tail_type(M) || M <- Members]);
 list_tail_type(_) -> none.
 
 
@@ -383,7 +383,7 @@ refine_compare_zero(V, Op, Env) ->
     KnownNumber = case Prev of
         any -> false;
         {var, _} -> false;
-        _ -> spectra_type:consistent_subtype(Prev, number)
+        _ -> prisma_type:consistent_subtype(Prev, number)
     end,
     Type = case Op of
         '<' -> {union, [neg_integer, float]};
@@ -421,7 +421,7 @@ refine_var('_', _Type, Env) ->
     {ok, Env};
 refine_var(V, Type, Env) ->
     Prev = maps:get(V, Env, any),
-    case spectra_type:meet(Prev, Type) of
+    case prisma_type:meet(Prev, Type) of
         none -> unreachable;
         M -> {ok, Env#{V => M}}
     end.
@@ -432,7 +432,7 @@ join_envs([First | Rest]) ->
     maps:fold(
         fun(K, V, Acc) ->
             case lists:all(fun(E) -> maps:is_key(K, E) end, Rest) of
-                true -> Acc#{K => lists:foldl(fun(E, T) -> spectra_type:join(T, maps:get(K, E)) end, V, Rest)};
+                true -> Acc#{K => lists:foldl(fun(E, T) -> prisma_type:join(T, maps:get(K, E)) end, V, Rest)};
                 false -> Acc
             end
         end,
@@ -496,7 +496,7 @@ infer_expr(Mod, MFA, {map, _, Fields}, Env0, Contracts, Warns0, Sites0) ->
     {{map, lists:usort(MapFields)}, Env1, Warns1, Sites1};
 infer_expr(Mod, MFA, {map, Anno, Base, Fields}, Env0, Contracts, Warns0, Sites0) ->
     {BaseType, Env1, Warns1, Sites1} = infer_expr(Mod, MFA, Base, Env0, Contracts, Warns0, Sites0),
-    case spectra_type:meet(BaseType, any_map) of
+    case prisma_type:meet(BaseType, any_map) of
         none when BaseType =/= none ->
             W = make_warning(discrepancy, MFA, Anno, <<"Map update on non-map value">>),
             {none, Env1, [W | Warns1], Sites1};
@@ -536,7 +536,7 @@ infer_expr(Mod, MFA, {call, Anno, Target, Args}, Env0, Contracts, Warns00, Sites
 %% The constructs below used to be answered `any` without looking inside, so a call in a fun, a try, a comprehension or a
 %% record field was never checked. They are looked into for warnings and call sites only: what is bound inside does not
 %% reach the code that follows, and the result stays `any` (a fun typed `any_fun` is not consistent with a declared
-%% `fun((A) -> B)`, which Spectra's own code showed on the first run).
+%% `fun((A) -> B)`, which Prisma's own code showed on the first run).
 infer_expr(Mod, MFA, {'fun', _, {clauses, Clauses}}, Env, Contracts, Warns0, Sites0) ->
     {Warns, Sites} = infer_nested_clauses(Mod, MFA, Clauses, Env, Contracts, Warns0, Sites0),
     {any, Env, Warns, Sites};
@@ -663,8 +663,8 @@ infer_binop(_MFA, _Anno, Op, _LAst, LType, _RAst, RType, Env, Warns, Sites)
     {none, Env, Warns, Sites};
 infer_binop(MFA, Anno, Op, LAst, LType, RAst, RType, Env0, Warns, Sites)
   when Op =:= '+'; Op =:= '-'; Op =:= '*' ->
-    LM = spectra_type:meet(LType, number),
-    RM = spectra_type:meet(RType, number),
+    LM = prisma_type:meet(LType, number),
+    RM = prisma_type:meet(RType, number),
     case (LM =:= none andalso LType =/= none) orelse (RM =:= none andalso RType =/= none) of
         true ->
             Msg = iolist_to_binary(io_lib:format("Arithmetic operator '~s' will fail with badarith (~p, ~p)", [Op, LType, RType])),
@@ -679,8 +679,8 @@ infer_binop(MFA, Anno, Op, LAst, LType, RAst, RType, Env0, Warns, Sites)
             {Ret, Env1, Warns, Sites}
     end;
 infer_binop(MFA, Anno, '/', LAst, LType, RAst, RType, Env0, Warns, Sites) ->
-    LM = spectra_type:meet(LType, number),
-    RM = spectra_type:meet(RType, number),
+    LM = prisma_type:meet(LType, number),
+    RM = prisma_type:meet(RType, number),
     case (LM =:= none andalso LType =/= none) orelse (RM =:= none andalso RType =/= none) of
         true ->
             Msg = iolist_to_binary(io_lib:format("Division '/' will fail with badarith (~p, ~p)", [LType, RType])),
@@ -691,8 +691,8 @@ infer_binop(MFA, Anno, '/', LAst, LType, RAst, RType, Env0, Warns, Sites) ->
     end;
 infer_binop(MFA, Anno, Op, LAst, LType, RAst, RType, Env0, Warns, Sites)
   when Op =:= 'div'; Op =:= 'rem'; Op =:= 'band'; Op =:= 'bor'; Op =:= 'bxor'; Op =:= 'bsl'; Op =:= 'bsr' ->
-    LM = spectra_type:meet(LType, integer),
-    RM = spectra_type:meet(RType, integer),
+    LM = prisma_type:meet(LType, integer),
+    RM = prisma_type:meet(RType, integer),
     case (LM =:= none andalso LType =/= none) orelse (RM =:= none andalso RType =/= none) of
         true ->
             Msg = iolist_to_binary(io_lib:format("Integer operator '~s' will fail with badarith (~p, ~p)", [Op, LType, RType])),
@@ -705,7 +705,7 @@ infer_binop(MFA, Anno, Op, LAst, LType, RAst, RType, Env0, Warns, Sites)
 %% (any term) when the left one does not decide: `A andalso B` is `false | B`, `A orelse B` is `true | B`.
 infer_binop(MFA, Anno, Op, LAst, LType, _RAst, RType, Env0, Warns, Sites)
   when Op =:= 'andalso'; Op =:= 'orelse' ->
-    case spectra_type:meet(LType, boolean) of
+    case prisma_type:meet(LType, boolean) of
         none when LType =/= none ->
             Msg = iolist_to_binary(io_lib:format("Boolean operator '~s' will fail (~p, ~p)", [Op, LType, RType])),
             {none, Env0, [make_warning(discrepancy, MFA, Anno, Msg) | Warns], Sites};
@@ -715,8 +715,8 @@ infer_binop(MFA, Anno, Op, LAst, LType, _RAst, RType, Env0, Warns, Sites)
     end;
 infer_binop(MFA, Anno, Op, LAst, LType, RAst, RType, Env0, Warns, Sites)
   when Op =:= 'and'; Op =:= 'or'; Op =:= 'xor' ->
-    LM = spectra_type:meet(LType, boolean),
-    RM = spectra_type:meet(RType, boolean),
+    LM = prisma_type:meet(LType, boolean),
+    RM = prisma_type:meet(RType, boolean),
     case (LM =:= none andalso LType =/= none) orelse (RM =:= none andalso RType =/= none) of
         true ->
             Msg = iolist_to_binary(io_lib:format("Boolean operator '~s' will fail (~p, ~p)", [Op, LType, RType])),
@@ -727,20 +727,20 @@ infer_binop(MFA, Anno, Op, LAst, LType, RAst, RType, Env0, Warns, Sites)
     end;
 infer_binop(MFA, Anno, Op, LAst, LType, _RAst, RType, Env0, Warns, Sites)
   when Op =:= '++'; Op =:= '--' ->
-    case spectra_type:meet(LType, {list, any}) of
+    case prisma_type:meet(LType, {list, any}) of
         none when LType =/= none ->
             Msg = iolist_to_binary(io_lib:format("List operator '~s' requires a list on the left-hand side, got ~p", [Op, LType])),
             {none, Env0, [make_warning(discrepancy, MFA, Anno, Msg) | Warns], Sites};
         _ ->
             Env1 = constrain_ast_var(LAst, {list, any}, Env0),
-            Ret = case Op of '++' -> spectra_type:join(LType, RType); '--' -> LType end,
+            Ret = case Op of '++' -> prisma_type:join(LType, RType); '--' -> LType end,
             {Ret, Env1, Warns, Sites}
     end;
 infer_binop(_MFA, _Anno, _Op, _LAst, _LType, _RAst, _RType, Env, Warns, Sites) ->
     {boolean, Env, Warns, Sites}.
 
 infer_unop(MFA, Anno, 'not', ArgAst, ArgType, Env0, Warns, Sites) ->
-    case spectra_type:meet(ArgType, boolean) of
+    case prisma_type:meet(ArgType, boolean) of
         none when ArgType =/= none ->
             Msg = iolist_to_binary(io_lib:format("Unary 'not' requires boolean, got ~p", [ArgType])),
             {none, Env0, [make_warning(discrepancy, MFA, Anno, Msg) | Warns], Sites};
@@ -749,7 +749,7 @@ infer_unop(MFA, Anno, 'not', ArgAst, ArgType, Env0, Warns, Sites) ->
     end;
 infer_unop(MFA, Anno, Op, ArgAst, ArgType, Env0, Warns, Sites)
   when Op =:= '-'; Op =:= '+' ->
-    case spectra_type:meet(ArgType, number) of
+    case prisma_type:meet(ArgType, number) of
         none when ArgType =/= none ->
             Msg = iolist_to_binary(io_lib:format("Unary '~s' requires number, got ~p", [Op, ArgType])),
             {none, Env0, [make_warning(discrepancy, MFA, Anno, Msg) | Warns], Sites};
@@ -775,10 +775,10 @@ cons_type(HType, {union, Members}) ->
         [] -> [];
         _ -> [proper_cons(HType, {union, Proper})]
     end,
-    spectra_type:normalize_union(ProperPart ++ [cons_type(HType, M) || M <- Other]);
+    prisma_type:normalize_union(ProperPart ++ [cons_type(HType, M) || M <- Other]);
 cons_type(HType, {improper_list, TailElem, TailEnd}) ->
     %% [H | improper_list(E, T)] is improper_list(H or E, T): the chain does not nest, however many cells are consed
-    {improper_list, spectra_type:join(HType, TailElem), TailEnd};
+    {improper_list, prisma_type:join(HType, TailElem), TailEnd};
 cons_type(HType, TType) ->
     case proper_tail(TType) of
         true -> proper_cons(HType, TType);
@@ -789,7 +789,7 @@ cons_type(HType, TType) ->
 proper_cons(HType, TType) ->
     ElemJoin = case extract_list_elem(TType) of
         none -> HType;
-        TailElem -> spectra_type:join(HType, TailElem)
+        TailElem -> prisma_type:join(HType, TailElem)
     end,
     {nonempty_list, ElemJoin}.
 
@@ -801,14 +801,14 @@ proper_tail({union, Members}) -> lists:all(fun proper_tail/1, Members);
 proper_tail(_) -> false.
 
 %% The type of `-X` when X has the given numeric type (anything not modelled is just `number`).
--spec negate_type(spectra_type:stype()) -> spectra_type:stype().
+-spec negate_type(prisma_type:stype()) -> prisma_type:stype().
 negate_type(none) -> none;
 negate_type({int_lit, I}) -> {int_lit, -I};
 negate_type({int_range, Lo, Hi}) -> {int_range, negate_bound(Hi), negate_bound(Lo)};
 negate_type(pos_integer) -> neg_integer;
 negate_type(neg_integer) -> pos_integer;
 negate_type(non_neg_integer) -> {int_range, neg_inf, 0};
-negate_type({union, Members}) -> spectra_type:normalize_union([negate_type(M) || M <- Members]);
+negate_type({union, Members}) -> prisma_type:normalize_union([negate_type(M) || M <- Members]);
 negate_type(T) when T =:= integer; T =:= float; T =:= number -> T;
 negate_type(_) -> number.
 
@@ -844,7 +844,7 @@ constrain_ast_var({var, _, '_'}, _Type, Env) ->
     Env;
 constrain_ast_var({var, _, V}, Type, Env) ->
     Prev = maps:get(V, Env, any),
-    case spectra_type:meet(Prev, Type) of
+    case prisma_type:meet(Prev, Type) of
         none -> Env;
         M -> Env#{V => M}
     end;
@@ -902,7 +902,7 @@ infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0) 
         [] ->
             {none, Env0, Warns1, Sites1};
         _ ->
-            JoinedRet = spectra_type:normalize_union(lists:reverse(BranchRets)),
+            JoinedRet = prisma_type:normalize_union(lists:reverse(BranchRets)),
             JoinedEnv = join_envs(lists:reverse(BranchEnvs)),
             {JoinedRet, JoinedEnv, Warns1, Sites1}
     end.
@@ -947,7 +947,7 @@ closed_pattern({op, _, '-', {integer, _, _}}, _Env) -> true;
 closed_pattern(_, _Env) -> false.
 
 subtract_covered({union, Members}, PatType) ->
-    spectra_type:normalize_union([M || M <- Members, not covers(PatType, M)]);
+    prisma_type:normalize_union([M || M <- Members, not covers(PatType, M)]);
 subtract_covered(Remaining, PatType) ->
     case covers(PatType, Remaining) of
         true -> none;
@@ -965,7 +965,7 @@ covers(P, P) -> true;
 covers({tuple, Ps}, {tuple, Ms}) when length(Ps) =:= length(Ms) ->
     lists:all(fun({P, M}) -> covers(P, M) end, lists:zip(Ps, Ms));
 covers(P, M) ->
-    not has_unknown(M) andalso spectra_type:consistent_subtype(M, P).
+    not has_unknown(M) andalso prisma_type:consistent_subtype(M, P).
 
 has_unknown(any) -> true;
 has_unknown({var, _}) -> true;
@@ -1016,12 +1016,12 @@ infer_call(Mod, CallerMFA, Anno, Target, ArgAsts, ArgTypes, Env0, Contracts, War
 
 %% The return type that the specs of a function declare (`any` if there is none or it says nothing). Names that cannot be resolved
 %% here (`t()`, `other:t()`, an opaque, a type variable) are unknown, not impossible: a pattern does not match against them.
--spec declared_return([spectra_type:stype()], non_neg_integer()) -> spectra_type:stype().
+-spec declared_return([prisma_type:stype()], non_neg_integer()) -> prisma_type:stype().
 declared_return(Specs, Arity) ->
-    Rets = [Ret || Spec <- Specs, {fun_type, Args, Ret} <- [spectra_type:unfold_bounded_fun(Spec)], length(Args) =:= Arity],
+    Rets = [Ret || Spec <- Specs, {fun_type, Args, Ret} <- [prisma_type:unfold_bounded_fun(Spec)], length(Args) =:= Arity],
     case Rets of
         [] -> any;
-        _ -> erase_unresolved(spectra_type:normalize_union(Rets))
+        _ -> erase_unresolved(prisma_type:normalize_union(Rets))
     end.
 
 erase_unresolved({local_type, _, _}) -> any;
@@ -1029,7 +1029,7 @@ erase_unresolved({remote_type, _, _, _}) -> any;
 erase_unresolved({opaque, _, _, _, _}) -> any;
 erase_unresolved({recursive_ref, _, _}) -> any;
 erase_unresolved({var, _}) -> any;
-erase_unresolved({union, Members}) -> spectra_type:normalize_union([erase_unresolved(M) || M <- Members]);
+erase_unresolved({union, Members}) -> prisma_type:normalize_union([erase_unresolved(M) || M <- Members]);
 erase_unresolved({tuple, Elems}) -> {tuple, [erase_unresolved(E) || E <- Elems]};
 erase_unresolved({list, E}) -> {list, erase_unresolved(E)};
 erase_unresolved({nonempty_list, E}) -> {nonempty_list, erase_unresolved(E)};
@@ -1067,12 +1067,12 @@ apply_callee_signature(CallerMFA, Line, CalleeMFA, ArgAsts, ActualArgs, Expected
     mfa_key(),
     non_neg_integer(),
     mfa_key(),
-    [{spectra_type:stype(), spectra_type:stype()}]
-) -> [#spectra_warning{}].
+    [{prisma_type:stype(), prisma_type:stype()}]
+) -> [#prisma_warning{}].
 check_call_site(CallerMFA, Line, {CM, CF, CA}, ZipArgs) ->
     {Warns, _} = lists:foldl(
         fun({Actual, Expected}, {WAcc, Idx}) ->
-            case spectra_type:meet(Expected, Actual) of
+            case prisma_type:meet(Expected, Actual) of
                 none when Actual =/= none, Expected =/= none ->
                     Msg = iolist_to_binary(
                         io_lib:format(
@@ -1080,7 +1080,7 @@ check_call_site(CallerMFA, Line, {CM, CF, CA}, ZipArgs) ->
                             [CM, CF, CA, Idx, Actual, Expected]
                         )
                     ),
-                    W = #spectra_warning{
+                    W = #prisma_warning{
                         kind = discrepancy,
                         mfa = CallerMFA,
                         line = Line,
@@ -1106,9 +1106,9 @@ short_circuit_type(Op, LType, RType) ->
         'andalso' -> {{atom_lit, false}, {atom_lit, true}};
         'orelse' -> {{atom_lit, true}, {atom_lit, false}}
     end,
-    Decides = spectra_type:meet(LType, Deciding) =/= none,
-    RightRuns = spectra_type:meet(LType, Passes) =/= none,
-    spectra_type:normalize_union([T || {true, T} <- [{Decides, Deciding}, {RightRuns, RType}]]).
+    Decides = prisma_type:meet(LType, Deciding) =/= none,
+    RightRuns = prisma_type:meet(LType, Passes) =/= none,
+    prisma_type:normalize_union([T || {true, T} <- [{Decides, Deciding}, {RightRuns, RType}]]).
 
 %% Return types that depend on the argument: tl([1 | 2]) is 2, not a list.
 bif_return_type(tl, [ArgType], _Static) ->
@@ -1158,7 +1158,7 @@ bif_signature(is_map, 1) -> {ok, [any], boolean};
 bif_signature(_, _) -> error.
 
 make_warning(Kind, MFA, Anno, Msg) ->
-    #spectra_warning{
+    #prisma_warning{
         kind = Kind,
         mfa = MFA,
         line = erl_anno:line(Anno),
@@ -1178,7 +1178,7 @@ seed_arg_types(MFA, Arity, AllContracts) ->
         {ok, #func_contract{declared_specs = [_ | _] = Specs}} ->
             SpecArgLists = lists:filtermap(
                 fun(Spec) ->
-                    case spectra_type:unfold_bounded_fun(Spec) of
+                    case prisma_type:unfold_bounded_fun(Spec) of
                         {fun_type, SpecArgs, _} when length(SpecArgs) =:= Arity ->
                             {true, [sanitize_seed_type(A) || A <- SpecArgs]};
                         _ ->
@@ -1194,7 +1194,7 @@ seed_arg_types(MFA, Arity, AllContracts) ->
                     lists:map(
                         fun(Idx) ->
                             Col = [lists:nth(Idx, Args) || Args <- SpecArgLists],
-                            spectra_type:normalize_union(Col)
+                            prisma_type:normalize_union(Col)
                         end,
                         lists:seq(1, Arity)
                     )
@@ -1208,7 +1208,7 @@ sanitize_seed_type({remote_type, _, _, _}) -> any;
 sanitize_seed_type({list, E}) -> {list, sanitize_seed_type(E)};
 sanitize_seed_type({nonempty_list, E}) -> {nonempty_list, sanitize_seed_type(E)};
 sanitize_seed_type({tuple, Es}) -> {tuple, [sanitize_seed_type(E) || E <- Es]};
-sanitize_seed_type({union, Ms}) -> spectra_type:normalize_union([sanitize_seed_type(M) || M <- Ms]);
+sanitize_seed_type({union, Ms}) -> prisma_type:normalize_union([sanitize_seed_type(M) || M <- Ms]);
 sanitize_seed_type(Other) -> Other.
 
 update_map_type({map, BaseFields}, NewFields) ->
@@ -1216,6 +1216,6 @@ update_map_type({map, BaseFields}, NewFields) ->
     KeptBase = [F || {_BKind, BK, _BV} = F <- BaseFields, not lists:member(BK, NewKeys)],
     {map, lists:usort(KeptBase ++ NewFields)};
 update_map_type({union, Members}, NewFields) ->
-    spectra_type:normalize_union([update_map_type(M, NewFields) || M <- Members]);
+    prisma_type:normalize_union([update_map_type(M, NewFields) || M <- Members]);
 update_map_type(_, NewFields) ->
     {map, lists:usort(NewFields)}.

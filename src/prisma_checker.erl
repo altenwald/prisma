@@ -1,7 +1,7 @@
 %% @doc Hybrid static analyzer combining Success Typing and Gradual Typing.
--module(spectra_checker).
+-module(prisma_checker).
 
--include("spectra.hrl").
+-include("prisma.hrl").
 
 -export([
     check_module/2,
@@ -17,14 +17,14 @@
 ]).
 
 %% @doc Analyzes all modules in `TargetPlt` against `DepsPlt` in hybrid mode.
--spec check_plt(#spectra_plt{}, #spectra_plt{}) -> [#spectra_warning{}].
+-spec check_plt(#prisma_plt{}, #prisma_plt{}) -> [#prisma_warning{}].
 check_plt(TargetPlt, DepsPlt) ->
     check_plt(TargetPlt, DepsPlt, #{mode => hybrid}).
 
 %% @doc Analyzes all modules in `TargetPlt` against `DepsPlt` with `Opts`.
--spec check_plt(#spectra_plt{}, #spectra_plt{}, map()) -> [#spectra_warning{}].
-check_plt(#spectra_plt{modules = TargetMods} = TargetPlt, DepsPlt, Opts) ->
-    CombinedPlt = spectra_plt:merge(DepsPlt, TargetPlt),
+-spec check_plt(#prisma_plt{}, #prisma_plt{}, map()) -> [#prisma_warning{}].
+check_plt(#prisma_plt{modules = TargetMods} = TargetPlt, DepsPlt, Opts) ->
+    CombinedPlt = prisma_plt:merge(DepsPlt, TargetPlt),
     lists:flatmap(
         fun({_Mod, Summary}) ->
             check_module(Summary, CombinedPlt, Opts)
@@ -33,12 +33,12 @@ check_plt(#spectra_plt{modules = TargetMods} = TargetPlt, DepsPlt, Opts) ->
     ).
 
 %% @doc Analyzes a `#module_summary{}` in hybrid mode.
--spec check_module(#module_summary{}, #spectra_plt{}) -> [#spectra_warning{}].
+-spec check_module(#module_summary{}, #prisma_plt{}) -> [#prisma_warning{}].
 check_module(Summary, Plt) ->
     check_module(Summary, Plt, #{mode => hybrid}).
 
 %% @doc Analyzes a `#module_summary{}` using the configured mode (`hybrid`, `gradual`, `discrepancy`).
--spec check_module(#module_summary{}, #spectra_plt{}, map()) -> [#spectra_warning{}].
+-spec check_module(#module_summary{}, #prisma_plt{}, map()) -> [#prisma_warning{}].
 check_module(#module_summary{file = File, functions = Funcs} = Summary, Plt, Opts) ->
     Mode = maps:get(mode, Opts, hybrid),
     ContractWarnings = lists:flatmap(
@@ -48,7 +48,7 @@ check_module(#module_summary{file = File, functions = Funcs} = Summary, Plt, Opt
         lists:sort(maps:to_list(Funcs))
     ),
     OxbowWarnings = case maps:get(oxbow, Opts, true) of
-        true -> spectra_oxbow:check_module(Summary, Opts);
+        true -> prisma_oxbow:check_module(Summary, Opts);
         false -> []
     end,
     AllWarns = lists:usort(ContractWarnings ++ OxbowWarnings),
@@ -57,8 +57,8 @@ check_module(#module_summary{file = File, functions = Funcs} = Summary, Plt, Opt
 attach_file_to_warnings(Warns, undefined) ->
     Warns;
 attach_file_to_warnings(Warns, File) ->
-    [case W#spectra_warning.file of
-        undefined -> W#spectra_warning{file = File};
+    [case W#prisma_warning.file of
+        undefined -> W#prisma_warning{file = File};
         _ -> W
      end || W <- Warns].
 
@@ -100,12 +100,12 @@ collect_discrepancies(#func_contract{mfa = {CallerMod, _, _} = CallerMFA, local_
     LocalWarns ++ InterModWarns.
 
 check_remote_discrepancy_call({CallerMod, _, _} = CallerMFA, Line, {CalleeMod, _, _} = CalleeMFA, ActualArgs, Plt) ->
-    case spectra_plt:lookup_mfa(CalleeMFA, Plt) of
+    case prisma_plt:lookup_mfa(CalleeMFA, Plt) of
         {ok, #func_contract{declared_specs = Specs, inferred_type = Inferred}} ->
             case resolve_expected_arg_vectors(CallerMod, CalleeMod, Specs, Inferred, Plt) of
                 {ok, Vectors} ->
                     check_vectors(Vectors, ActualArgs,
-                                  fun(Zipped) -> spectra_infer:check_call_site(CallerMFA, Line, CalleeMFA, Zipped) end);
+                                  fun(Zipped) -> prisma_infer:check_call_site(CallerMFA, Line, CalleeMFA, Zipped) end);
                 _ ->
                     []
             end;
@@ -122,7 +122,7 @@ unknown_function_warnings(CallerMFA, Line, {Mod, F, A} = CalleeMFA, Plt) ->
         true ->
             [];
         false ->
-            case spectra_plt:lookup_module(Mod, Plt) of
+            case prisma_plt:lookup_module(Mod, Plt) of
                 {ok, #module_summary{language = Language, functions = Funcs}} when Language =/= elixir ->
                     Arities = lists:sort([FA || {M, Fn, FA} <- maps:keys(Funcs), M =:= Mod, Fn =:= F]),
                     Msg = iolist_to_binary(io_lib:format(
@@ -131,7 +131,7 @@ unknown_function_warnings(CallerMFA, Line, {Mod, F, A} = CalleeMFA, Plt) ->
                                              [] -> "";
                                              _ -> io_lib:format(" (it has ~s/~s)", [F, lists:join(", ", [integer_to_list(X) || X <- Arities])])
                                          end])),
-                    [#spectra_warning{kind = unknown_function, mfa = CallerMFA, line = Line, message = Msg, callee = CalleeMFA}];
+                    [#prisma_warning{kind = unknown_function, mfa = CallerMFA, line = Line, message = Msg, callee = CalleeMFA}];
                 _ ->
                     []
             end
@@ -146,7 +146,7 @@ provided_by_the_compiler(_, _, _) -> false.
 verify_gradual_calls(#func_contract{mfa = {CallerMod, _, _} = CallerMFA, call_sites = Sites}, Plt) ->
     lists:flatmap(
         fun({Line, {CalleeMod, _, _} = CalleeMFA, ActualArgs}) ->
-            case spectra_plt:lookup_mfa(CalleeMFA, Plt) of
+            case prisma_plt:lookup_mfa(CalleeMFA, Plt) of
                 {ok, #func_contract{declared_specs = [ _ | _ ] = Specs, inferred_type = Inferred}} ->
                     case resolve_expected_arg_vectors(CallerMod, CalleeMod, Specs, Inferred, Plt) of
                         {ok, Vectors} ->
@@ -166,7 +166,7 @@ verify_gradual_calls(#func_contract{mfa = {CallerMod, _, _} = CallerMFA, call_si
 %% contradiction: it is not reported. What is proven to fall outside the contract (a literal, a range, another type) still is.
 -spec accepts(term(), term()) -> boolean().
 accepts(Actual, Expected) ->
-    spectra_type:consistent_subtype(Actual, Expected) orelse unproven_gap(Actual, Expected).
+    prisma_type:consistent_subtype(Actual, Expected) orelse unproven_gap(Actual, Expected).
 
 unproven_gap({union, Members}, Expected) ->
     lists:all(fun(M) -> accepts(M, Expected) end, Members);
@@ -179,7 +179,7 @@ unproven_gap(number, Expected) ->
 unproven_gap(non_neg_integer, {int_range, 0, _}) ->
     true;
 unproven_gap({list, Elem}, {nonempty_list, ExpectedElem}) ->
-    spectra_type:consistent_subtype(Elem, ExpectedElem);
+    prisma_type:consistent_subtype(Elem, ExpectedElem);
 unproven_gap(_, _) ->
     false.
 
@@ -203,7 +203,7 @@ check_gradual_args(CallerMFA, Line, {CM, CF, CA}, ZipArgs) ->
                             [CM, CF, CA, Idx, Actual, Expected]
                         )
                     ),
-                    W = #spectra_warning{
+                    W = #prisma_warning{
                         kind = Kind,
                         mfa = CallerMFA,
                         line = Line,
@@ -230,10 +230,10 @@ classify_gradual_failure(_, _) -> gradual_mismatch.
 resolve_expected_arg_vectors(CallerMod, CalleeMod, [_ | _] = SpecClauses, _Inferred, Plt) ->
     Vectors = lists:filtermap(
         fun(SpecClause) ->
-            case spectra_type:unfold_bounded_fun(SpecClause) of
+            case prisma_type:unfold_bounded_fun(SpecClause) of
                 {fun_type, SpecArgs, _Ret} ->
                     {true, [
-                        case spectra_plt:resolve_type(CallerMod, CalleeMod, A, Plt) of
+                        case prisma_plt:resolve_type(CallerMod, CalleeMod, A, Plt) of
                             {ok, R} -> R;
                             _ -> A
                         end
@@ -282,7 +282,7 @@ verify_gradual_spec({Mod, _, _} = MFA, [_ | _] = SpecClauses, {fun_type, _Inferr
         [] ->
             [];
         _ ->
-            DeclaredUnion = spectra_type:normalize_union(DeclaredReturns),
+            DeclaredUnion = prisma_type:normalize_union(DeclaredReturns),
             case accepts(InferredRet, DeclaredUnion) of
                 true ->
                     [];
@@ -294,7 +294,7 @@ verify_gradual_spec({Mod, _, _} = MFA, [_ | _] = SpecClauses, {fun_type, _Inferr
                             [DeclaredUnion, InferredRet]
                         )
                     ),
-                    [#spectra_warning{
+                    [#prisma_warning{
                         kind = Kind,
                         mfa = MFA,
                         line = Line,
@@ -308,9 +308,9 @@ verify_gradual_spec(_MFA, _Specs, _Inferred, _Line, _Plt) ->
     [].
 
 extract_spec_return(Mod, SpecClause, Plt) ->
-    case spectra_type:unfold_bounded_fun(SpecClause) of
+    case prisma_type:unfold_bounded_fun(SpecClause) of
         {fun_type, _Args, RetType} ->
-            case spectra_plt:resolve_type(Mod, Mod, RetType, Plt) of
+            case prisma_plt:resolve_type(Mod, Mod, RetType, Plt) of
                 {ok, Resolved} -> {ok, Resolved};
                 {error, _} -> {ok, RetType}
             end;
@@ -318,14 +318,14 @@ extract_spec_return(Mod, SpecClause, Plt) ->
             error
     end.
 
-%% @doc Formats a single `#spectra_warning{}` using default options.
--spec format_warning(#spectra_warning{}) -> binary().
+%% @doc Formats a single `#prisma_warning{}` using default options.
+-spec format_warning(#prisma_warning{}) -> binary().
 format_warning(Warning) ->
     format_warning(Warning, #{}).
 
-%% @doc Formats a `#spectra_warning{}` according to `Opts` (`human`, `oneline`, `json`, colors).
--spec format_warning(#spectra_warning{}, map()) -> binary().
-format_warning(#spectra_warning{} = W, Opts) ->
+%% @doc Formats a `#prisma_warning{}` according to `Opts` (`human`, `oneline`, `json`, colors).
+-spec format_warning(#prisma_warning{}, map()) -> binary().
+format_warning(#prisma_warning{} = W, Opts) ->
     Format = maps:get(format, Opts, human),
     Color = should_color(Opts),
     case Format of
@@ -337,13 +337,13 @@ format_warning(#spectra_warning{} = W, Opts) ->
             format_human(W, Color)
     end.
 
-%% @doc Formats a list of `#spectra_warning{}` with default options.
--spec format_warnings([#spectra_warning{}]) -> binary().
+%% @doc Formats a list of `#prisma_warning{}` with default options.
+-spec format_warnings([#prisma_warning{}]) -> binary().
 format_warnings(Warnings) ->
     format_warnings(Warnings, #{}).
 
-%% @doc Formats a list of `#spectra_warning{}` according to `Opts`.
--spec format_warnings([#spectra_warning{}], map()) -> binary().
+%% @doc Formats a list of `#prisma_warning{}` according to `Opts`.
+-spec format_warnings([#prisma_warning{}], map()) -> binary().
 format_warnings(Warnings, Opts) ->
     Format = maps:get(format, Opts, human),
     case Format of
@@ -378,7 +378,7 @@ should_color(Opts) ->
 colorize(Text, Ansi, true) -> [Ansi, Text, "\e[0m"];
 colorize(Text, _Ansi, false) -> Text.
 
-format_human(#spectra_warning{
+format_human(#prisma_warning{
     kind = Kind,
     mfa = {Mod, Fun, Arity},
     line = Line,
@@ -390,7 +390,7 @@ format_human(#spectra_warning{
     arg_idx = ArgIdx,
     file = File
 }, Color) ->
-    CleanMod = spectra_type:clean_module(Mod),
+    CleanMod = prisma_type:clean_module(Mod),
     Lang = case atom_to_binary(Mod, utf8) of
         <<"Elixir.", _/binary>> -> elixir;
         _ -> erlang
@@ -417,18 +417,18 @@ format_human(#spectra_warning{
 
     Details = case {Declared, Actual, Expected} of
         {Decl, Act, undefined} when Decl =/= undefined, Act =/= undefined ->
-            DeclStr = spectra_type:format(Decl, #{lang => Lang}),
-            ActStr = spectra_type:format(Act, #{lang => Lang}),
+            DeclStr = prisma_type:format(Decl, #{lang => Lang}),
+            ActStr = prisma_type:format(Act, #{lang => Lang}),
             [
                 "\n  ", colorize("Declared:", "\e[1;36m", Color), "  ", DeclStr,
                 "\n  ", colorize("Inferred:", "\e[1;31m", Color), "  ", ActStr
             ];
         {undefined, Act, Exp} when Exp =/= undefined, Act =/= undefined ->
-            ExpStr = spectra_type:format(Exp, #{lang => Lang}),
-            ActStr = spectra_type:format(Act, #{lang => Lang}),
+            ExpStr = prisma_type:format(Exp, #{lang => Lang}),
+            ActStr = prisma_type:format(Act, #{lang => Lang}),
             CalleeLines = case Callee of
                 {CM, CF, CA} ->
-                    CleanCM = spectra_type:clean_module(CM),
+                    CleanCM = prisma_type:clean_module(CM),
                     TargetStr = CleanCM ++ ":" ++ atom_to_list(CF) ++ "/" ++ integer_to_list(CA),
                     ArgStr = case ArgIdx of undefined -> ""; N -> io_lib:format(" (argument #~B)", [N]) end,
                     ["\n  ", colorize("Call to:", "\e[1m", Color), "   ", TargetStr, ArgStr];
@@ -446,7 +446,7 @@ format_human(#spectra_warning{
     end,
     iolist_to_binary([Header, Details]).
 
-format_oneline(#spectra_warning{
+format_oneline(#prisma_warning{
     kind = Kind,
     mfa = {Mod, Fun, Arity},
     line = Line,
@@ -458,7 +458,7 @@ format_oneline(#spectra_warning{
     arg_idx = ArgIdx,
     file = File
 }, Color) ->
-    CleanMod = spectra_type:clean_module(Mod),
+    CleanMod = prisma_type:clean_module(Mod),
     Lang = case atom_to_binary(Mod, utf8) of
         <<"Elixir.", _/binary>> -> elixir;
         _ -> erlang
@@ -472,26 +472,26 @@ format_oneline(#spectra_warning{
     Desc = case {Declared, Actual, Expected} of
         {Decl, Act, undefined} when Decl =/= undefined, Act =/= undefined ->
             io_lib:format("declared ~s is incompatible with inferred ~s", [
-                spectra_type:format(Decl, #{lang => Lang}),
-                spectra_type:format(Act, #{lang => Lang})
+                prisma_type:format(Decl, #{lang => Lang}),
+                prisma_type:format(Act, #{lang => Lang})
             ]);
         {undefined, Act, Exp} when Exp =/= undefined, Act =/= undefined ->
             Target = case Callee of
-                {CM, CF, CA} -> io_lib:format("to ~s:~s/~B ", [spectra_type:clean_module(CM), atom_to_list(CF), CA]);
+                {CM, CF, CA} -> io_lib:format("to ~s:~s/~B ", [prisma_type:clean_module(CM), atom_to_list(CF), CA]);
                 _ -> ""
             end,
             ArgStr = case ArgIdx of undefined -> ""; N -> io_lib:format("arg #~B ", [N]) end,
             io_lib:format("call ~s~sof type ~s does not match expected ~s", [
                 Target, ArgStr,
-                spectra_type:format(Act, #{lang => Lang}),
-                spectra_type:format(Exp, #{lang => Lang})
+                prisma_type:format(Act, #{lang => Lang}),
+                prisma_type:format(Exp, #{lang => Lang})
             ]);
         _ ->
             clean_message_text(Msg)
     end,
     iolist_to_binary([Loc, ": ", Desc]).
 
-encode_warning_json(#spectra_warning{
+encode_warning_json(#prisma_warning{
     kind = Kind,
     mfa = {Mod, Fun, Arity},
     line = Line,
@@ -503,7 +503,7 @@ encode_warning_json(#spectra_warning{
     arg_idx = ArgIdx,
     file = File
 }) ->
-    CleanMod = spectra_type:clean_module(Mod),
+    CleanMod = prisma_type:clean_module(Mod),
     Lang = case atom_to_binary(Mod, utf8) of <<"Elixir.", _/binary>> -> elixir; _ -> erlang end,
     Base = [
         <<"  {\n">>,
@@ -520,15 +520,15 @@ encode_warning_json(#spectra_warning{
     end,
     ExtraDeclared = case Declared of
         undefined -> [];
-        _ -> [<<",\n    \"declared\": \"">>, json_escape(spectra_type:format(Declared, #{lang => Lang})), <<"\"">>]
+        _ -> [<<",\n    \"declared\": \"">>, json_escape(prisma_type:format(Declared, #{lang => Lang})), <<"\"">>]
     end,
     ExtraActual = case Actual of
         undefined -> [];
-        _ -> [<<",\n    \"actual\": \"">>, json_escape(spectra_type:format(Actual, #{lang => Lang})), <<"\"">>]
+        _ -> [<<",\n    \"actual\": \"">>, json_escape(prisma_type:format(Actual, #{lang => Lang})), <<"\"">>]
     end,
     ExtraExpected = case Expected of
         undefined -> [];
-        _ -> [<<",\n    \"expected\": \"">>, json_escape(spectra_type:format(Expected, #{lang => Lang})), <<"\"">>]
+        _ -> [<<",\n    \"expected\": \"">>, json_escape(prisma_type:format(Expected, #{lang => Lang})), <<"\"">>]
     end,
     ExtraArgIdx = case ArgIdx of
         undefined -> [];
@@ -537,7 +537,7 @@ encode_warning_json(#spectra_warning{
     ExtraCallee = case Callee of
         {CM, CF, CA} ->
             [
-                <<",\n    \"callee\": {\"module\": \"">>, json_escape(spectra_type:clean_module(CM)),
+                <<",\n    \"callee\": {\"module\": \"">>, json_escape(prisma_type:clean_module(CM)),
                 <<"\", \"function\": \"">>, json_escape(atom_to_list(CF)),
                 <<"\", \"arity\": ">>, integer_to_binary(CA), <<"}">>
             ];

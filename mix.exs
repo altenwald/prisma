@@ -1,12 +1,12 @@
-defmodule Spectra.MixProject do
+defmodule Prisma.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @source_url "https://github.com/altenwald/spectra"
+  @source_url "https://github.com/altenwald/prisma"
 
   def project do
     [
-      app: :spectra,
+      app: :prisma,
       version: @version,
       language: :erlang,
       erlc_options: [:debug_info],
@@ -31,7 +31,7 @@ defmodule Spectra.MixProject do
 
   defp package do
     [
-      name: "spectra",
+      name: "prisma",
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url},
       files: ~w(src include assets mix.exs rebar.config rebar.lock README* BENCHMARK* LICENSE*)

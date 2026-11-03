@@ -2,9 +2,9 @@
 %%
 %% Resolves locked dependencies and OTP base applications into cached `.splt`
 %% files indexed by OTP release, package name, and version.
--module(spectra_lock).
+-module(prisma_lock).
 
--include("spectra.hrl").
+-include("prisma.hrl").
 
 -export([
     parse_rebar_lock/1,
@@ -142,8 +142,8 @@ discover_deps(ProjectRoot) ->
 %% @doc Returns the default directory for storing cached `.splt` files.
 -spec default_cache_dir() -> string().
 default_cache_dir() ->
-    case os:getenv("SPECTRA_CACHE_DIR") of
-        false -> filename:basedir(user_cache, "spectra");
+    case os:getenv("PRISMA_CACHE_DIR") of
+        false -> filename:basedir(user_cache, "prisma");
         EnvDir -> EnvDir
     end.
 
@@ -162,13 +162,13 @@ otp_cache_path(CacheDir, OtpApp) ->
     filename:join([unicode:characters_to_list(CacheDir), "otp-" ++ OtpRel, "otp", FileName]).
 
 %% @doc Loads or builds and caches the `.splt` for an OTP application (e.g. `stdlib`).
--spec ensure_otp_plt(atom(), map()) -> {ok, #spectra_plt{}} | {error, term()}.
+-spec ensure_otp_plt(atom(), map()) -> {ok, #prisma_plt{}} | {error, term()}.
 ensure_otp_plt(OtpApp, Opts) ->
     CacheDir = maps:get(cache_dir, Opts, default_cache_dir()),
     Path = otp_cache_path(CacheDir, OtpApp),
     case filelib:is_regular(Path) of
         true ->
-            spectra_plt:load(Path);
+            prisma_plt:load(Path);
         false ->
             case code:lib_dir(OtpApp) of
                 {error, Reason} ->
@@ -178,9 +178,9 @@ ensure_otp_plt(OtpApp, Opts) ->
                     PkgName = atom_to_binary(OtpApp, utf8),
                     OtpRel = list_to_binary(erlang:system_info(otp_release)),
                     Beams = filelib:wildcard(filename:join(EbinDir, "*.beam")),
-                    case spectra_plt:from_beams(Beams, #{package => PkgName, package_vsn => OtpRel}) of
+                    case prisma_plt:from_beams(Beams, #{package => PkgName, package_vsn => OtpRel}) of
                         {ok, Plt} ->
-                            _ = spectra_plt:save(Plt, Path),
+                            _ = prisma_plt:save(Plt, Path),
                             {ok, Plt};
                         Error ->
                             Error
@@ -190,7 +190,7 @@ ensure_otp_plt(OtpApp, Opts) ->
 
 %% @doc Resolves, builds/fetches, caches, and merges `.splt` files for a project's locked dependencies.
 -spec resolve_project_plts(file:filename_all(), map()) ->
-    {ok, #spectra_plt{}} | {error, term()}.
+    {ok, #prisma_plt{}} | {error, term()}.
 resolve_project_plts(ProjectRoot, Opts) ->
     CacheDir = maps:get(cache_dir, Opts, default_cache_dir()),
     OtpApps = maps:get(otp_apps, Opts, []),
@@ -213,13 +213,13 @@ resolve_project_plts(ProjectRoot, Opts) ->
         end,
         Deps
     ),
-    {ok, spectra_plt:merge(OtpPlts ++ DepPlts)}.
+    {ok, prisma_plt:merge(OtpPlts ++ DepPlts)}.
 
 resolve_single_dep(ProjectRoot, CacheDir, Name, Vsn, Opts) ->
     Path = cache_path(CacheDir, Name, Vsn),
     case filelib:is_regular(Path) of
         true ->
-            spectra_plt:load(Path);
+            prisma_plt:load(Path);
         false ->
             case try_remote_fetcher(Name, Vsn, Path, Opts) of
                 {ok, Plt} ->
@@ -234,13 +234,13 @@ try_remote_fetcher(Name, Vsn, CachePath, Opts) ->
         {ok, FetcherFun} when is_function(FetcherFun, 3) ->
             OtpRel = list_to_binary(erlang:system_info(otp_release)),
             case FetcherFun(OtpRel, Name, Vsn) of
-                {ok, #spectra_plt{} = Plt} ->
-                    _ = spectra_plt:save(Plt, CachePath),
+                {ok, #prisma_plt{} = Plt} ->
+                    _ = prisma_plt:save(Plt, CachePath),
                     {ok, Plt};
                 {ok, Bin} when is_binary(Bin) ->
-                    case spectra_plt:decode(Bin) of
+                    case prisma_plt:decode(Bin) of
                         {ok, Plt} ->
-                            _ = spectra_plt:save(Plt, CachePath),
+                            _ = prisma_plt:save(Plt, CachePath),
                             {ok, Plt};
                         _ ->
                             error
@@ -260,9 +260,9 @@ build_and_cache_local_dep(ProjectRoot, CachePath, Name, Vsn) ->
         [] ->
             error;
         Beams ->
-            case spectra_plt:from_beams(Beams, #{package => Name, package_vsn => Vsn}) of
+            case prisma_plt:from_beams(Beams, #{package => Name, package_vsn => Vsn}) of
                 {ok, Plt} ->
-                    _ = spectra_plt:save(Plt, CachePath),
+                    _ = prisma_plt:save(Plt, CachePath),
                     {ok, Plt};
                 _ ->
                     error

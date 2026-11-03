@@ -1,11 +1,11 @@
-%% @doc Canonical type representation and manipulation for Spectra.
+%% @doc Canonical type representation and manipulation for Prisma.
 %%
 %% Converts Erlang Abstract Format type ASTs into normalized algebraic terms
 %% supporting polymorphism, bounded_fun constraints, remote types, opaques,
 %% and cycle-safe recursive unfolding.
--module(spectra_type).
+-module(prisma_type).
 
--include("spectra.hrl").
+-include("prisma.hrl").
 
 -define(MAX_IMPROPER_MEET_DEPTH, 2).
 -define(WIDEN_DEPTH, 4).
@@ -624,19 +624,19 @@ meet_improper_with_list(E1, T1, E2, Kind) ->
 %% depth (counted across the recursion, which goes back through meet/2); below it, a safe superset: a pair of
 %% chains nested that deep has not been seen, and the cost grows with each level.
 meet_improper(E1, T1, E2, T2) ->
-    Depth = case get(spectra_meet_improper_depth) of undefined -> 0; D -> D end,
+    Depth = case get(prisma_meet_improper_depth) of undefined -> 0; D -> D end,
     case meet(E1, E2) of
         none ->
             nil;
         _ when Depth >= ?MAX_IMPROPER_MEET_DEPTH ->
             {improper_list, join(E1, E2), join(T1, T2)};
         E ->
-            put(spectra_meet_improper_depth, Depth + 1),
+            put(prisma_meet_improper_depth, Depth + 1),
             try
                 Tails = [meet(T1, T2), meet_tail(T1, E2, T2), meet_tail(T2, E1, T1)],
                 normalize_union([improper_chain(E, T) || T <- Tails])
             after
-                put(spectra_meet_improper_depth, Depth)
+                put(prisma_meet_improper_depth, Depth)
             end
     end.
 

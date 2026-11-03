@@ -1,12 +1,12 @@
-%% @doc Spectra Hub server, REST API router, and HTML dashboard for Hex.pm `.splt` files.
+%% @doc Prisma Hub server, REST API router, and HTML dashboard for Hex.pm `.splt` files.
 %%
 %% Verifies packages against Hex.pm, builds `.splt` artifacts on demand (synchronously
 %% or in background workers), tracks demand rankings, and serves `.splt` binaries.
--module(spectra_hub).
+-module(prisma_hub).
 
 -behaviour(gen_server).
 
--include("spectra.hrl").
+-include("prisma.hrl").
 
 -export([
     start_link/1,
@@ -31,17 +31,17 @@
 -record(state, {
     storage_dir :: string(),
     hex_checker :: fun((binary(), binary()) -> ok | {error, term()}),
-    builder :: fun((binary(), binary(), binary()) -> {ok, #spectra_plt{}} | {error, term()}),
+    builder :: fun((binary(), binary(), binary()) -> {ok, #prisma_plt{}} | {error, term()}),
     async_build = true :: boolean(),
     entries = #{} :: #{{binary(), binary(), binary()} => map()}
 }).
 
-%% @doc Starts a `spectra_hub` server process with `Opts`.
+%% @doc Starts a `prisma_hub` server process with `Opts`.
 -spec start_link(map()) -> {ok, pid()} | {error, term()}.
 start_link(Opts) ->
     gen_server:start_link(?MODULE, Opts, []).
 
-%% @doc Stops the `spectra_hub` server process.
+%% @doc Stops the `prisma_hub` server process.
 -spec stop(pid()) -> ok.
 stop(Pid) ->
     gen_server:stop(Pid).
@@ -73,7 +73,7 @@ get_plt(Pid, Otp, Pkg, Vsn) ->
 top_demanded(Pid, Limit) ->
     gen_server:call(Pid, {top_demanded, Limit}).
 
-%% @doc Returns a fetcher function compatible with `spectra_lock:resolve_project_plts/2`.
+%% @doc Returns a fetcher function compatible with `prisma_lock:resolve_project_plts/2`.
 -spec local_fetcher(pid()) -> fun((binary(), binary(), binary()) -> {ok, binary()} | error).
 local_fetcher(Pid) ->
     fun(OtpRel, Pkg, Vsn) ->
@@ -159,8 +159,8 @@ render_dashboard(TopEntries) ->
     Rows = [render_row(E) || E <- TopEntries],
     iolist_to_binary([
         <<"<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">">>,
-        <<"<title>Spectra Hub - Modular BEAM PLTs</title></head><body>">>,
-        <<"<h1>Spectra Hub</h1>">>,
+        <<"<title>Prisma Hub - Modular BEAM PLTs</title></head><body>">>,
+        <<"<h1>Prisma Hub</h1>">>,
         <<"<p>On-demand portable <code>.splt</code> generator and cache for Hex.pm packages.</p>">>,
         <<"<form method=\"POST\" action=\"/api/v1/plts/request\">">>,
         <<"<input name=\"otp\" placeholder=\"OTP (e.g. 29)\" required>">>,
@@ -198,7 +198,7 @@ encode_entry_json(#{otp := Otp, package := Pkg, version := Vsn, status := Status
     ]).
 
 init(Opts) ->
-    StorageDir = unicode:characters_to_list(maps:get(storage_dir, Opts, "/tmp/spectra_hub")),
+    StorageDir = unicode:characters_to_list(maps:get(storage_dir, Opts, "/tmp/prisma_hub")),
     HexChecker = maps:get(hex_checker, Opts, fun default_hex_check/2),
     Builder = maps:get(builder, Opts, fun default_plt_builder/3),
     Async = maps:get(async_build, Opts, true),
@@ -297,10 +297,10 @@ handle_new_plt_request({Otp, Pkg, Vsn} = Key, #state{
 
 execute_build(Builder, Otp, Pkg, Vsn, Path) ->
     case Builder(Otp, Pkg, Vsn) of
-        {ok, #spectra_plt{} = Plt} ->
-            case spectra_plt:save(Plt, Path) of
+        {ok, #prisma_plt{} = Plt} ->
+            case prisma_plt:save(Plt, Path) of
                 ok ->
-                    {ok, Path, length(spectra_plt:modules(Plt))};
+                    {ok, Path, length(prisma_plt:modules(Plt))};
                 {error, Reason} ->
                     {error, Reason}
             end;
@@ -310,7 +310,7 @@ execute_build(Builder, Otp, Pkg, Vsn, Path) ->
 
 default_hex_check(Pkg, Vsn) when is_binary(Pkg), is_binary(Vsn) ->
     Url = "https://hex.pm/api/packages/" ++ binary_to_list(Pkg) ++ "/releases/" ++ binary_to_list(Vsn),
-    case httpc:request(get, {Url, [{"user-agent", "spectra-hub/0.1.0"}]}, [{timeout, 5000}], []) of
+    case httpc:request(get, {Url, [{"user-agent", "prisma-hub/0.1.0"}]}, [{timeout, 5000}], []) of
         {ok, {{_, 200, _}, _, _}} -> ok;
         {ok, {{_, 404, _}, _, _}} -> {error, not_found_in_hex};
         {error, Reason} -> {error, Reason};
@@ -318,5 +318,5 @@ default_hex_check(Pkg, Vsn) when is_binary(Pkg), is_binary(Vsn) ->
     end.
 
 default_plt_builder(Otp, Pkg, Vsn) ->
-    Plt = (spectra_plt:new(Pkg, Vsn))#spectra_plt{otp_release = Otp},
+    Plt = (prisma_plt:new(Pkg, Vsn))#prisma_plt{otp_release = Otp},
     {ok, Plt}.

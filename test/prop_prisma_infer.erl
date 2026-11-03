@@ -9,10 +9,10 @@
 %%     "this call fails" or "this clause cannot match", and a line that ran without crashing refutes them. `cover`
 %%     tells which lines ran.
 %% Every refutation is a proven false positive, minimized by PropEr's shrinking.
--module(prop_spectra_infer).
+-module(prop_prisma_infer).
 
 -include_lib("proper/include/proper.hrl").
--include("spectra.hrl").
+-include("prisma.hrl").
 
 -define(TAGS, [int, bool, atom, pair, cell, list, float]).
 %% what the generated callee module accepts (its -spec is overloaded over these)
@@ -118,7 +118,7 @@ stmt(V, K, Env) ->
     end,
     FloatEq = ?LET({F, X, Y}, {expr(float, Env, 1), expr(int, Env, 1), expr(int, Env, 1)},
                    {fmt("    ~s = if\n        ~s == 0 -> ~s;\n        true -> ~s\n    end", [V, F, X, Y]), int}),
-    %% BIFs in a guard, always on the right type: a guard that Spectra decides cannot succeed has to be really dead
+    %% BIFs in a guard, always on the right type: a guard that Prisma decides cannot succeed has to be really dead
     GuardBif = ?LET({L, P}, {expr(list, Env, 1), expr(pair, Env, 1)},
                     {fmt("    ~s = if\n        length(~s) > 1 -> 1;\n        tuple_size(~s) =:= 2 -> 2;\n        true -> 3\n    end", [V, L, P]), int}),
     VarNames = [N || {N, T} <- Env, is_list(N), is_atom(T)],
@@ -249,11 +249,11 @@ check(Src0, CalleeSrc0, Samples) ->
     ok = file:write_file(CalleeFile, CalleeBeam),
     {module, CalleeMod} = code:load_abs(filename:rootname(CalleeFile)),
     try
-        {ok, Plt} = spectra_plt:from_beams([Beam]),
-        #module_summary{functions = Funcs} = maps:get(Mod, Plt#spectra_plt.modules),
+        {ok, Plt} = prisma_plt:from_beams([Beam]),
+        #module_summary{functions = Funcs} = maps:get(Mod, Plt#prisma_plt.modules),
         {fun_type, Dom, Ret} = (maps:get({Mod, f, 2}, Funcs))#func_contract.inferred_type,
-        {ok, Warnings} = spectra:analyze_beams([Beam, CalleeBeam], #{mode => discrepancy, oxbow => false}),
-        Claims = [W || #spectra_warning{kind = K, mfa = {WMod, _, _}} = W <- Warnings, WMod =:= Mod,
+        {ok, Warnings} = prisma:analyze_beams([Beam, CalleeBeam], #{mode => discrepancy, oxbow => false}),
+        Claims = [W || #prisma_warning{kind = K, mfa = {WMod, _, _}} = W <- Warnings, WMod =:= Mod,
                        K =:= discrepancy orelse K =:= dead_code],
         _ = cover:start(),
         {ok, Mod} = cover:compile_beam(File),
@@ -275,16 +275,16 @@ run_all(Mod, [Args | Rest], Dom, Ret, Claims) ->
         {ok, Result} ->
             {ok, Lines} = cover:analyse(Mod, coverage, line),
             Ran = [L || {{_, L}, {1, 0}} <- Lines],
-            Refuted = [W || #spectra_warning{line = L} = W <- Claims, lists:member(L, Ran)],
-            case {spectra_oracle:member(Result, Ret),
-                  lists:all(fun({A, T}) -> spectra_oracle:member(A, T) end, lists:zip(Args, Dom)),
+            Refuted = [W || #prisma_warning{line = L} = W <- Claims, lists:member(L, Ran)],
+            case {prisma_oracle:member(Result, Ret),
+                  lists:all(fun({A, T}) -> prisma_oracle:member(A, T) end, lists:zip(Args, Dom)),
                   Refuted} of
                 {true, true, []} -> run_all(Mod, Rest, Dom, Ret, Claims);
                 {false, _, _} -> {refuted, {result_outside_inferred_type, Args, Result, Ret}};
                 {_, false, _} -> {refuted, {argument_outside_inferred_domain, Args, Dom}};
-                {_, _, _} -> {refuted, {warning_on_a_line_that_ran, Args, [{W#spectra_warning.kind,
-                                                                            W#spectra_warning.line,
-                                                                            W#spectra_warning.message}
+                {_, _, _} -> {refuted, {warning_on_a_line_that_ran, Args, [{W#prisma_warning.kind,
+                                                                            W#prisma_warning.line,
+                                                                            W#prisma_warning.message}
                                                                            || W <- Refuted]}}
             end;
         crashed ->

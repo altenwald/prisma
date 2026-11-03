@@ -1,5 +1,5 @@
-%% @doc Rebar3 provider plugin (`rebar3 spectra`).
--module(spectra_prv).
+%% @doc Rebar3 provider plugin (`rebar3 prisma`).
+-module(prisma_prv).
 
 -export([
     init/1,
@@ -9,7 +9,7 @@
     parse_config_opts/1
 ]).
 
--define(PROVIDER, spectra).
+-define(PROVIDER, prisma).
 -define(DEPS, [compile]).
 -define(OPTS, [
     {format, $f, "format", string, "Output format: human, oneline, json (default: human)"},
@@ -21,7 +21,7 @@
     {plt, undefined, "plt", string, "Path to .splt file (can be specified multiple times)"}
 ]).
 
-%% @doc Registers the `spectra` provider with Rebar3.
+%% @doc Registers the `prisma` provider with Rebar3.
 -spec init(term()) -> {ok, term()}.
 init(State) ->
     case code:ensure_loaded(providers) of
@@ -31,10 +31,10 @@ init(State) ->
                 {module, ?MODULE},
                 {bare, true},
                 {deps, ?DEPS},
-                {example, "rebar3 spectra"},
+                {example, "rebar3 prisma"},
                 {opts, ?OPTS},
-                {short_desc, "Run Spectra hybrid type and discrepancy analysis"},
-                {desc, "Analyzes compiled BEAM files using Spectra's hybrid gradual and discrepancy checker."}
+                {short_desc, "Run Prisma hybrid type and discrepancy analysis"},
+                {desc, "Analyzes compiled BEAM files using Prisma's hybrid gradual and discrepancy checker."}
             ]),
             {ok, rebar_state:add_provider(State, Provider)};
         _ ->
@@ -56,19 +56,19 @@ do(State) ->
     end,
     EbinDirs = resolve_ebins(AppEbins, Root, Targets),
     Opts = ParsedOpts#{project_root => Root},
-    case spectra:analyze_dirs(EbinDirs, Opts) of
+    case prisma:analyze_dirs(EbinDirs, Opts) of
         {ok, []} ->
             case maps:get(format, Opts, human) of
                 json ->
                     io:format("[]~n");
                 _ ->
-                    UseColor = spectra_checker:should_color(Opts),
-                    Msg = spectra_checker:colorize("Spectra: 0 warnings found.", "\e[1;32m", UseColor),
+                    UseColor = prisma_checker:should_color(Opts),
+                    Msg = prisma_checker:colorize("Prisma: 0 warnings found.", "\e[1;32m", UseColor),
                     io:format("~ts~n", [Msg])
             end,
             {ok, State};
         {ok, Warnings} ->
-            Formatted = spectra_checker:format_warnings(Warnings, Opts),
+            Formatted = prisma_checker:format_warnings(Warnings, Opts),
             io:format("~ts~n", [Formatted]),
             {error, format_error({warnings_found, length(Warnings)})};
         {error, Reason} ->
@@ -78,9 +78,9 @@ do(State) ->
 %% @doc Formats provider errors for Rebar3 output.
 -spec format_error(term()) -> iolist().
 format_error({warnings_found, Count}) ->
-    io_lib:format("Spectra found ~B type warning(s)", [Count]);
+    io_lib:format("Prisma found ~B type warning(s)", [Count]);
 format_error(Reason) ->
-    io_lib:format("Spectra error: ~p", [Reason]).
+    io_lib:format("Prisma error: ~p", [Reason]).
 
 %% @private Safely gets ebin dir for an app info record.
 safe_app_ebin(App) ->
@@ -93,7 +93,7 @@ safe_app_ebin(App) ->
 
 %% @private Parses configuration and CLI options from Rebar3 state.
 parse_opts(State) ->
-    ConfigOpts = try rebar_state:get(State, spectra, []) of
+    ConfigOpts = try rebar_state:get(State, prisma, []) of
         List when is_list(List) -> parse_config_opts(List);
         _ -> #{}
     catch
@@ -138,7 +138,7 @@ parse_cli_args(Args) ->
         Args
     ).
 
-%% @doc Parses options configured under `{spectra, [...]}` in `rebar.config`.
+%% @doc Parses options configured under `{prisma, [...]}` in `rebar.config`.
 -spec parse_config_opts([term()]) -> map().
 parse_config_opts(Opts) ->
     lists:foldl(
@@ -181,4 +181,4 @@ resolve_ebins(_AppEbins, _Root, [_|_] = Targets) ->
 resolve_ebins([_|_] = AppEbins, _Root, []) ->
     [unicode:characters_to_list(D) || D <- AppEbins];
 resolve_ebins([], Root, []) ->
-    spectra_lock:discover_project_ebins(Root, #{}).
+    prisma_lock:discover_project_ebins(Root, #{}).

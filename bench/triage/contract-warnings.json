@@ -1,5 +1,5 @@
 {
- "_doc": "The 55 contract (gradual_mismatch) warnings that the return-type-from-spec change added in hybrid mode, over rabbitmq-server 5dacb85. Every one was read in the source. verdict: 'true by contract' = the spec says less than the code does; 'no longer reported' = a Spectra false positive fixed afterwards, or the numeric / non-empty-list tolerance (spectra_checker:accepts/2); 'known limitation' = Spectra is wrong and it is not fixed.",
+ "_doc": "The 55 contract (gradual_mismatch) warnings that the return-type-from-spec change added in hybrid mode, over rabbitmq-server 5dacb85. Every one was read in the source. verdict: 'true by contract' = the spec says less than the code does; 'no longer reported' = a Prisma false positive fixed afterwards, or the numeric / non-empty-list tolerance (prisma_checker:accepts/2); 'known limitation' = Prisma is wrong and it is not fixed.",
  "categories": {
   "integer range wider than the declared one": [
    {

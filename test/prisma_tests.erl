@@ -1,50 +1,50 @@
--module(spectra_tests).
+-module(prisma_tests).
 
 -include_lib("eunit/include/eunit.hrl").
--include("spectra.hrl").
+-include("prisma.hrl").
 
 extract_and_portable_plt_test() ->
-    ?assertEqual(<<"0.1.0">>, spectra:version()),
-    BeamFile = code:where_is_file("spectra.beam"),
+    ?assertEqual(<<"0.1.0">>, prisma:version()),
+    BeamFile = code:where_is_file("prisma.beam"),
     ?assert(is_list(BeamFile)),
     EbinDir = filename:dirname(BeamFile),
 
-    {ok, Summary} = spectra_abstract:extract_beam(list_to_binary(BeamFile)),
-    ?assertEqual(spectra, Summary#module_summary.module),
+    {ok, Summary} = prisma_abstract:extract_beam(list_to_binary(BeamFile)),
+    ?assertEqual(prisma, Summary#module_summary.module),
     ?assertEqual(erlang, Summary#module_summary.language),
-    ?assertMatch({error, _}, spectra_abstract:extract_beam("/nonexistent/file.beam")),
+    ?assertMatch({error, _}, prisma_abstract:extract_beam("/nonexistent/file.beam")),
 
-    EmptyPlt = spectra_plt:new(),
-    ?assertEqual([], spectra_plt:modules(EmptyPlt)),
-    ?assertEqual(EmptyPlt, spectra_plt:merge([])),
+    EmptyPlt = prisma_plt:new(),
+    ?assertEqual([], prisma_plt:modules(EmptyPlt)),
+    ?assertEqual(EmptyPlt, prisma_plt:merge([])),
 
-    {ok, DirPlt} = spectra_plt:from_dir(EbinDir),
-    ?assert( lists:member(spectra, spectra_plt:modules(DirPlt)) ),
+    {ok, DirPlt} = prisma_plt:from_dir(EbinDir),
+    ?assert( lists:member(prisma, prisma_plt:modules(DirPlt)) ),
 
-    {ok, BeamsPlt} = spectra_plt:from_beams([BeamFile]),
-    ?assertEqual([spectra], spectra_plt:modules(BeamsPlt)),
-    ?assertMatch({error, {beam_extract_failed, _, _}}, spectra_plt:from_beams(["/bad.beam", BeamFile])),
+    {ok, BeamsPlt} = prisma_plt:from_beams([BeamFile]),
+    ?assertEqual([prisma], prisma_plt:modules(BeamsPlt)),
+    ?assertMatch({error, {beam_extract_failed, _, _}}, prisma_plt:from_beams(["/bad.beam", BeamFile])),
 
-    TmpPltFile = "/tmp/spectra_dev/test_out.splt",
-    {ok, BuiltPlt} = spectra:build_plt([EbinDir], TmpPltFile),
-    ?assert(lists:member(spectra, spectra_plt:modules(BuiltPlt))),
-    ?assertMatch({ok, []}, spectra:analyze_dirs([EbinDir], #{plts => [TmpPltFile]})),
-    ?assertMatch({ok, []}, spectra:analyze_dirs([BeamFile])),
+    TmpPltFile = "/tmp/prisma_dev/test_out.splt",
+    {ok, BuiltPlt} = prisma:build_plt([EbinDir], TmpPltFile),
+    ?assert(lists:member(prisma, prisma_plt:modules(BuiltPlt))),
+    ?assertMatch({ok, []}, prisma:analyze_dirs([EbinDir], #{plts => [TmpPltFile]})),
+    ?assertMatch({ok, []}, prisma:analyze_dirs([BeamFile])),
     file:delete(TmpPltFile),
 
-    ?assertMatch({error, _}, spectra_plt:load("/nonexistent.splt")),
-    ?assertEqual({error, invalid_plt_magic}, spectra_plt:decode(<<"bad">>)),
-    BadRecordBin = <<?SPECTRA_PLT_MAGIC, (term_to_binary({not_a_plt}))/binary>>,
-    ?assertEqual({error, invalid_plt_record}, spectra_plt:decode(BadRecordBin)).
+    ?assertMatch({error, _}, prisma_plt:load("/nonexistent.splt")),
+    ?assertEqual({error, invalid_plt_magic}, prisma_plt:decode(<<"bad">>)),
+    BadRecordBin = <<?PRISMA_PLT_MAGIC, (term_to_binary({not_a_plt}))/binary>>,
+    ?assertEqual({error, invalid_plt_record}, prisma_plt:decode(BadRecordBin)).
 
 elixir_module_detection_test() ->
-    MixBeam = code:where_is_file("Elixir.Mix.Tasks.Spectra.beam"),
+    MixBeam = code:where_is_file("Elixir.Mix.Tasks.Prisma.beam"),
     ?assert(is_list(MixBeam)),
-    {ok, Summary} = spectra_abstract:extract_beam(MixBeam),
-    ?assertEqual('Elixir.Mix.Tasks.Spectra', Summary#module_summary.module),
+    {ok, Summary} = prisma_abstract:extract_beam(MixBeam),
+    ?assertEqual('Elixir.Mix.Tasks.Prisma', Summary#module_summary.module),
     ?assertEqual(elixir, Summary#module_summary.language),
-    ?assertEqual(elixir, spectra_abstract:detect_language(foo, {debug_info_v1, elixir_erl, none})),
-    ?assertEqual(erlang, spectra_abstract:detect_language(foo, missing_chunk)).
+    ?assertEqual(elixir, prisma_abstract:detect_language(foo, {debug_info_v1, elixir_erl, none})),
+    ?assertEqual(erlang, prisma_abstract:detect_language(foo, missing_chunk)).
 
 gradual_spec_and_checker_compatibility_test() ->
     Forms = [
@@ -119,17 +119,17 @@ gradual_spec_and_checker_compatibility_test() ->
         ]}
     ],
     {ok, sample_specs, BeamBin} = compile:forms(Forms, [debug_info]),
-    {ok, Warnings} = spectra:analyze_beams([BeamBin], #{}),
-    ?assertMatch([#spectra_warning{kind = gradual_mismatch, mfa = {sample_specs, broken, 0}}], Warnings),
-    Formatted = spectra_checker:format_warning(hd(Warnings)),
+    {ok, Warnings} = prisma:analyze_beams([BeamBin], #{}),
+    ?assertMatch([#prisma_warning{kind = gradual_mismatch, mfa = {sample_specs, broken, 0}}], Warnings),
+    Formatted = prisma_checker:format_warning(hd(Warnings)),
     ?assert(is_binary(Formatted)),
 
-    {ok, Summary} = spectra_abstract:extract_beam(BeamBin),
-    ?assertEqual([], spectra_checker:check_module(Summary, spectra_plt:new(), #{mode => discrepancy})),
-    ?assertMatch([_], spectra_checker:check_module(Summary, spectra_plt:new())).
+    {ok, Summary} = prisma_abstract:extract_beam(BeamBin),
+    ?assertEqual([], prisma_checker:check_module(Summary, prisma_plt:new(), #{mode => discrepancy})),
+    ?assertMatch([_], prisma_checker:check_module(Summary, prisma_plt:new())).
 
 warning_formats_human_oneline_json_and_color_test() ->
-    W1 = #spectra_warning{
+    W1 = #prisma_warning{
         kind = gradual_mismatch,
         mfa = {'Elixir.Dymmer.Trace', trace, 3},
         line = 53,
@@ -140,7 +140,7 @@ warning_formats_human_oneline_json_and_color_test() ->
         actual = integer,
         file = "/Users/manuel/dymmer/lib/trace.ex"
     },
-    W2 = #spectra_warning{
+    W2 = #prisma_warning{
         kind = gradual_mismatch,
         mfa = {'Elixir.DymmerWeb.Api', create, 2},
         line = 39,
@@ -150,7 +150,7 @@ warning_formats_human_oneline_json_and_color_test() ->
     },
 
     %% Human without color
-    HumanNoColor = spectra_checker:format_warnings([W1, W2], #{format => human, color => never}),
+    HumanNoColor = prisma_checker:format_warnings([W1, W2], #{format => human, color => never}),
     ?assertNot(binary:match(HumanNoColor, <<"\e[">>) =/= nomatch),
     ?assert(binary:match(HumanNoColor, <<"Dymmer.Trace:trace/3 (line 53)">>) =/= nomatch),
     ?assert(binary:match(HumanNoColor, <<"/Users/manuel/dymmer/lib/trace.ex:53">>) =/= nomatch),
@@ -159,17 +159,17 @@ warning_formats_human_oneline_json_and_color_test() ->
     ?assert(binary:match(HumanNoColor, <<"Declared:  :ok | :error">>) =/= nomatch),
 
     %% Human with color
-    HumanColor = spectra_checker:format_warnings([W1], #{format => human, color => always}),
+    HumanColor = prisma_checker:format_warnings([W1], #{format => human, color => always}),
     ?assert(binary:match(HumanColor, <<"\e[">>) =/= nomatch),
     ?assert(binary:match(HumanColor, <<"\e[2m\e[90m/Users/manuel/dymmer/lib/trace.ex:53\e[0m">>) =/= nomatch),
 
     %% Oneline
-    OneLine = spectra_checker:format_warnings([W1, W2], #{format => oneline, color => never}),
+    OneLine = prisma_checker:format_warnings([W1, W2], #{format => oneline, color => never}),
     ?assert(binary:match(OneLine, <<"/Users/manuel/dymmer/lib/trace.ex:53: [gradual_mismatch] Dymmer.Trace:trace/3:">>) =/= nomatch),
     ?assert(binary:match(OneLine, <<"DymmerWeb.Api:39: [gradual_mismatch] DymmerWeb.Api:create/2:">>) =/= nomatch),
 
     %% JSON
-    JsonBin = spectra_checker:format_warnings([W1, W2], #{format => json}),
+    JsonBin = prisma_checker:format_warnings([W1, W2], #{format => json}),
     ?assert(binary:match(JsonBin, <<"\"kind\": \"gradual_mismatch\"">>) =/= nomatch),
     ?assert(binary:match(JsonBin, <<"\"module\": \"Dymmer.Trace\"">>) =/= nomatch),
     ?assert(binary:match(JsonBin, <<"\"file\": \"/Users/manuel/dymmer/lib/trace.ex\"">>) =/= nomatch),
@@ -177,20 +177,20 @@ warning_formats_human_oneline_json_and_color_test() ->
     ?assert(binary:match(JsonBin, <<"\"actual\": \"integer()\"">>) =/= nomatch),
 
     %% CLI check options parsing
-    ParsedOpts = spectra:parse_check_opts(["--format", "json", "--no-color", "--plt", "test.splt", "my_ebin"]),
+    ParsedOpts = prisma:parse_check_opts(["--format", "json", "--no-color", "--plt", "test.splt", "my_ebin"]),
     ?assertEqual(json, maps:get(format, ParsedOpts)),
     ?assertEqual(never, maps:get(color, ParsedOpts)),
     ?assertEqual(["test.splt"], maps:get(plts, ParsedOpts)),
     ?assertEqual(["my_ebin"], maps:get(targets, ParsedOpts)),
 
     %% Mix task parsing
-    MixOpts = 'Elixir.Mix.Tasks.Spectra':parse_args([<<"--format">>, <<"oneline">>, <<"--no-color">>, <<"--mode">>, <<"gradual">>, <<"--plt">>, <<"extra.splt">>]),
+    MixOpts = 'Elixir.Mix.Tasks.Prisma':parse_args([<<"--format">>, <<"oneline">>, <<"--no-color">>, <<"--mode">>, <<"gradual">>, <<"--plt">>, <<"extra.splt">>]),
     ?assertEqual(oneline, maps:get(format, MixOpts)),
     ?assertEqual(never, maps:get(color, MixOpts)),
     ?assertEqual(gradual, maps:get(mode, MixOpts)),
     ?assertEqual(["extra.splt"], maps:get(plts, MixOpts)),
 
-    MixConfig = 'Elixir.Mix.Tasks.Spectra':parse_mix_config([
+    MixConfig = 'Elixir.Mix.Tasks.Prisma':parse_mix_config([
         {mode, gradual},
         {format, json},
         {oxbow, false},
@@ -203,13 +203,13 @@ warning_formats_human_oneline_json_and_color_test() ->
     ?assertEqual(never, maps:get(color, MixConfig)),
     ?assertEqual(["mix.splt"], maps:get(plts, MixConfig)),
 
-    Attrs = 'Elixir.Mix.Tasks.Spectra':'__info__'(attributes),
+    Attrs = 'Elixir.Mix.Tasks.Prisma':'__info__'(attributes),
     ?assert(lists:member({behaviour, ['Elixir.Mix.Task']}, Attrs)),
     ?assertMatch({shortdoc, [_]}, lists:keyfind(shortdoc, 1, Attrs)),
-    ?assertEqual(false, 'Elixir.Mix.Tasks.Spectra':'__mix_recompile__?'()),
+    ?assertEqual(false, 'Elixir.Mix.Tasks.Prisma':'__mix_recompile__?'()),
 
     %% Rebar3 provider parsing & formatting
-    RebarCli = spectra_prv:parse_cli_args([
+    RebarCli = prisma_prv:parse_cli_args([
         {format, "oneline"},
         {format, json},
         {mode, "discrepancy"},
@@ -231,7 +231,7 @@ warning_formats_human_oneline_json_and_color_test() ->
     ?assertEqual(true, maps:get(oxbow, RebarCli)),
     ?assertEqual(["rebar.splt", "rebar2.splt"], maps:get(plts, RebarCli)),
 
-    RebarConfig = spectra_prv:parse_config_opts([
+    RebarConfig = prisma_prv:parse_config_opts([
         {format, json},
         {format, "human"},
         {mode, gradual},
@@ -247,8 +247,8 @@ warning_formats_human_oneline_json_and_color_test() ->
     ?assertEqual(true, maps:get(oxbow, RebarConfig)),
     ?assertEqual(["cfg.splt", "extra_cfg.splt"], maps:get(plts, RebarConfig)),
 
-    ?assert(is_list(spectra_prv:format_error({warnings_found, 4}))),
-    ?assert(is_list(spectra_prv:format_error(some_failure))),
+    ?assert(is_list(prisma_prv:format_error({warnings_found, 4}))),
+    ?assert(is_list(prisma_prv:format_error(some_failure))),
     case code:ensure_loaded(rebar_state) of
         {module, rebar_state} ->
             State0 = case erlang:function_exported(rebar_state, new, 0) of
@@ -259,8 +259,8 @@ warning_formats_human_oneline_json_and_color_test() ->
                         false -> rebar_state:new([], [], ".")
                     end
             end,
-            ?assertMatch({ok, _}, spectra_prv:init(State0)),
-            ?assertMatch({ok, _}, spectra_prv:do(State0));
+            ?assertMatch({ok, _}, prisma_prv:init(State0)),
+            ?assertMatch({ok, _}, prisma_prv:do(State0));
         _ ->
-            ?assertEqual({ok, dummy_state}, spectra_prv:init(dummy_state))
+            ?assertEqual({ok, dummy_state}, prisma_prv:init(dummy_state))
     end.

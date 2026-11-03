@@ -1,4 +1,4 @@
--module(spectra_infer_patterns_tests).
+-module(prisma_infer_patterns_tests).
 
 -include_lib("eunit/include/eunit.hrl").
 
@@ -9,7 +9,7 @@ gradual_warnings(Src) ->
     {ok, Tokens, _} = erl_scan:string("-module(pat_sample).\n" ++ Src),
     Forms = parse(Tokens),
     {ok, pat_sample, Beam} = compile:forms(Forms, [debug_info]),
-    {ok, Warnings} = spectra:analyze_beams([Beam], #{mode => hybrid}),
+    {ok, Warnings} = prisma:analyze_beams([Beam], #{mode => hybrid}),
     Warnings.
 
 parse(Tokens) ->

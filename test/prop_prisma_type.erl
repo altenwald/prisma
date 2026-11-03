@@ -1,17 +1,17 @@
-%% PropEr properties for the type algebra of `spectra_type`.
+%% PropEr properties for the type algebra of `prisma_type`.
 %%
 %% The oracle is semantic: `member/2` decides whether a concrete Erlang term belongs to a ground type, and the
 %% generators build terms of a given type. Types are ground and free of `any` (which is consistent with everything by
 %% design, so set inclusion says nothing about it); maps, funs, records and variables are not generated yet.
--module(prop_spectra_type).
+-module(prop_prisma_type).
 
 -include_lib("proper/include/proper.hrl").
 
 %% -------------------------------------------------------------------------
-%% Semantic oracle (shared: test/spectra_oracle.erl)
+%% Semantic oracle (shared: test/prisma_oracle.erl)
 %% -------------------------------------------------------------------------
 
-member(V, T) -> spectra_oracle:member(V, T).
+member(V, T) -> prisma_oracle:member(V, T).
 
 %% -------------------------------------------------------------------------
 %% Generators
@@ -100,37 +100,37 @@ prop_generators_agree_with_oracle() ->
     ?FORALL({T, V}, inhabited(), member(V, T)).
 
 prop_subtype_is_reflexive() ->
-    ?FORALL(T, stype(), spectra_type:consistent_subtype(T, T)).
+    ?FORALL(T, stype(), prisma_type:consistent_subtype(T, T)).
 
 %% If A is consistent-subtype of B, every value of A is a value of B (types are free of `any`).
 prop_subtype_is_sound() ->
     ?FORALL({{A, V}, B}, {inhabited(), stype()},
-        ?IMPLIES(spectra_type:consistent_subtype(A, B), member(V, B))).
+        ?IMPLIES(prisma_type:consistent_subtype(A, B), member(V, B))).
 
 prop_join_is_an_upper_bound() ->
     ?FORALL({{A, V}, B}, {inhabited(), stype()},
-        member(V, spectra_type:join(A, B)) andalso member(V, spectra_type:join(B, A))).
+        member(V, prisma_type:join(A, B)) andalso member(V, prisma_type:join(B, A))).
 
 prop_meet_is_sound() ->
     ?FORALL({{A, V}, B}, {inhabited(), stype()},
-        ?IMPLIES(member(V, spectra_type:meet(A, B)), member(V, B))).
+        ?IMPLIES(member(V, prisma_type:meet(A, B)), member(V, B))).
 
 prop_meet_keeps_common_values() ->
     ?FORALL({{A, V}, B}, {inhabited(), stype()},
-        ?IMPLIES(member(V, B), member(V, spectra_type:meet(A, B)))).
+        ?IMPLIES(member(V, B), member(V, prisma_type:meet(A, B)))).
 
 prop_normalize_union_keeps_members() ->
     ?FORALL({{A, V}, B}, {inhabited(), stype()},
-        member(V, spectra_type:normalize_union([A, B]))).
+        member(V, prisma_type:normalize_union([A, B]))).
 
 prop_normalize_union_is_idempotent() ->
     ?FORALL(Ts, resize(4, list(stype())),
         begin
-            N = spectra_type:normalize_union(Ts),
-            N =:= spectra_type:normalize_union([N])
+            N = prisma_type:normalize_union(Ts),
+            N =:= prisma_type:normalize_union([N])
         end).
 
 %% No false mismatch: when B contains A by construction, A must be accepted where B is expected.
 prop_widening_is_accepted() ->
     ?FORALL({{A, V}, B}, ?LET(AV, inhabited(), {AV, widen(element(1, AV))}),
-        member(V, B) andalso spectra_type:consistent_subtype(A, B)).
+        member(V, B) andalso prisma_type:consistent_subtype(A, B)).

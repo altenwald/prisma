@@ -1,48 +1,48 @@
--module(spectra_infer_tests).
+-module(prisma_infer_tests).
 
 -include_lib("eunit/include/eunit.hrl").
--include("spectra.hrl").
+-include("prisma.hrl").
 
 type_meet_test() ->
-    ?assertEqual(integer, spectra_type:meet(any, integer)),
-    ?assertEqual(none, spectra_type:meet(none, integer)),
-    ?assertEqual(pos_integer, spectra_type:meet(number, pos_integer)),
-    ?assertEqual(pos_integer, spectra_type:meet(integer, pos_integer)),
-    ?assertEqual({int_lit, 5}, spectra_type:meet(pos_integer, {int_lit, 5})),
-    ?assertEqual(none, spectra_type:meet(pos_integer, {int_lit, -1})),
-    ?assertEqual(none, spectra_type:meet(neg_integer, {int_lit, 0})),
-    ?assertEqual({int_lit, 0}, spectra_type:meet(non_neg_integer, {int_lit, 0})),
-    ?assertEqual({int_range, 5, 10}, spectra_type:meet({int_range, 1, 10}, {int_range, 5, 20})),
-    ?assertEqual({int_lit, 5}, spectra_type:meet({int_range, 1, 5}, {int_range, 5, 10})),
-    ?assertEqual(none, spectra_type:meet({int_range, 1, 4}, {int_range, 5, 10})),
-    ?assertEqual({atom_lit, true}, spectra_type:meet(boolean, {atom_lit, true})),
-    ?assertEqual(none, spectra_type:meet(boolean, {atom_lit, ok})),
-    ?assertEqual({nonempty_list, integer}, spectra_type:meet({list, number}, {nonempty_list, integer})),
-    ?assertEqual(nil, spectra_type:meet({list, integer}, {list, atom})),
-    ?assertEqual(none, spectra_type:meet({nonempty_list, integer}, {nonempty_list, atom})),
+    ?assertEqual(integer, prisma_type:meet(any, integer)),
+    ?assertEqual(none, prisma_type:meet(none, integer)),
+    ?assertEqual(pos_integer, prisma_type:meet(number, pos_integer)),
+    ?assertEqual(pos_integer, prisma_type:meet(integer, pos_integer)),
+    ?assertEqual({int_lit, 5}, prisma_type:meet(pos_integer, {int_lit, 5})),
+    ?assertEqual(none, prisma_type:meet(pos_integer, {int_lit, -1})),
+    ?assertEqual(none, prisma_type:meet(neg_integer, {int_lit, 0})),
+    ?assertEqual({int_lit, 0}, prisma_type:meet(non_neg_integer, {int_lit, 0})),
+    ?assertEqual({int_range, 5, 10}, prisma_type:meet({int_range, 1, 10}, {int_range, 5, 20})),
+    ?assertEqual({int_lit, 5}, prisma_type:meet({int_range, 1, 5}, {int_range, 5, 10})),
+    ?assertEqual(none, prisma_type:meet({int_range, 1, 4}, {int_range, 5, 10})),
+    ?assertEqual({atom_lit, true}, prisma_type:meet(boolean, {atom_lit, true})),
+    ?assertEqual(none, prisma_type:meet(boolean, {atom_lit, ok})),
+    ?assertEqual({nonempty_list, integer}, prisma_type:meet({list, number}, {nonempty_list, integer})),
+    ?assertEqual(nil, prisma_type:meet({list, integer}, {list, atom})),
+    ?assertEqual(none, prisma_type:meet({nonempty_list, integer}, {nonempty_list, atom})),
     ?assertEqual(
         {tuple, [{atom_lit, ok}, integer]},
-        spectra_type:meet({tuple, [atom, number]}, {tuple, [{atom_lit, ok}, integer]})
+        prisma_type:meet({tuple, [atom, number]}, {tuple, [{atom_lit, ok}, integer]})
     ),
-    ?assertEqual(none, spectra_type:meet({tuple, [atom]}, {tuple, [atom, integer]})),
+    ?assertEqual(none, prisma_type:meet({tuple, [atom]}, {tuple, [atom, integer]})),
     ?assertEqual(
         integer,
-        spectra_type:meet({union, [integer, atom]}, {union, [number, {binary, 0, 8}]})
+        prisma_type:meet({union, [integer, atom]}, {union, [number, {binary, 0, 8}]})
     ),
     ?assertEqual(
         {map, [{exact, {atom_lit, k}, integer}]},
-        spectra_type:meet(any_map, {map, [{exact, {atom_lit, k}, integer}]})
+        prisma_type:meet(any_map, {map, [{exact, {atom_lit, k}, integer}]})
     ),
     ?assertEqual(
         none,
-        spectra_type:meet(
+        prisma_type:meet(
             {map, [{exact, {atom_lit, k}, integer}]},
             {map, [{exact, {atom_lit, k}, atom}]}
         )
     ),
     ?assertEqual(
         {fun_type, [integer], atom},
-        spectra_type:meet({fun_type, [number], atom}, {fun_type, [integer], any})
+        prisma_type:meet({fun_type, [number], atom}, {fun_type, [integer], any})
     ).
 
 success_type_inference_and_propagation_test() ->
@@ -79,7 +79,7 @@ success_type_inference_and_propagation_test() ->
         ]}
     ],
     {ok, infer_sample, BeamBin} = compile:forms(Forms, [debug_info]),
-    {ok, Summary} = spectra_abstract:extract_beam(BeamBin),
+    {ok, Summary} = prisma_abstract:extract_beam(BeamBin),
     Funcs = Summary#module_summary.functions,
 
     AddOne = maps:get({infer_sample, add_one, 1}, Funcs),
@@ -183,8 +183,8 @@ discrepancy_detection_no_false_positives_test() ->
         ]}
     ],
     {ok, discrepancy_sample, BeamBin} = compile:forms(Forms, [debug_info]),
-    {ok, Warnings} = spectra:analyze_beams([BeamBin], #{mode => discrepancy}),
-    WarningMFAs = [{W#spectra_warning.kind, W#spectra_warning.mfa} || W <- Warnings],
+    {ok, Warnings} = prisma:analyze_beams([BeamBin], #{mode => discrepancy}),
+    WarningMFAs = [{W#prisma_warning.kind, W#prisma_warning.mfa} || W <- Warnings],
     ?assert(lists:member({discrepancy, {discrepancy_sample, bad_arith, 0}}, WarningMFAs)),
     ?assert(lists:member({discrepancy, {discrepancy_sample, bad_match, 0}}, WarningMFAs)),
     ?assert(lists:member({discrepancy, {discrepancy_sample, bad_local_call, 0}}, WarningMFAs)),
@@ -222,22 +222,22 @@ cross_module_splt_discrepancy_test() ->
     ],
     {ok, dep_mod, DepBeam} = compile:forms(DepForms, [debug_info]),
     {ok, caller_mod, CallerBeam} = compile:forms(CallerForms, [debug_info]),
-    TmpDepPlt = "/tmp/spectra_dev/dep_mod.splt",
-    {ok, DepPlt} = spectra_plt:from_beams([DepBeam]),
-    ok = spectra_plt:save(DepPlt, TmpDepPlt),
+    TmpDepPlt = "/tmp/prisma_dev/dep_mod.splt",
+    {ok, DepPlt} = prisma_plt:from_beams([DepBeam]),
+    ok = prisma_plt:save(DepPlt, TmpDepPlt),
 
-    {ok, Warnings} = spectra:analyze_beams([CallerBeam], #{plts => [TmpDepPlt], mode => discrepancy}),
+    {ok, Warnings} = prisma:analyze_beams([CallerBeam], #{plts => [TmpDepPlt], mode => discrepancy}),
     file:delete(TmpDepPlt),
-    ?assertMatch([#spectra_warning{kind = discrepancy, mfa = {caller_mod, bad_remote, 0}}], Warnings).
+    ?assertMatch([#prisma_warning{kind = discrepancy, mfa = {caller_mod, bad_remote, 0}}], Warnings).
 
 additional_patterns_guards_and_bifs_test() ->
-    ?assertEqual(float, spectra_type:meet(float, float)),
-    ?assertEqual(none, spectra_type:meet(float, integer)),
-    ?assertEqual({binary, 8, 8}, spectra_type:meet({binary, 0, 8}, {binary, 8, 1})),
-    ?assertEqual({record, r, []}, spectra_type:meet(any_tuple, {record, r, []})),
-    ?assertEqual({record, r, []}, spectra_type:meet({record, r, []}, any_tuple)),
-    ?assertEqual({fun_type, [], ok}, spectra_type:meet(any_fun, {fun_type, [], ok})),
-    ?assertEqual({fun_any_args, ok}, spectra_type:meet(any_fun, {fun_any_args, ok})),
+    ?assertEqual(float, prisma_type:meet(float, float)),
+    ?assertEqual(none, prisma_type:meet(float, integer)),
+    ?assertEqual({binary, 8, 8}, prisma_type:meet({binary, 0, 8}, {binary, 8, 1})),
+    ?assertEqual({record, r, []}, prisma_type:meet(any_tuple, {record, r, []})),
+    ?assertEqual({record, r, []}, prisma_type:meet({record, r, []}, any_tuple)),
+    ?assertEqual({fun_type, [], ok}, prisma_type:meet(any_fun, {fun_type, [], ok})),
+    ?assertEqual({fun_any_args, ok}, prisma_type:meet(any_fun, {fun_any_args, ok})),
 
     Forms = [
         {attribute, 1, module, extra_infer},
@@ -283,7 +283,7 @@ additional_patterns_guards_and_bifs_test() ->
         ]}
     ],
     {ok, extra_infer, BeamBin} = compile:forms(Forms, [debug_info]),
-    {ok, Summary} = spectra_abstract:extract_beam(BeamBin),
+    {ok, Summary} = prisma_abstract:extract_beam(BeamBin),
     FailsContract = maps:get({extra_infer, always_fails, 0}, Summary#module_summary.functions),
     ?assertEqual({fun_type, [], none}, FailsContract#func_contract.inferred_type).
 
@@ -294,8 +294,8 @@ inferred_return(Src) ->
     {ok, Toks, _} = erl_scan:string(Text),
     Forms = split_forms(Toks, [], []),
     {ok, unop_sample, Beam} = compile:forms(Forms, [debug_info, binary]),
-    {ok, Plt} = spectra_plt:from_beams([Beam]),
-    #module_summary{functions = Funcs} = maps:get(unop_sample, Plt#spectra_plt.modules),
+    {ok, Plt} = prisma_plt:from_beams([Beam]),
+    #module_summary{functions = Funcs} = maps:get(unop_sample, Plt#prisma_plt.modules),
     {fun_type, _Args, Ret} = (maps:get({unop_sample, f, 1}, Funcs))#func_contract.inferred_type,
     Ret.
 
@@ -314,34 +314,34 @@ unary_minus_negates_literals_test() ->
 
 unary_minus_on_each_branch_test() ->
     Ret = inferred_return("f(B) -> case B of true -> -1; false -> -2 end."),
-    ?assert(spectra_oracle:member(-1, Ret)),
-    ?assert(spectra_oracle:member(-2, Ret)),
-    ?assertNot(spectra_oracle:member(1, Ret)),
-    ?assertNot(spectra_oracle:member(2, Ret)).
+    ?assert(prisma_oracle:member(-1, Ret)),
+    ?assert(prisma_oracle:member(-2, Ret)),
+    ?assertNot(prisma_oracle:member(1, Ret)),
+    ?assertNot(prisma_oracle:member(2, Ret)).
 
 negative_literal_clauses_are_reachable_test() ->
     Text = "-module(unop_reach).\n-export([f/0, g/0]).\nf() -> -1.\ng() -> case f() of -1 -> ok end.\n",
     {ok, Toks, _} = erl_scan:string(Text),
     {ok, unop_reach, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
-    ?assertEqual({ok, []}, spectra:analyze_beams([Beam], #{mode => discrepancy, oxbow => false})).
+    ?assertEqual({ok, []}, prisma:analyze_beams([Beam], #{mode => discrepancy, oxbow => false})).
 
 negate_type_test_() ->
     [
-        ?_assertEqual({int_lit, -5}, spectra_infer:negate_type({int_lit, 5})),
-        ?_assertEqual({int_range, -10, -2}, spectra_infer:negate_type({int_range, 2, 10})),
-        ?_assertEqual({int_range, -3, pos_inf}, spectra_infer:negate_type({int_range, neg_inf, 3})),
-        ?_assertEqual({int_range, neg_inf, 3}, spectra_infer:negate_type({int_range, -3, pos_inf})),
-        ?_assertEqual(neg_integer, spectra_infer:negate_type(pos_integer)),
-        ?_assertEqual(pos_integer, spectra_infer:negate_type(neg_integer)),
-        ?_assertEqual({int_range, neg_inf, 0}, spectra_infer:negate_type(non_neg_integer)),
-        ?_assertEqual(integer, spectra_infer:negate_type(integer)),
-        ?_assertEqual(float, spectra_infer:negate_type(float)),
-        ?_assertEqual(number, spectra_infer:negate_type(number)),
-        ?_assertEqual(none, spectra_infer:negate_type(none)),
+        ?_assertEqual({int_lit, -5}, prisma_infer:negate_type({int_lit, 5})),
+        ?_assertEqual({int_range, -10, -2}, prisma_infer:negate_type({int_range, 2, 10})),
+        ?_assertEqual({int_range, -3, pos_inf}, prisma_infer:negate_type({int_range, neg_inf, 3})),
+        ?_assertEqual({int_range, neg_inf, 3}, prisma_infer:negate_type({int_range, -3, pos_inf})),
+        ?_assertEqual(neg_integer, prisma_infer:negate_type(pos_integer)),
+        ?_assertEqual(pos_integer, prisma_infer:negate_type(neg_integer)),
+        ?_assertEqual({int_range, neg_inf, 0}, prisma_infer:negate_type(non_neg_integer)),
+        ?_assertEqual(integer, prisma_infer:negate_type(integer)),
+        ?_assertEqual(float, prisma_infer:negate_type(float)),
+        ?_assertEqual(number, prisma_infer:negate_type(number)),
+        ?_assertEqual(none, prisma_infer:negate_type(none)),
         ?_assertEqual(
             [{int_lit, -2}, {int_lit, -1}],
             begin
-                {union, Ms} = spectra_type:normalize_union([spectra_infer:negate_type(T) || T <- [{int_lit, 2}, {int_lit, 1}]]),
+                {union, Ms} = prisma_type:normalize_union([prisma_infer:negate_type(T) || T <- [{int_lit, 2}, {int_lit, 1}]]),
                 lists:sort(Ms)
             end
         )
@@ -356,14 +356,14 @@ improper_sample(Src) ->
     Beam.
 
 cell_warnings(Src) ->
-    {ok, Ws} = spectra:analyze_beams([improper_sample(Src)], #{mode => discrepancy, oxbow => false}),
-    [{K, L} || #spectra_warning{kind = K, line = L} <- Ws].
+    {ok, Ws} = prisma:analyze_beams([improper_sample(Src)], #{mode => discrepancy, oxbow => false}),
+    [{K, L} || #prisma_warning{kind = K, line = L} <- Ws].
 
 cell_with_integer_tail_is_not_a_proper_list_test() ->
     Ret = inferred_return("f(_) -> [1 | 2]."),
-    ?assertNot(spectra_oracle:member([1 | 2], {list, any}) andalso spectra_oracle:member(Ret, {list, any})),
-    ?assert(spectra_oracle:member([1 | 2], Ret)),
-    ?assertNot(spectra_oracle:member(foo, Ret)).
+    ?assertNot(prisma_oracle:member([1 | 2], {list, any}) andalso prisma_oracle:member(Ret, {list, any})),
+    ?assert(prisma_oracle:member([1 | 2], Ret)),
+    ?assertNot(prisma_oracle:member(foo, Ret)).
 
 cell_with_list_tail_stays_a_proper_list_test() ->
     ?assertEqual({nonempty_list, {int_lit, 1}}, inferred_return("f(_) -> [1 | [1]].")),
@@ -381,17 +381,17 @@ tail_of_unknown_term_is_unknown_test() ->
 type_algebra_improper_vs_list_test_() ->
     Impr = {improper_list, integer, integer},
     [
-        ?_assertEqual(nil, spectra_type:meet(Impr, nil)),
-        ?_assertEqual(nil, spectra_type:meet(nil, Impr)),
-        ?_assertEqual({list, integer}, spectra_type:meet(Impr, {list, integer})),
-        ?_assertEqual({list, integer}, spectra_type:meet({list, integer}, Impr)),
-        ?_assertNotEqual(none, spectra_type:meet(Impr, {nonempty_list, integer})),
-        ?_assertEqual(nil, spectra_type:meet(Impr, {list, atom})),
-        ?_assertEqual(none, spectra_type:meet(Impr, {nonempty_list, atom})),
-        ?_assert(spectra_type:consistent_subtype({list, integer}, Impr)),
-        ?_assert(spectra_type:consistent_subtype({nonempty_list, integer}, Impr)),
-        ?_assertNot(spectra_type:consistent_subtype(Impr, {list, integer})),
-        ?_assert(spectra_type:consistent_subtype({improper_list, integer, any}, {list, integer}))
+        ?_assertEqual(nil, prisma_type:meet(Impr, nil)),
+        ?_assertEqual(nil, prisma_type:meet(nil, Impr)),
+        ?_assertEqual({list, integer}, prisma_type:meet(Impr, {list, integer})),
+        ?_assertEqual({list, integer}, prisma_type:meet({list, integer}, Impr)),
+        ?_assertNotEqual(none, prisma_type:meet(Impr, {nonempty_list, integer})),
+        ?_assertEqual(nil, prisma_type:meet(Impr, {list, atom})),
+        ?_assertEqual(none, prisma_type:meet(Impr, {nonempty_list, atom})),
+        ?_assert(prisma_type:consistent_subtype({list, integer}, Impr)),
+        ?_assert(prisma_type:consistent_subtype({nonempty_list, integer}, Impr)),
+        ?_assertNot(prisma_type:consistent_subtype(Impr, {list, integer})),
+        ?_assert(prisma_type:consistent_subtype({improper_list, integer, any}, {list, integer}))
     ].
 
 cons_chain_does_not_nest_test() ->
@@ -399,7 +399,7 @@ cons_chain_does_not_nest_test() ->
     ?assertMatch({improper_list, _, any}, inferred_return("f(T) -> [1, 2, 3 | T].")),
     {improper_list, Elem, any} = inferred_return("f(T) -> [1, 2, 3 | T]."),
     ?assertNot(is_tuple(Elem) andalso element(1, Elem) =:= improper_list),
-    ?assert(spectra_oracle:member(1, Elem) andalso spectra_oracle:member(3, Elem)).
+    ?assert(prisma_oracle:member(1, Elem) andalso prisma_oracle:member(3, Elem)).
 
 unknown_tail_is_not_assumed_to_be_a_list_test() ->
     %% [H | T] with T unknown: T may be anything, so a clause that needs an integer tail is reachable
@@ -409,8 +409,8 @@ unknown_tail_is_not_assumed_to_be_a_list_test() ->
 %% does not decide. (They used to be read as `and` / `or`, so a non-boolean right operand "failed".)
 
 short_circuit_warnings(Src) ->
-    {ok, Ws} = spectra:analyze_beams([improper_sample(Src)], #{mode => discrepancy, oxbow => false}),
-    [{K, L} || #spectra_warning{kind = K, line = L} <- Ws].
+    {ok, Ws} = prisma:analyze_beams([improper_sample(Src)], #{mode => discrepancy, oxbow => false}),
+    [{K, L} || #prisma_warning{kind = K, line = L} <- Ws].
 
 andalso_orelse_accept_a_non_boolean_right_operand_test() ->
     ?assertEqual([], short_circuit_warnings("f(X) -> X > 0 orelse {false, \"negative\"}.\n")),
@@ -422,14 +422,14 @@ andalso_orelse_accept_a_non_boolean_right_operand_test() ->
 
 andalso_orelse_result_is_the_right_operand_or_the_deciding_boolean_test() ->
     AndRet = inferred_return("f(B) -> B andalso 1."),
-    ?assert(spectra_oracle:member(false, AndRet)),
-    ?assert(spectra_oracle:member(1, AndRet)),
-    ?assertNot(spectra_oracle:member(true, AndRet)),
-    ?assertNot(spectra_oracle:member(2, AndRet)),
+    ?assert(prisma_oracle:member(false, AndRet)),
+    ?assert(prisma_oracle:member(1, AndRet)),
+    ?assertNot(prisma_oracle:member(true, AndRet)),
+    ?assertNot(prisma_oracle:member(2, AndRet)),
     OrRet = inferred_return("f(B) -> B orelse {false, 3}."),
-    ?assert(spectra_oracle:member(true, OrRet)),
-    ?assert(spectra_oracle:member({false, 3}, OrRet)),
-    ?assertNot(spectra_oracle:member(false, OrRet)),
+    ?assert(prisma_oracle:member(true, OrRet)),
+    ?assert(prisma_oracle:member({false, 3}, OrRet)),
+    ?assertNot(prisma_oracle:member(false, OrRet)),
     %% both operands boolean: still a boolean
     ?assertEqual(boolean, inferred_return("f(A) when is_boolean(A) -> A andalso (A =:= true).")).
 
@@ -456,9 +456,9 @@ two_module_warnings(CallerSrc, CalleeSrc, Mode) ->
         {ok, _, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
         Beam
     end,
-    {ok, Ws} = spectra:analyze_beams([Compile("ov_caller", CallerSrc), Compile("ov_callee", CalleeSrc)],
+    {ok, Ws} = prisma:analyze_beams([Compile("ov_caller", CallerSrc), Compile("ov_callee", CalleeSrc)],
                                      #{mode => Mode, oxbow => false}),
-    [{K, L} || #spectra_warning{kind = K, line = L} <- Ws].
+    [{K, L} || #prisma_warning{kind = K, line = L} <- Ws].
 
 overloaded_callee() ->
     "-export([g/1, h/2]).\n"
@@ -502,8 +502,8 @@ plain_warnings(Src) ->
     Text = "-module(cmp_sample).\n" ++ Src,
     {ok, Toks, _} = erl_scan:string(Text),
     {ok, cmp_sample, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
-    {ok, Ws} = spectra:analyze_beams([Beam], #{mode => discrepancy, oxbow => false}),
-    [{K, L} || #spectra_warning{kind = K, line = L} <- Ws].
+    {ok, Ws} = prisma:analyze_beams([Beam], #{mode => discrepancy, oxbow => false}),
+    [{K, L} || #prisma_warning{kind = K, line = L} <- Ws].
 
 comparison_with_zero_keeps_floats_test() ->
     ?assertEqual([], plain_warnings("-export([f/1]).\nf(X) when is_float(X) ->\n    case X - 1 of\n        Neg when Neg < 0 -> a;\n        Pos when Pos > 0 -> b;\n        _ -> c\n    end.\n")),
@@ -595,12 +595,12 @@ tuple_that_cannot_be_the_record_is_still_rejected_test() ->
 
 meet_of_a_tuple_and_a_record_test_() ->
     Rec = {record, r, [{a, integer}, {b, atom}]},
-    [?_assertEqual(Rec, spectra_type:meet({tuple, [{atom_lit, r}, integer, atom]}, Rec)),
-     ?_assertEqual(Rec, spectra_type:meet(Rec, {tuple, [{atom_lit, r}, any, any]})),
-     ?_assertEqual(none, spectra_type:meet({tuple, [{atom_lit, s}, integer, atom]}, Rec)),
+    [?_assertEqual(Rec, prisma_type:meet({tuple, [{atom_lit, r}, integer, atom]}, Rec)),
+     ?_assertEqual(Rec, prisma_type:meet(Rec, {tuple, [{atom_lit, r}, any, any]})),
+     ?_assertEqual(none, prisma_type:meet({tuple, [{atom_lit, s}, integer, atom]}, Rec)),
      %% arity and field types are not checked: a spec only lists some of the fields
-     ?_assertEqual(Rec, spectra_type:meet({tuple, [{atom_lit, r}, integer]}, Rec)),
-     ?_assertEqual({record, r, []}, spectra_type:meet({tuple, [{atom_lit, r}, atom, atom]}, {record, r, []}))].
+     ?_assertEqual(Rec, prisma_type:meet({tuple, [{atom_lit, r}, integer]}, Rec)),
+     ?_assertEqual({record, r, []}, prisma_type:meet({tuple, [{atom_lit, r}, atom, atom]}, {record, r, []}))].
 
 %% A BIF with arguments of the wrong type inside a guard makes the guard fail, so the clause can never match.
 
@@ -648,7 +648,7 @@ guards_with_fitting_tests_report_nothing_test() ->
     ?assertEqual([], plain_warnings(Src)).
 
 %% A failure is reported where it is, and only there. The functions that call the one that fails, however many levels up, are not
-%% named: Dialyzer's "no local return" cascade (a warning in every caller, without saying why) is exactly what Spectra must not do.
+%% named: Dialyzer's "no local return" cascade (a warning in every caller, without saying why) is exactly what Prisma must not do.
 
 failure_is_reported_only_where_it_is_test() ->
     Src = "-export([top/0, other/1]).\n"
@@ -682,7 +682,7 @@ a_failing_call_in_a_guard_or_a_nested_construct_does_not_name_its_callers_test()
     %% only the guard test of f/1 is named, not g/1 which calls it
     ?assertEqual([{discrepancy, 3}], plain_warnings(Src)).
 
-%% A call to a function that does not exist in a module Spectra knows is reported; a module it does not know says nothing.
+%% A call to a function that does not exist in a module Prisma knows is reported; a module it does not know says nothing.
 
 missing_callee() ->
     "-export([g/1]).\n-spec g(integer()) -> ok.\ng(_) -> ok.\nhidden() -> ok.\n".
@@ -717,11 +717,11 @@ saved_plt_keeps_contracts_and_drops_the_code_test() ->
     Text = "-module(plt_lean).\n-export([f/1]).\n-spec f(integer()) -> integer().\nf(X) -> X + 1.\n",
     {ok, Toks, _} = erl_scan:string(Text),
     {ok, plt_lean, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
-    {ok, Plt} = spectra_plt:from_beams([Beam]),
-    #module_summary{functions = Before} = maps:get(plt_lean, Plt#spectra_plt.modules),
+    {ok, Plt} = prisma_plt:from_beams([Beam]),
+    #module_summary{functions = Before} = maps:get(plt_lean, Plt#prisma_plt.modules),
     ?assertMatch(#func_contract{clauses = [_ | _]}, maps:get({plt_lean, f, 1}, Before)),
-    {ok, Loaded} = spectra_plt:decode(spectra_plt:encode(Plt)),
-    #module_summary{functions = After} = maps:get(plt_lean, Loaded#spectra_plt.modules),
+    {ok, Loaded} = prisma_plt:decode(prisma_plt:encode(Plt)),
+    #module_summary{functions = After} = maps:get(plt_lean, Loaded#prisma_plt.modules),
     #func_contract{clauses = [], declared_specs = Specs, inferred_type = Inferred, exported = true} = maps:get({plt_lean, f, 1}, After),
     #func_contract{declared_specs = Specs0, inferred_type = Inferred0} = maps:get({plt_lean, f, 1}, Before),
     ?assertEqual(Specs0, Specs),
@@ -755,9 +755,9 @@ mutually_recursive_list_builders_keep_the_type_small_test() ->
 union_tail_with_a_non_list_member_still_gives_an_improper_list_test() ->
     %% g/1 returns [] or an integer: `[H | g()]` may be a proper list or an improper one
     Ret = inferred_return("f(X) -> [a | g(X)].\ng(0) -> [];\ng(_) -> 1.\n"),
-    ?assert(spectra_oracle:member([a], Ret)),
-    ?assert(spectra_oracle:member([a | 1], Ret)),
-    ?assertNot(spectra_oracle:member([a | foo], Ret)).
+    ?assert(prisma_oracle:member([a], Ret)),
+    ?assert(prisma_oracle:member([a | 1], Ret)),
+    ?assertNot(prisma_oracle:member([a | foo], Ret)).
 
 %% The target of a call is an expression too: `(m:f()):g()`, `m:(f())()` and `(f())(X)` hold calls that must be checked.
 
@@ -823,19 +823,19 @@ spec_of_a_dependency_loaded_from_a_plt_is_used_test() ->
         Beam
     end,
     CalleeBeam = Compile("ov_callee", return_callee()),
-    {ok, DepPlt} = spectra_plt:from_beams([CalleeBeam]),
+    {ok, DepPlt} = prisma_plt:from_beams([CalleeBeam]),
     File = "ext_specs_test.splt",
-    ok = file:write_file(File, spectra_plt:encode(DepPlt)),
+    ok = file:write_file(File, prisma_plt:encode(DepPlt)),
     try
         Caller = Compile("ov_caller", "-export([f/0]).\nf() ->\n    {ok, V} = ov_callee:f(),\n    V.\n"),
-        {ok, Ws} = spectra:analyze_beams([Caller], #{plts => [File], mode => discrepancy, oxbow => false}),
-        ?assertEqual([{discrepancy, 4}], [{K, L} || #spectra_warning{kind = K, line = L} <- Ws])
+        {ok, Ws} = prisma:analyze_beams([Caller], #{plts => [File], mode => discrepancy, oxbow => false}),
+        ?assertEqual([{discrepancy, 4}], [{K, L} || #prisma_warning{kind = K, line = L} <- Ws])
     after
         file:delete(File)
     end.
 
 %% A declared return type that names a type of the other module (`-type t() :: ...`, `-spec f() -> t()`) cannot be resolved while the caller
-%% is inferred: it is unknown, not impossible. (Spectra's own code showed it: `unfold_bounded_fun/1` returns `stype()`.)
+%% is inferred: it is unknown, not impossible. (Prisma's own code showed it: `unfold_bounded_fun/1` returns `stype()`.)
 
 named_type_callee() ->
     "-export([f/0, g/0]).\n-type t() :: {ok, integer()} | error.\n"
@@ -868,35 +868,35 @@ case_ret(Body) ->
         {ok, _, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
         Beam
     end,
-    {ok, Plt} = spectra_plt:from_beams([Compile("ov_caller", Caller), Compile("ov_callee", case_negation_callee())]),
-    #module_summary{functions = Funcs} = maps:get(ov_caller, Plt#spectra_plt.modules),
+    {ok, Plt} = prisma_plt:from_beams([Compile("ov_caller", Caller), Compile("ov_callee", case_negation_callee())]),
+    #module_summary{functions = Funcs} = maps:get(ov_caller, Plt#prisma_plt.modules),
     {fun_type, [], Ret} = (maps:get({ov_caller, f, 0}, Funcs))#func_contract.inferred_type,
     Ret.
 
 variable_clause_after_a_covering_clause_is_precise_test() ->
     Ret = case_ret("    case ov_callee:f() of\n        ok -> {ok, 1};\n        Err -> Err\n    end"),
-    ?assert(spectra_oracle:member({ok, 1}, Ret)),
-    ?assert(spectra_oracle:member({error, x}, Ret)),
-    ?assertNot(spectra_oracle:member(ok, Ret)).
+    ?assert(prisma_oracle:member({ok, 1}, Ret)),
+    ?assert(prisma_oracle:member({error, x}, Ret)),
+    ?assertNot(prisma_oracle:member(ok, Ret)).
 
 several_covering_clauses_are_subtracted_test() ->
     Ret = case_ret("    case ov_callee:g() of\n        ok -> 1;\n        {error, _} -> 2;\n        Other -> Other\n    end"),
-    ?assert(spectra_oracle:member(1, Ret)),
-    ?assert(spectra_oracle:member(2, Ret)),
-    ?assert(spectra_oracle:member({badrpc, x}, Ret)),
-    ?assertNot(spectra_oracle:member(ok, Ret)),
-    ?assertNot(spectra_oracle:member({error, x}, Ret)).
+    ?assert(prisma_oracle:member(1, Ret)),
+    ?assert(prisma_oracle:member(2, Ret)),
+    ?assert(prisma_oracle:member({badrpc, x}, Ret)),
+    ?assertNot(prisma_oracle:member(ok, Ret)),
+    ?assertNot(prisma_oracle:member({error, x}, Ret)).
 
 a_clause_with_a_guard_subtracts_nothing_test() ->
     Ret = case_ret("    case ov_callee:f() of\n        ok when 1 > 2 -> 1;\n        Other -> Other\n    end"),
-    ?assert(spectra_oracle:member(ok, Ret)),
-    ?assert(spectra_oracle:member({error, x}, Ret)).
+    ?assert(prisma_oracle:member(ok, Ret)),
+    ?assert(prisma_oracle:member({error, x}, Ret)).
 
 a_clause_that_covers_only_part_subtracts_only_that_part_test() ->
     Ret = case_ret("    case ov_callee:g() of\n        {error, not_found} -> 1;\n        Other -> Other\n    end"),
     %% {error, atom()} is not covered by {error, not_found}: it stays
-    ?assert(spectra_oracle:member({error, other}, Ret)),
-    ?assert(spectra_oracle:member(ok, Ret)).
+    ?assert(prisma_oracle:member({error, other}, Ret)),
+    ?assert(prisma_oracle:member(ok, Ret)).
 
 catch_all_after_exhaustive_clauses_stays_quiet_test() ->
     ?assertEqual([], two_module_warnings("-export([f/0]).\nf() ->\n    case ov_callee:f() of\n        ok -> 1;\n        {error, _} -> 2;\n        _ -> 3\n    end.\n",
@@ -907,26 +907,26 @@ catch_all_after_exhaustive_clauses_stays_quiet_test() ->
 
 a_variable_that_is_already_bound_is_not_a_catch_all_test() ->
     Ret = inferred_return("f(X) ->\n    Y = 1,\n    case X of\n        Y -> ok;\n        _ -> error\n    end.\n"),
-    ?assert(spectra_oracle:member(ok, Ret)),
-    ?assert(spectra_oracle:member(error, Ret)),
+    ?assert(prisma_oracle:member(ok, Ret)),
+    ?assert(prisma_oracle:member(error, Ret)),
     %% and as the head of a function: Checksum is compared, not bound
     Ret2 = inferred_return("f(Checksum) -> g(Checksum, 5).\ng(Checksum, Computed) ->\n    case Computed of\n        Checksum -> ok;\n        _ -> error\n    end.\n"),
-    ?assert(spectra_oracle:member(ok, Ret2)),
-    ?assert(spectra_oracle:member(error, Ret2)).
+    ?assert(prisma_oracle:member(ok, Ret2)),
+    ?assert(prisma_oracle:member(error, Ret2)).
 
 a_pattern_with_a_new_variable_subtracts_the_whole_tuple_test() ->
     %% E is new: `{error, E}` takes every `{error, _}` out of what the next clause sees (this used to pass only because
     %% the pattern bound E to `any` and the whole return became `any`)
     Ret = case_ret("    case ov_callee:g() of\n        {error, E} -> E;\n        Other -> Other\n    end"),
-    ?assertNot(spectra_oracle:member({error, x}, Ret)),
-    ?assert(spectra_oracle:member(ok, Ret)),
-    ?assert(spectra_oracle:member({badrpc, x}, Ret)).
+    ?assertNot(prisma_oracle:member({error, x}, Ret)),
+    ?assert(prisma_oracle:member(ok, Ret)),
+    ?assert(prisma_oracle:member({badrpc, x}, Ret)).
 
 a_pattern_with_a_bound_variable_subtracts_nothing_test() ->
     %% E is already bound: `{error, E}` might be an equality test, nothing is taken out
     Ret = case_ret("    E = x,\n    case ov_callee:g() of\n        {error, E} -> E;\n        Other -> Other\n    end"),
-    ?assert(spectra_oracle:member({error, x}, Ret)),
-    ?assert(spectra_oracle:member(ok, Ret)).
+    ?assert(prisma_oracle:member({error, x}, Ret)),
+    ?assert(prisma_oracle:member(ok, Ret)).
 
 %% A BIF that is not in the table gives `any`, and `9 + any` is `number`: it may be a float, so it does not fit `non_neg_integer()`.
 %% The BIFs that always return integers are known.
@@ -935,8 +935,8 @@ integer_returning_bifs_test() ->
     lists:foreach(
         fun(Expr) ->
             Ret = inferred_return("f(D) -> 9 + " ++ Expr ++ ".\n"),
-            ?assert({Expr, spectra_oracle:member(10, Ret)} =:= {Expr, true}),
-            ?assert({Expr, spectra_oracle:member(1.5, Ret)} =:= {Expr, false})
+            ?assert({Expr, prisma_oracle:member(10, Ret)} =:= {Expr, true}),
+            ?assert({Expr, prisma_oracle:member(1.5, Ret)} =:= {Expr, false})
         end,
         ["iolist_size(D)", "erlang:external_size(D)", "erlang:phash2(D)", "erlang:phash2(D, 100)", "size(D)"]).
 
@@ -944,7 +944,7 @@ integer_returning_bifs_test() ->
 
 arithmetic_keeps_the_sign_test_() ->
     Infer = fun(Src) -> inferred_return("f(N) when is_integer(N), N >= 0 -> " ++ Src ++ ".\n") end,
-    Is = fun(Type, V) -> spectra_oracle:member(V, Type) end,
+    Is = fun(Type, V) -> prisma_oracle:member(V, Type) end,
     [?_assert(Is(Infer("9 + iolist_size(N)"), 9)),
      ?_assertNot(Is(Infer("9 + iolist_size(N)"), 0)),          %% positive
      ?_assertNot(Is(Infer("9 + iolist_size(N)"), -1)),
@@ -1006,8 +1006,8 @@ gradual_warnings(Src) ->
     Text = "-module(cmp_sample).\n" ++ Src,
     {ok, Toks, _} = erl_scan:string(Text),
     {ok, cmp_sample, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
-    {ok, Ws} = spectra:analyze_beams([Beam], #{oxbow => false}),
-    [{K, L} || #spectra_warning{kind = K, line = L} <- Ws].
+    {ok, Ws} = prisma:analyze_beams([Beam], #{oxbow => false}),
+    [{K, L} || #prisma_warning{kind = K, line = L} <- Ws].
 
 %% A variable in a pattern is a catch-all when it is new, and an equality test when it is already bound. The environment knows which ones are bound,
 %% so a pattern with only new variables takes its values out of what is left of the scrutinee (`{ok, State} -> ...; Err -> Err`).
@@ -1024,28 +1024,28 @@ fresh_ret(Body) ->
         {ok, _, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
         Beam
     end,
-    {ok, Plt} = spectra_plt:from_beams([Compile("ov_caller", Caller), Compile("ov_callee", fresh_callee())]),
-    #module_summary{functions = Funcs} = maps:get(ov_caller, Plt#spectra_plt.modules),
+    {ok, Plt} = prisma_plt:from_beams([Compile("ov_caller", Caller), Compile("ov_callee", fresh_callee())]),
+    #module_summary{functions = Funcs} = maps:get(ov_caller, Plt#prisma_plt.modules),
     {fun_type, [], Ret} = (maps:get({ov_caller, f, 0}, Funcs))#func_contract.inferred_type,
     Ret.
 
 new_variables_take_their_values_out_test() ->
     Ret = fresh_ret("    case ov_callee:f() of\n        {ok, State} -> {done, State};\n        Err -> Err\n    end"),
-    ?assert(spectra_oracle:member({done, 1}, Ret)),
-    ?assert(spectra_oracle:member({error, x}, Ret)),
-    ?assertNot(spectra_oracle:member({ok, 1}, Ret)).
+    ?assert(prisma_oracle:member({done, 1}, Ret)),
+    ?assert(prisma_oracle:member({error, x}, Ret)),
+    ?assertNot(prisma_oracle:member({ok, 1}, Ret)).
 
 a_variable_bound_by_a_record_pattern_is_not_new_test() ->
     %% X comes out of the record: `X ->` compares, it does not catch everything
     Ret = fresh_ret("    R = #r{v = ok},\n    #r{v = X} = R,\n    case ov_callee:g() of\n        X -> matched;\n        _ -> other\n    end"),
-    ?assert(spectra_oracle:member(matched, Ret)),
-    ?assert(spectra_oracle:member(other, Ret)).
+    ?assert(prisma_oracle:member(matched, Ret)),
+    ?assert(prisma_oracle:member(other, Ret)).
 
 a_variable_bound_in_the_head_is_not_new_test() ->
     Ret = inferred_return("f(Y) ->\n    case Y of\n        {ok, Z} -> Z;\n        Z -> {other, Z}\n    end.\n"),
     %% Z is new in both clauses: the second one only sees what the first did not take
-    ?assert(spectra_oracle:member({other, 5}, Ret)),
-    ?assert(spectra_oracle:member(1, Ret)).
+    ?assert(prisma_oracle:member({other, 5}, Ret)),
+    ?assert(prisma_oracle:member(1, Ret)).
 
 arithmetic_on_something_unknown_is_unknown_test() ->
     ?assertEqual(any, inferred_return("f(X) -> X + 1.\n")),
@@ -1067,8 +1067,8 @@ a_function_that_never_returns_is_a_callback_for_anything_test() ->
 meet_of_fun_types_whose_return_never_comes_back_test_() ->
     Never = {fun_type, [any, any], none},
     Wants = {fun_type, [atom, any], {atom_lit, ok}},
-    [?_assertNotEqual(none, spectra_type:meet(Never, Wants)),
-     ?_assertNotEqual(none, spectra_type:meet(Wants, Never)),
+    [?_assertNotEqual(none, prisma_type:meet(Never, Wants)),
+     ?_assertNotEqual(none, prisma_type:meet(Wants, Never)),
      %% still disjoint when the arguments are, or the arity differs
-     ?_assertEqual(none, spectra_type:meet({fun_type, [integer], none}, {fun_type, [atom], {atom_lit, ok}})),
-     ?_assertEqual(none, spectra_type:meet({fun_type, [any], none}, {fun_type, [any, any], {atom_lit, ok}}))].
+     ?_assertEqual(none, prisma_type:meet({fun_type, [integer], none}, {fun_type, [atom], {atom_lit, ok}})),
+     ?_assertEqual(none, prisma_type:meet({fun_type, [any], none}, {fun_type, [any, any], {atom_lit, ok}}))].

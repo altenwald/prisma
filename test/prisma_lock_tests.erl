@@ -1,7 +1,7 @@
--module(spectra_lock_tests).
+-module(prisma_lock_tests).
 
 -include_lib("eunit/include/eunit.hrl").
--include("spectra.hrl").
+-include("prisma.hrl").
 
 parse_rebar_lock_test() ->
     RebarLockContent =
@@ -13,7 +13,7 @@ parse_rebar_lock_test() ->
         "[\n"
         " {pkg_hash,[{<<\"cowboy\">>,<<\"deadbeef\">>}]}\n"
         "].\n",
-    {ok, Deps} = spectra_lock:parse_rebar_lock(list_to_binary(RebarLockContent)),
+    {ok, Deps} = prisma_lock:parse_rebar_lock(list_to_binary(RebarLockContent)),
     ?assertEqual(
         [
             #{name => <<"cowboy">>, version => <<"2.10.0">>, source => hex},
@@ -30,7 +30,7 @@ parse_mix_lock_test() ->
         "  \"jason\": {:hex, :jason, \"1.4.1\", \"hash3\", [:mix], [], \"hexpm\", \"hash4\"},\n"
         "  \"my_git\": {:git, \"https://github.com/org/my_git.git\", \"9f8e7d6\", [branch: \"main\"]}\n"
         "}\n",
-    {ok, Deps} = spectra_lock:parse_mix_lock(list_to_binary(MixLockContent)),
+    {ok, Deps} = prisma_lock:parse_mix_lock(list_to_binary(MixLockContent)),
     ?assertEqual(
         [
             #{name => <<"cowboy">>, version => <<"2.10.0">>, source => hex},
@@ -41,8 +41,8 @@ parse_mix_lock_test() ->
     ).
 
 resolve_and_cache_project_plts_test() ->
-    TmpProj = "/tmp/spectra_dev/tmp_lock_proj",
-    TmpCache = "/tmp/spectra_dev/tmp_splt_cache",
+    TmpProj = "/tmp/prisma_dev/tmp_lock_proj",
+    TmpCache = "/tmp/prisma_dev/tmp_splt_cache",
     os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache),
 
     DepEbin = filename:join([TmpProj, "_build", "default", "lib", "dep_lib", "ebin"]),
@@ -69,15 +69,15 @@ resolve_and_cache_project_plts_test() ->
     ok = file:write_file(filename:join(TmpProj, "rebar.lock"), LockText),
 
     %% First resolution builds dep_lib-1.2.3.splt and caches it in TmpCache
-    {ok, ResolvedPlt1} = spectra_lock:resolve_project_plts(TmpProj, #{cache_dir => TmpCache}),
-    ?assertEqual([dep_lib], spectra_plt:modules(ResolvedPlt1)),
-    ExpectedCachePath = spectra_lock:cache_path(TmpCache, <<"dep_lib">>, <<"1.2.3">>),
+    {ok, ResolvedPlt1} = prisma_lock:resolve_project_plts(TmpProj, #{cache_dir => TmpCache}),
+    ?assertEqual([dep_lib], prisma_plt:modules(ResolvedPlt1)),
+    ExpectedCachePath = prisma_lock:cache_path(TmpCache, <<"dep_lib">>, <<"1.2.3">>),
     ?assert(filelib:is_regular(ExpectedCachePath)),
 
     %% Delete the _build beam to prove the second resolution loads from the .splt cache!
     ok = file:delete(filename:join(DepEbin, "dep_lib.beam")),
-    {ok, ResolvedPlt2} = spectra_lock:resolve_project_plts(TmpProj, #{cache_dir => TmpCache}),
-    ?assertEqual([dep_lib], spectra_plt:modules(ResolvedPlt2)),
+    {ok, ResolvedPlt2} = prisma_lock:resolve_project_plts(TmpProj, #{cache_dir => TmpCache}),
+    ?assertEqual([dep_lib], prisma_plt:modules(ResolvedPlt2)),
 
     %% Compile an app module that calls dep_lib:fetch_count/1 with a wrong argument type (integer)
     AppForms = [
@@ -92,60 +92,60 @@ resolve_and_cache_project_plts_test() ->
     {ok, my_app, AppBeam} = compile:forms(AppForms, [debug_info]),
     ok = file:write_file(filename:join(AppEbin, "my_app.beam"), AppBeam),
 
-    {ok, Warnings} = spectra:analyze_dirs([AppEbin], #{
+    {ok, Warnings} = prisma:analyze_dirs([AppEbin], #{
         project_root => TmpProj,
         cache_dir => TmpCache,
         mode => hybrid
     }),
-    ?assertMatch([#spectra_warning{mfa = {my_app, broken_call, 0}} | _], Warnings),
+    ?assertMatch([#prisma_warning{mfa = {my_app, broken_call, 0}} | _], Warnings),
 
     os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache).
 
 otp_plt_fetcher_and_mix_lock_discovery_test() ->
-    TmpProj = "/tmp/spectra_dev/tmp_mix_lock_proj",
-    TmpCache = "/tmp/spectra_dev/tmp_splt_cache2",
+    TmpProj = "/tmp/prisma_dev/tmp_mix_lock_proj",
+    TmpCache = "/tmp/prisma_dev/tmp_splt_cache2",
     os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache),
     ok = filelib:ensure_dir(filename:join(TmpProj, "dummy")),
 
-    ?assert(is_list(spectra_lock:default_cache_dir())),
-    ?assertMatch({error, _}, spectra_lock:ensure_otp_plt(non_existent_otp_app_xyz, #{cache_dir => TmpCache})),
-    {ok, OtpPlt1} = spectra_lock:ensure_otp_plt(compiler, #{cache_dir => TmpCache}),
-    ?assert(lists:member(compile, spectra_plt:modules(OtpPlt1))),
+    ?assert(is_list(prisma_lock:default_cache_dir())),
+    ?assertMatch({error, _}, prisma_lock:ensure_otp_plt(non_existent_otp_app_xyz, #{cache_dir => TmpCache})),
+    {ok, OtpPlt1} = prisma_lock:ensure_otp_plt(compiler, #{cache_dir => TmpCache}),
+    ?assert(lists:member(compile, prisma_plt:modules(OtpPlt1))),
     %% Second call loads from cache
-    {ok, OtpPlt2} = spectra_lock:ensure_otp_plt(compiler, #{cache_dir => TmpCache}),
-    ?assertEqual(spectra_plt:modules(OtpPlt1), spectra_plt:modules(OtpPlt2)),
+    {ok, OtpPlt2} = prisma_lock:ensure_otp_plt(compiler, #{cache_dir => TmpCache}),
+    ?assertEqual(prisma_plt:modules(OtpPlt1), prisma_plt:modules(OtpPlt2)),
 
     %% Write mix.lock and resolve using a custom fetcher
     MixLockPath = filename:join(TmpProj, "mix.lock"),
     MixLockText = "%{\n  \"jason\": {:hex, :jason, \"1.4.1\", \"h1\", [:mix], [], \"hexpm\", \"h2\"}\n}\n",
     ok = file:write_file(MixLockPath, MixLockText),
-    ?assertEqual([#{name => <<"jason">>, version => <<"1.4.1">>, source => hex}], spectra_lock:discover_deps(TmpProj)),
+    ?assertEqual([#{name => <<"jason">>, version => <<"1.4.1">>, source => hex}], prisma_lock:discover_deps(TmpProj)),
 
-    FakeJasonPlt = spectra_plt:new(<<"jason">>, <<"1.4.1">>),
-    EncodedJason = spectra_plt:encode(FakeJasonPlt),
+    FakeJasonPlt = prisma_plt:new(<<"jason">>, <<"1.4.1">>),
+    EncodedJason = prisma_plt:encode(FakeJasonPlt),
     Fetcher = fun(_OtpRel, <<"jason">>, <<"1.4.1">>) -> {ok, EncodedJason} end,
 
-    {ok, Resolved} = spectra_lock:resolve_project_plts(TmpProj, #{
+    {ok, Resolved} = prisma_lock:resolve_project_plts(TmpProj, #{
         cache_dir => TmpCache,
         fetcher => Fetcher
     }),
-    ?assertMatch(#spectra_plt{}, Resolved),
-    ?assert(filelib:is_regular(spectra_lock:cache_path(TmpCache, <<"jason">>, <<"1.4.1">>))),
+    ?assertMatch(#prisma_plt{}, Resolved),
+    ?assert(filelib:is_regular(prisma_lock:cache_path(TmpCache, <<"jason">>, <<"1.4.1">>))),
 
     %% Extra rebar.lock variants and CLI helpers
     ExtraRebar = "[{<<\"a\">>,{pkg,a,\"1.0\",[]},0},{<<\"b\">>,{git,\"u\",{branch,\"main\"}},0},{<<\"c\">>,{git,\"u\",{tag,\"v1\"}},0}].",
-    {ok, ExtraDeps} = spectra_lock:parse_rebar_lock(list_to_binary(ExtraRebar)),
+    {ok, ExtraDeps} = prisma_lock:parse_rebar_lock(list_to_binary(ExtraRebar)),
     ?assertEqual(3, length(ExtraDeps)),
 
-    ?assertEqual({["a.splt"], ["ebin"]}, spectra:parse_check_args(["--plt", "a.splt", "ebin"])),
-    ?assert(is_list(lists:flatten(spectra_prv:format_error({warnings_found, 2})))),
-    ?assert(is_list(lists:flatten(spectra_prv:format_error(custom_err)))),
+    ?assertEqual({["a.splt"], ["ebin"]}, prisma:parse_check_args(["--plt", "a.splt", "ebin"])),
+    ?assert(is_list(lists:flatten(prisma_prv:format_error({warnings_found, 2})))),
+    ?assert(is_list(lists:flatten(prisma_prv:format_error(custom_err)))),
 
     os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache).
 
 auto_separate_deps_from_project_apps_test() ->
-    TmpProj = "/tmp/spectra_dev/tmp_auto_proj",
-    TmpCache = "/tmp/spectra_dev/tmp_auto_cache",
+    TmpProj = "/tmp/prisma_dev/tmp_auto_proj",
+    TmpCache = "/tmp/prisma_dev/tmp_auto_cache",
     os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache),
 
     DepEbin = filename:join([TmpProj, "_build", "dev", "lib", "noisy_dep", "ebin"]),
@@ -188,20 +188,20 @@ auto_separate_deps_from_project_apps_test() ->
     ok = file:write_file(filename:join(TmpProj, "mix.lock"), MixLockText),
 
     %% discover_project_ebins must return ONLY own_app's ebin, excluding noisy_dep
-    ProjectEbins = spectra_lock:discover_project_ebins(TmpProj, #{env => "dev"}),
+    ProjectEbins = prisma_lock:discover_project_ebins(TmpProj, #{env => "dev"}),
     ?assertEqual([OwnEbin], ProjectEbins),
 
     %% analyze_project analyzes ONLY own_app against cached noisy_dep.splt -> 0 warnings!
-    {ok, Warnings} = spectra:analyze_project(TmpProj, #{cache_dir => TmpCache, env => "dev"}),
+    {ok, Warnings} = prisma:analyze_project(TmpProj, #{cache_dir => TmpCache, env => "dev"}),
     ?assertEqual([], Warnings),
 
     os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache).
 
 candidate_build_ebins_default_fallback_test() ->
-    TmpProj = "/tmp/spectra_dev/tmp_fallback_proj",
+    TmpProj = "/tmp/prisma_dev/tmp_fallback_proj",
     os:cmd("rm -rf " ++ TmpProj),
     DevEbin = filename:join([TmpProj, "_build", "dev", "lib", "my_dev_app", "ebin"]),
     ok = filelib:ensure_dir(filename:join(DevEbin, "dummy")),
-    ?assertEqual([DevEbin], spectra_lock:discover_project_ebins(TmpProj, #{})),
-    ?assertEqual({ok, []}, spectra:analyze_project(TmpProj)),
+    ?assertEqual([DevEbin], prisma_lock:discover_project_ebins(TmpProj, #{})),
+    ?assertEqual({ok, []}, prisma:analyze_project(TmpProj)),
     os:cmd("rm -rf " ++ TmpProj).

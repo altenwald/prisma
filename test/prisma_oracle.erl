@@ -1,7 +1,7 @@
-%% Semantic oracle shared by the PropEr properties: decides whether a concrete term belongs to a `spectra_type:stype()`.
+%% Semantic oracle shared by the PropEr properties: decides whether a concrete term belongs to a `prisma_type:stype()`.
 %% Forms the oracle does not model (maps, funs, records, named types) are answered `true`, so they can never
 %% produce a false alarm in a property; only what it models can be falsified.
--module(spectra_oracle).
+-module(prisma_oracle).
 
 -export([member/2]).
 

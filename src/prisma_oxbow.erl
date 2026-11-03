@@ -9,9 +9,9 @@
 %%
 %% Adheres to the "Highest Degree of Certainty" principle: zero false alarms,
 %% strictly ignoring behavior callbacks, compiler-generated functions (__*), and public exports.
--module(spectra_oxbow).
+-module(prisma_oxbow).
 
--include("spectra.hrl").
+-include("prisma.hrl").
 
 -export([
     check_module/1,
@@ -19,12 +19,12 @@
 ]).
 
 %% @doc Runs oxbow code detection on a `#module_summary{}` with default options.
--spec check_module(#module_summary{}) -> [#spectra_warning{}].
+-spec check_module(#module_summary{}) -> [#prisma_warning{}].
 check_module(Summary) ->
     check_module(Summary, #{}).
 
 %% @doc Runs oxbow code detection on a `#module_summary{}` with options.
--spec check_module(#module_summary{}, map()) -> [#spectra_warning{}].
+-spec check_module(#module_summary{}, map()) -> [#prisma_warning{}].
 check_module(#module_summary{module = Mod, functions = Funcs}, _Opts) when is_map(Funcs) ->
     case maps:size(Funcs) of
         0 ->
@@ -37,8 +37,8 @@ check_module(#module_summary{module = Mod, functions = Funcs}, _Opts) when is_ma
             UnusedParamsWarns = check_unused_params(Funcs, Reachable),
             lists:sort(
                 fun(W1, W2) ->
-                    {W1#spectra_warning.line, W1#spectra_warning.mfa} =<
-                    {W2#spectra_warning.line, W2#spectra_warning.mfa}
+                    {W1#prisma_warning.line, W1#prisma_warning.mfa} =<
+                    {W2#prisma_warning.line, W2#prisma_warning.mfa}
                 end,
                 UnusedFuncsWarns ++ UnusedParamsWarns
             )
@@ -100,14 +100,14 @@ check_unused_functions(Funcs, Reachable) ->
                  not is_compiler_generated_name(F) andalso
                  not sets:is_element(MFA, Reachable) of
                 true ->
-                    ModStr = spectra_type:clean_module(M),
+                    ModStr = prisma_type:clean_module(M),
                     Msg = iolist_to_binary(
                         io_lib:format(
                             "Unused private function: ~s:~s/~B is never called and can be safely removed",
                             [ModStr, atom_to_list(F), A]
                         )
                     ),
-                    [#spectra_warning{
+                    [#prisma_warning{
                         kind = oxbow_code,
                         mfa = MFA,
                         line = Line,
@@ -147,7 +147,7 @@ check_unused_params(Funcs, Reachable) ->
     ).
 
 detect_ignored_params({Mod, Fun, Arity} = MFA, Line, Arity, Clauses) ->
-    CleanMod = spectra_type:clean_module(Mod),
+    CleanMod = prisma_type:clean_module(Mod),
     lists:filtermap(
         fun(Idx) ->
             case is_param_ignored_all_clauses(Idx, Clauses) of
@@ -158,7 +158,7 @@ detect_ignored_params({Mod, Fun, Arity} = MFA, Line, Arity, Clauses) ->
                             [Idx, CleanMod, atom_to_list(Fun), Arity]
                         )
                     ),
-                    {true, #spectra_warning{
+                    {true, #prisma_warning{
                         kind = oxbow_code,
                         mfa = MFA,
                         line = Line,

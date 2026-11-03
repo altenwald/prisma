@@ -1,25 +1,25 @@
-# Spectra correctness
+# Prisma correctness
 
-How often Spectra is right, measured on real code and compared with other tools **inside the same category**.
+How often Prisma is right, measured on real code and compared with other tools **inside the same category**.
 Speed and memory live in [`BENCHMARK.md`](BENCHMARK.md); the harness is in [`bench/`](bench/README.md).
 
 Status: first measurement (RabbitMQ), PropEr properties for the type algebra and for inference soundness by execution. The seeded-fault (mutation) corpus is not written yet.
 
 ## Like-for-like: discrepancies
 
-`spectra check` mixes four kinds of warning (discrepancy, gradual contract, dead code, oxbow), and Dialyzer only reports
-the first one plus some dead code, so the full counts are not comparable. Here Spectra runs with
+`prisma check` mixes four kinds of warning (discrepancy, gradual contract, dead code, oxbow), and Dialyzer only reports
+the first one plus some dead code, so the full counts are not comparable. Here Prisma runs with
 `mode => discrepancy, oxbow => false` through the API (the escript has no `--mode` option yet: it would read it as a path)
 and Dialyzer with its default warnings and the erts/kernel/stdlib PLT.
 
 Corpus: rabbitmq-server `5dacb85` (see `bench/corpus.config.json`).
 
-| Corpus | Spectra (discrepancy mode) | Dialyzer | xref (undefined calls) |
+| Corpus | Prisma (discrepancy mode) | Dialyzer | xref (undefined calls) |
 | :--- | :--- | :--- | :--- |
 | `rabbit` (234 modules) | **51**: 18 discrepancy, 33 dead code | **0** (40 "callback info not available" notes) | 0 |
 | 7 applications (440 modules) | **101**: 35 discrepancy, 66 dead code | **0** (4 notes) | 7 |
 
-RabbitMQ runs Dialyzer in its own CI, so zero is the expected answer. Every one of Spectra's 51 warnings on `rabbit` is
+RabbitMQ runs Dialyzer in its own CI, so zero is the expected answer. Every one of Prisma's 51 warnings on `rabbit` is
 therefore either a false positive or something Dialyzer cannot see.
 
 ## Triage of the 51 warnings of `rabbit`
@@ -56,16 +56,16 @@ Each one was read against the source, its callers and its docs.
 
 The five spec defects are also confirmed by Dialyzer, but only with `-Woverspecs`/`-Wunderspecs` (they report, for example,
 `has_capability` as "a subtype of the success typing `(_, 'undefined' | {'array', 'symbol', [any()]})`"), and there they are buried
-in **942 spec-difference warnings** for the same `rabbit` ebin. Dialyzer's default warnings give none of them. Spectra reports exactly
+in **942 spec-difference warnings** for the same `rabbit` ebin. Dialyzer's default warnings give none of them. Prisma reports exactly
 the cases where a spec contradicts a *clause*, 7 out of those 942, and none of the 7 is noise. That is a different kind of
-finding from the false positives above: **the first real results of Spectra on this code base are wrong specs**, low severity,
+finding from the false positives above: **the first real results of Prisma on this code base are wrong specs**, low severity,
 which nobody would find without it (or without reading 942 lines).
 
 ## The 43 warnings of the 440 modules
 
 After the fixes above the run over the seven applications gives 43 warnings: the 5 wrong specs of `rabbit` already described and 38 in
 `cuttlefish`, `cowlib`, `khepri` and `rabbit_common` (code in `rabbit` that calls into them). Four **false positives** turned up
-while reading them (two causes, both Spectra bugs, both fixed below) and the rest are true:
+while reading them (two causes, both Prisma bugs, both fixed below) and the rest are true:
 
 | Where | Warnings | What is true |
 | :--- | :---: | :--- |
@@ -80,7 +80,7 @@ while reading them (two causes, both Spectra bugs, both fixed below) and the res
 | `ra_log:write_sparse/3` | 1 | **false positive**: `P == undefined orelse Range == undefined orelse ...`, fixed. |
 
 Dialyzer, with `-Woverspecs`/`-Wunderspecs`, flags five of these functions, among **2229 spec-difference warnings** on the same 440 modules
-(and `to_list_of_binaries` and `parse_duration` it does not flag at all); with its default warnings, none. So: Spectra's list is 38 long
+(and `to_list_of_binaries` and `parse_duration` it does not flag at all); with its default warnings, none. So: Prisma's list is 38 long
 and has no noise, but it is not a subset of what Dialyzer can say, and neither is the other way round.
 
 ### The two bugs, and the gap in the generator that hid them
@@ -104,7 +104,7 @@ So the right answer is gone and the sound one is "cannot tell". Nothing else was
 
 ## Property-based tests: type algebra (PropEr)
 
-`test/prop_spectra_type.erl`, run with `rebar3 as test proper -n 1000`. The oracle is semantic: `member(Term, Type)` decides
+`test/prop_prisma_type.erl`, run with `rebar3 as test proper -n 1000`. The oracle is semantic: `member(Term, Type)` decides
 whether a concrete term belongs to a ground type, and generators build terms of a given type, so no human triage is needed.
 Types are ground and free of `any` (maps, funs and records are not generated yet); lists include `maybe_improper_list`.
 
@@ -131,7 +131,7 @@ properties do not see them. The next section does.
 
 ## Property-based tests: inference and warnings against execution (PropEr)
 
-`test/prop_spectra_infer.erl`. PropEr generates small well-typed modules (one function `f/2`: a few bindings and `case`
+`test/prop_prisma_infer.erl`. PropEr generates small well-typed modules (one function `f/2`: a few bindings and `case`
 expressions over integers, booleans, atoms, pairs, lists and `[H | T]` cells, each clause on its own line) and 25 argument
 samples. The module is compiled, run under `cover`, and for every run that returns normally:
 
@@ -143,15 +143,15 @@ samples. The module is compiled, run under `cover`, and for every run that retur
 A refutation is a **proven** false positive (or an unsound inference), and PropEr shrinks it to a minimal module. Three came out
 in the first session, each in a few lines (all in [`bench/repro/`](bench/repro/README.md)):
 
-| Shrunk program | What Spectra says | Truth |
+| Shrunk program | What Prisma says | Truth |
 | :--- | :--- | :--- |
 | `case true andalso 0 of false -> 0; N when is_integer(N) -> N end` | "`andalso` will fail", "guard cannot succeed" | returns `0` (**fixed**) |
 | `case [0 \| 0] of [H \| T] when is_integer(T) -> H + T end` | inferred return type `none` | returns `0` (**fixed**) |
 | `f() -> -1.` and `case f() of -1 -> ok end` | `f/0` returns `1`; "no clause can match" | returns `-1` |
 
 The third is the most basic of the three: **`infer_unop` kept the type of the operand for unary `-`, so every negative
-literal was inferred as its absolute value**. It is **fixed** (`negate_type/1` in `src/spectra_infer.erl`, with unit tests in
-`test/spectra_infer_tests.erl`) and the generator now produces negative literals. Measured on RabbitMQ (`rabbit`, discrepancy
+literal was inferred as its absolute value**. It is **fixed** (`negate_type/1` in `src/prisma_infer.erl`, with unit tests in
+`test/prisma_infer_tests.erl`) and the generator now produces negative literals. Measured on RabbitMQ (`rabbit`, discrepancy
 mode) the fix changes nothing: the same 51 warnings before and after, so none of them came from this bug.
 
 All three are fixed, and the property is now the plain `prop_inference_and_warnings_agree_with_execution`: it passes **1500
@@ -165,13 +165,13 @@ A call to a function with an overloaded `-spec` (`-spec f(a) -> ok; (b) -> ok.`)
 module were already fine, because their argument types are seeded with the union of the clauses.
 
 Now each clause is one whole vector of argument types, and a call is accepted if **some** vector accepts all its arguments
-(`spectra_checker:check_vectors/3`, for discrepancy and gradual checks alike). Not a per-position union: with `(integer(), boolean())`
+(`prisma_checker:check_vectors/3`, for discrepancy and gradual checks alike). Not a per-position union: with `(integer(), boolean())`
 and `(atom(), integer())`, the call `h(1, 1)` mixes the two clauses and is still reported (unit test). Measured on RabbitMQ:
 **12 -> 8 warnings**, the four expected, none new.
 
 ### The generator now has callers, callees and specs
 
-`prop_spectra_infer` generates a second module per program: `g/1` or `g/2` with an overloaded `-spec` (up to three clauses over
+`prop_prisma_infer` generates a second module per program: `g/1` or `g/2` with an overloaded `-spec` (up to three clauses over
 integers, booleans, atoms, pairs and lists), guards exclusive per type, each clause returning its own number. The caller module
 calls it, 80% of the time with arguments of a clause of the spec and 20% with any types (those crash at run time, and a run that
 crashes refutes nothing). Warnings are only taken from the caller module. Run against the checker from before the fix it fails in
@@ -180,7 +180,7 @@ crashes refutes nothing). Warnings are only taken from the caller module. Run ag
 ### The generator also had a gap: floats
 
 Triaging the last warning of `rabbit_variable_queue` found a bug the properties had not: `X == 0` with a float is true for `0.0`
-(`==` compares numbers by value; `=:=` does not), and Spectra reported the guard as unreachable. The generator had no `/`, no floats and no
+(`==` compares numbers by value; `=:=` does not), and Prisma reported the guard as unreachable. The generator had no `/`, no floats and no
 `==` in guards. It has them now, and with the fix reverted it finds the bug in 388 tests. `X =:= 0` on a float stays reported
 (it really is dead), also covered by a unit test. The lesson is the usual one for generators: **a property is only as good as what it can
 generate**, so every real finding that it missed becomes a new production in the generator.
@@ -188,7 +188,7 @@ generate**, so every real finding that it missed becomes a new production in the
 ## `andalso` / `orelse`: the fix
 
 Only the **left** operand of `andalso` / `orelse` has to be a boolean; the value is the right operand (any term) when the left one
-does not decide. Spectra read them as `and` / `or`: it reported "will fail" when the right operand was not a boolean, narrowed the
+does not decide. Prisma read them as `and` / `or`: it reported "will fail" when the right operand was not a boolean, narrowed the
 right operand's variable to `boolean` (also wrong), and typed the result as `boolean`. Now `A andalso B` is `false | B`, `A orelse B`
 is `true | B` (narrowed by what A may be: `true andalso 0` is `0`, and a literal `true` on the left makes a `false ->` clause
 really dead, which is reported), and the left operand is still checked. `and`, `or` and `xor` stay strict.
@@ -205,7 +205,7 @@ Four places treated every `[H | T]` as a proper list, and PropEr found a fifth o
 - **Patterns.** The tail variable gets the tail type of the scrutinee (unknown if the scrutinee is), not `list(any)`.
 - **`tl/1`** returns the tail type of its argument; **`hd/1`, `tl/1`** take any non-empty list, proper or not (PropEr again: the old
   domain `nonempty_list(any)` was refuted by `[0 | 0]`).
-- **`spectra_type`**: `meet` and subtyping between `improper_list` and `list` / `nonempty_list` / `nil` / `improper_list`.
+- **`prisma_type`**: `meet` and subtyping between `improper_list` and `list` / `nonempty_list` / `nil` / `improper_list`.
 
 Measured on RabbitMQ (`rabbit`, discrepancy mode): **51 -> 14 warnings; the 37 that disappear are exactly the `rabbit_fifo*` ones, and none is new.**
 
@@ -214,15 +214,15 @@ Costs and losses, so nobody finds them by surprise:
 - **Precision.** `hd([])` is no longer reported (the type has no "non-empty improper list" to tell it from `hd([1 | 2])`); the Erlang
   compiler already warns about it. In exchange `tl(X) + 1` is no longer reported as `badarith`, which was a false positive.
 - **Speed.** Building the `.splt` of OTP's `compiler` application went from ~0.65 s to ~1.0 s (more unions in the types). A full
-  `spectra check` of `deps/rabbit` is unchanged (~1.2 s).
+  `prisma check` of `deps/rabbit` is unchanged (~1.2 s).
 - **Depth.** The exact meet of two improper lists with list-able tails is cut at a nesting depth of 2 (counted across the recursion),
   then a safe superset; without the cut `compiler` took minutes.
 
 ## False negatives: mutation testing
 
-The other half of the question: of the real faults, how many does Spectra see? `bench/mutate.escript` takes the compiled modules of a
+The other half of the question: of the real faults, how many does Prisma see? `bench/mutate.escript` takes the compiled modules of a
 corpus, injects **one** fault in the abstract code (keeping every line number) and writes the mutant; `bench/run_mutants.py` puts it in a
-copy of the application's `ebin`, runs Spectra and Dialyzer over the directory and counts a fault as **detected** when the tool gives, inside
+copy of the application's `ebin`, runs Prisma and Dialyzer over the directory and counts a fault as **detected** when the tool gives, inside
 the mutated function, a warning it did not give for the unmodified directory. `erlc` is counted too, but only for warnings that say the
 code fails (the mutation also causes unused-variable warnings, which are not detection).
 
@@ -238,7 +238,7 @@ Five operators, each a fault that cannot succeed whenever it runs (under the `-s
 
 Sample: seed 1, up to 25 mutants per operator over `ra`, `khepri`, `cuttlefish`, `cowlib` and `ranch` (144 modules): **125 mutants**.
 
-| Operator | Mutants | Spectra | Dialyzer | erlc |
+| Operator | Mutants | Prisma | Dialyzer | erlc |
 | :--- | :---: | :---: | :---: | :---: |
 | `r1` spec return | 25 | 25 | 25 | 0 |
 | `r2` argument vs spec | 25 | 21 | 24 | 0 |
@@ -247,11 +247,11 @@ Sample: seed 1, up to 25 mutants per operator over `ra`, `khepri`, `cuttlefish`,
 | `r6` pattern vs spec | 25 | 0 | 25 | 0 |
 | **all** | **125** | **52 (42%)** | **123 (98%)** | **23 (18%)** |
 
-Together Spectra and Dialyzer detect all 125; Spectra alone sees two that Dialyzer does not (a call in the generated `conf_parse` and a
-`byte_size` in `cow_qpack`), Dialyzer alone sees 73. So on this sample **Spectra misses most of what Dialyzer finds**. But the misses are not
+Together Prisma and Dialyzer detect all 125; Prisma alone sees two that Dialyzer does not (a call in the generated `conf_parse` and a
+`byte_size` in `cow_qpack`), Dialyzer alone sees 73. So on this sample **Prisma misses most of what Dialyzer finds**. But the misses are not
 spread out, they follow one thing: where the fault is.
 
-| Where the fault is | Mutants | Spectra | Dialyzer |
+| Where the fault is | Mutants | Prisma | Dialyzer |
 | :--- | :---: | :---: | :---: |
 | plain function body, `r1`-`r3` | 52 | **52** | 50 |
 | plain function body, `r4`, `r6` | 41 | 0 | 41 |
@@ -260,14 +260,14 @@ spread out, they follow one thing: where the fault is.
 | inside `try ... of` | 5 | 0 | 5 |
 | inside a record field | 1 | 0 | 1 |
 
-Where Spectra looks, it finds them (52 of 52, two more than Dialyzer). The 73 misses come from four gaps, each reproduced by a few lines in
+Where Prisma looks, it finds them (52 of 52, two more than Dialyzer). The 73 misses come from four gaps, each reproduced by a few lines in
 [`bench/repro/false_negatives/`](bench/repro/false_negatives/README.md):
 
 1. **Calls inside `fun`, `try` and record fields are not checked** (15 mutants; also part of the `r4` and `r6` ones in those contexts). Not
    investigated further: the construct is simply not reported.
-2. **BIF arguments in guards are not checked** (17 mutants, all `r3`): a clause with `when length(foo) > N` can never match and Spectra says nothing.
+2. **BIF arguments in guards are not checked** (17 mutants, all `r3`): a clause with `when length(foo) > N` can never match and Prisma says nothing.
 3. **A call to a function that does not exist is not reported** (`r4`, 25 mutants): the checker looks the callee up in the `.splt` and, when it
-   is not there, stays silent. This is what `xref` is for; Spectra has an `unknown_function` kind and never produces it for this.
+   is not there, stays silent. This is what `xref` is for; Prisma has an `unknown_function` kind and never produces it for this.
 4. **The return type of a call to another module is `any`** (`r6`, 25 mutants): inference only knows the contracts of the module it is
    analyzing, so `{ok, V} = other:f()` is never compared with the `-spec` of `other:f/0`.
 
@@ -275,7 +275,7 @@ Where Spectra looks, it finds them (52 of 52, two more than Dialyzer). The 73 mi
 
 Same 125 mutants after each fix (the counts for Dialyzer and `erlc` do not change).
 
-| Fix | Spectra | what it caught |
+| Fix | Prisma | what it caught |
 | :--- | :---: | :--- |
 | before | 52 / 125 | |
 | 1. look inside `fun`, `try`, `catch`, `receive`, comprehensions, records and binaries | 57 / 125 | `r2` 21 -> 24, `r3` 6 -> 8; nothing lost |
@@ -290,8 +290,8 @@ inside reaches the code that follows, and the result stays `any`. One mutant of 
 code); not investigated.
 
 Three things turned up on the way, none of them in the mutants:
-- the first version typed a `fun` as `any_fun`, which is not consistent with a declared `fun((A) -> B)`: **Spectra's own test, which analyzes
-  Spectra, reported two false positives in `spectra_hub` and `spectra_plt`**. A `fun` stays `any`;
+- the first version typed a `fun` as `any_fun`, which is not consistent with a declared `fun((A) -> B)`: **Prisma's own test, which analyzes
+  Prisma, reported two false positives in `prisma_hub` and `prisma_plt`**. A `fun` stays `any`;
 - calls inside a `catch` clause in RabbitMQ then showed a **false positive of `meet`**: `{amqp_error, _, _, _}` was disjoint from the record
   `#amqp_error{}`. A tuple whose first element can be the record's name is now a value of the record type. Arity and field types are not checked,
   because `{record, Name, Fields}` only lists the fields that the spec mentions (`#r{}` lists none);
@@ -306,7 +306,7 @@ programs x 25 runs); it cannot see false negatives, which the unit tests and the
 cannot succeed the guard cannot, and the clause is reported as dead (the existing "guard cannot succeed"); an operator with an operand that
 cannot be evaluated cannot be evaluated either. The first version gained only **one** of the 17 mutants of this class, and the reason was in
 the mutants themselves: the macros of khepri and ra put the failing BIF on the right of an `orelse` (`Path =:= [] orelse hd(Path) ...`), so the
-clause is *not* dead (it still holds for `[]`) and Spectra was right to keep quiet about it. What Dialyzer says there is narrower and correct:
+clause is *not* dead (it still holds for `[]`) and Prisma was right to keep quiet about it. What Dialyzer says there is narrower and correct:
 "Guard test `hd(mutant_atom)` can never succeed". So the tests of a guard are also checked one by one and each one that fails whenever it is
 evaluated is reported, whether or not another alternative saves the clause. No new warning in the 440 modules except `khepri_sproc` (the defensive
 clause already known, now also named at the test that cannot work on a `fun()`).
@@ -314,9 +314,9 @@ clause already known, now also named at the test that cannot work on a `fun()`).
 ### Where a failure is reported
 
 A failure is reported **where it is and only there**. Dialyzer names every function above the faulty one ("no local return"), without saying
-why, even when the problem is not in them; Spectra must not copy that. It is covered by a unit test (a fault three calls deep, with specs on
+why, even when the problem is not in them; Prisma must not copy that. It is covered by a unit test (a fault three calls deep, with specs on
 the callers, and calls from a fun, a try and a comprehension: the only warning is on the faulty line). Measured on the 125 mutants, the new
-warnings that each tool gives *outside* the mutated function are **6 for Spectra (the same number as before any of the fixes of this section)
+warnings that each tool gives *outside* the mutated function are **6 for Prisma (the same number as before any of the fixes of this section)
 and 201 for Dialyzer**. The 6 are five mutants, all `r1` (the function returns an atom against its own `-spec`), and they are of one kind: a function
 that *uses* the result gets a warning that says what does not fit (a `gradual_mismatch` in a caller with a spec, a call that receives the atom).
 That is not Dialyzer's silent cascade, but it is still an effect in the callers; the way to remove it is to let callers trust the declared `-spec`
@@ -333,9 +333,9 @@ literal. It is now (and that also closed the last `r2`).
 that is analyzed (and of the dependencies loaded from a `.splt`) are collected first, and the return type that a callee declares is what a call gives. The same is
 done inside a module: a call goes by what the callee *declares*, not by what its body happens to return. That is what removes the effect in the callers: a function
 whose body contradicts its spec is reported there, and nowhere else (the 6 collateral warnings of the mutants are now **0**, Dialyzer's 201 unchanged). Names that
-cannot be resolved while a module is inferred (`t()`, `other:t()`, an opaque, a type variable) are unknown, not impossible (Spectra's own test caught that one).
+cannot be resolved while a module is inferred (`t()`, `other:t()`, an opaque, a type variable) are unknown, not impossible (Prisma's own test caught that one).
 
-Things that had to be fixed for it, found one by one by the tests, the property or Spectra's own code:
+Things that had to be fixed for it, found one by one by the tests, the property or Prisma's own code:
 - a `case` now takes out of the scrutinee what an earlier clause without a guard matches, so `case f() of ok -> {ok, 1}; Err -> Err end` is `{ok, 1} | {error, _}`
   (before, `ok` stayed in `Err`). **Only patterns without variables subtract**: a variable may be new (a catch-all) or already bound (an equality test), the abstract
   code does not say, and treating `Checksum -> ok; _ -> error` as a catch-all made `error` vanish from the type;
@@ -361,13 +361,13 @@ Of these 62, the ones read one by one (9 in `cuttlefish` and `ra`) are **8 true 
 upgrades that clause from "defensive" to "reachable") and **1 false positive that was fixed** (the `ok` that survived in a `case`). The other 53 have **not been triaged**:
 until they are, the hybrid mode of this version should be read as strict, not as "every warning is a bug".
 
-The last mutant that Spectra misses (`r1` number 12, `cuttlefish_unit:generate_config/3`) is not a miss: the unmutated function already has two real warnings at
+The last mutant that Prisma misses (`r1` number 12, `cuttlefish_unit:generate_config/3`) is not a miss: the unmutated function already has two real warnings at
 the same lines and of the same kind (the ones above), and the runner compares (module, line, kind) with the unmodified directory, so the mutant's warning is hidden by
 them.
 
 ### Triage of the contract warnings that gap 4 adds
 
-Gap 4 added 62 `gradual_mismatch` warnings in hybrid mode (see above). They were read, and **three false positives of Spectra** came out and were fixed, each with its test:
+Gap 4 added 62 `gradual_mismatch` warnings in hybrid mode (see above). They were read, and **three false positives of Prisma** came out and were fixed, each with its test:
 
 - **a `case` could not take out what an earlier clause matched when that clause had a variable** (`{ok, State} -> ...; Err -> Err`, so `Err` still held `{ok, _}`: `ra_log_segment:close/1`,
   `rabbit_ff_controller`). My first version avoided variables altogether, because a variable may be new (a catch-all) or already bound (an equality test, as in `Checksum -> ok; _ -> error`).
@@ -389,7 +389,7 @@ What is left, **55 warnings**, in four kinds (`bench/triage/contract-warnings.js
 `rabbit_db_cluster:check_consistency/0` declares `ok` and delegates to a function that may return `{error, _}`, `rabbit_queue_type:handle_down/4` lets `{protocol_error, ...}` through, `rabbit_quorum_queue:purge/1` and `dequeue/6`
 ignore the `{error | timeout, _}` of `rabbit_fifo_client`, `rabbit_amqqueue:is_replicable/1` declares `boolean()` over a callee whose spec says `undefine | module()`, a typo, `ra:leave_and_delete_server/3`, the password validators
 whose `validate/2` declares a 2-tuple error and delegates to a `validate/3` that returns a 3-tuple...), **14 are not reported any more** and **1 is a false positive that stays** (see below).
-Reading them found **four more false positives of Spectra, fixed, each with a test and a repro in `bench/repro/`**:
+Reading them found **four more false positives of Prisma, fixed, each with a test and a repro in `bench/repro/`**:
 
 - **`widen/1` collapsed a union of more than 16 literals to `atom()`**, so `rabbit_framing_amqp_0_9_1:lookup_method_name/1` (more than a hundred method names, and a spec that lists every one) did not fit its own spec.
   A flat union of literals is cheap; what exploded was nesting. It is kept up to 1024 members now;
@@ -403,11 +403,11 @@ Reading them found **four more false positives of Spectra, fixed, each with a te
 
 **The false positive that stays:** `rabbit_ff_controller:run_callback/5`. Its `-spec` is overloaded by the value of `Command` (`enable` and `post_enable` give `ok`, `is_feature_used` gives `false`), and the clause that finds no callback computes
 `Ret = case Command of enable -> ok; post_enable -> ok; is_feature_used -> false end`. The code is right, but the return is `#{node() => ok | false}` and that fits neither overload: telling it needs the correlation between
-the parameter and the spec's clause, which Spectra does not follow.
+the parameter and the spec's clause, which Prisma does not follow.
 
 The 13 of the last two rows were a **policy question**, decided afterwards: a value known only by its wide type (`integer()`, `number()`, `[T]`) against a narrower contract
 (`non_neg_integer()`, `pos_integer()`, a range, `integer()`, `[T, ...]`) is **a gap in what is proven, not a contradiction**, and it is no longer reported
-(`spectra_checker:accepts/2`; consistent_subtype itself is unchanged). What is proven to fall outside the contract still is: a literal (`0` for `pos_integer()`), a float or an atom
+(`prisma_checker:accepts/2`; consistent_subtype itself is unchanged). What is proven to fall outside the contract still is: a literal (`0` for `pos_integer()`), a float or an atom
 for an integer, `[]` for a non-empty list, and `N - 1` with `N :: pos_integer()` for `pos_integer()` (the README example; the inference now types it `non_neg_integer()` so the tolerance does not hide it).
 Cost, accepted: an `integer()` that comes out of arithmetic (`A - B`) against `non_neg_integer()` is not reported either, because the type does not say where the `integer()` came from.
 Over the RabbitMQ dependencies the change only removes warnings (cowlib −5, khepri −2, ra −23, none new), mutants stay at 124/125 and collateral at 0; eunit 176/176, PropEr 10/10.
@@ -424,7 +424,7 @@ I had measured `check` on `deps/rabbit` and the PLT of OTP's `compiler`, not **t
   K^2, K^3... members, because `ne(A) | ne(B)` is not merged. Now the members that are proper lists make one `nonempty_list` together.
 - a tail that is `any` (the first pass of any recursive function) now gives an improper list *with its elements*, which embeds the whole type of the previous
   pass in the next one. Before the fix everything collapsed into `ne(any)`. Fixing one case was not enough, so the inferred types are bounded by
-  `spectra_type:widen/1`: nesting beyond four levels, and unions of more than 16 members, become `any` (or `atom` / `integer` for a crowd of literals). It is a supertype,
+  `prisma_type:widen/1`: nesting beyond four levels, and unions of more than 16 members, become `any` (or `atom` / `integer` for a crowd of literals). It is a supertype,
   so what held keeps holding.
 - the `.splt` kept the abstract code of every function (`func_contract.clauses`), only needed while a module is being inferred. It is no longer saved.
 - `normalize_union/1`, called 500,000 times per PLT, has shortcuts for the lists of one or two types it nearly always gets.
@@ -446,7 +446,7 @@ pair of ids. It is the right fix of the root; what is done above is the bounded 
 
 What this sample does not say:What this sample does not say: 125 mutants of five kinds, injected on purpose, are not the distribution of real bugs; "must fail" is by contract
 or by BIF, so a mutant on code that is never reached still counts; Dialyzer ran with its default warnings and the erts/kernel/stdlib PLT; and the
-new warnings that each tool gives *outside* the mutated function (6 for Spectra, 201 for Dialyzer) were counted but not analyzed (most are probably
+new warnings that each tool gives *outside* the mutated function (6 for Prisma, 201 for Dialyzer) were counted but not analyzed (most are probably
 consequences, such as a caller of a function that now returns an atom). One correction made on the way: the first version of the runner
 looked for warnings between the first and the last line of the function and **missed Dialyzer's invalid-spec warnings, which sit on the `-spec`
 line**, so it undercounted Dialyzer (14 of 18 on a small sample instead of 18); it was caught by looking at the mutants one by one before running the
