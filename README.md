@@ -19,10 +19,20 @@ One of the greatest points of friction when running static type analysis on the 
 
 ### The Prisma PPLT Architecture
 Prisma introduces the portable, binary **`.pplt`** format:
-- **Modular & Granular:** Every dependency in `rebar.lock` or `mix.lock`, as well as base Erlang/OTP modules, is compiled into its own isolated `.pplt` cache.
-- **Zero Redundant Rebuilds:** If a dependency's package name and version have not changed, its `.pplt` is loaded directly from the local cache.
+- **Modular & Granular:** Every dependency in `rebar.lock` or `mix.lock`, as well as base Erlang/OTP modules, has its own isolated `.pplt`.
+- **No server:** Prisma looks for the `.pplt` of each locked dependency, in this order: (1) the one the **library ships with its code**, `priv/<app>.pplt` in `_build/*/lib/<app>` or `deps/<app>`; (2) the one Prisma built before, in **`.prisma/` next to `rebar.lock` / `mix.lock`**; (3) a new one built from the dependency's beams in `_build`, saved in `.prisma/`. Nothing is downloaded and there is nothing to keep running.
+- **Zero Redundant Rebuilds:** If a dependency's package name and version have not changed, its `.pplt` is loaded directly from `.prisma/`. You can commit that directory to share it with your team and CI, or ignore it.
 - **Sub-Second Merging:** At analysis time, Prisma dynamically merges dependency `.pplt` files in-memory in milliseconds, focusing analysis purely on your project's application code.
-- **Prisma Hub Ready:** Built-in client support for fetching pre-compiled `.pplt` files on-demand for Hex.pm packages and target OTP versions, eliminating the need to compile dependency PPLTs locally.
+
+### Publishing a `.pplt` with your library
+
+A library author makes it once per release and ships it in `priv/`, which Hex packages and releases already include:
+
+```bash
+prisma build --output priv/my_lib.pplt _build/default/lib/my_lib/ebin
+```
+
+Whoever depends on the library then gets its contracts without building anything. Keep the file next to the code it was made from: Prisma trusts it as it trusts the beams.
 
 ---
 

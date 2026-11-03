@@ -1,7 +1,11 @@
-%% @doc Parses `rebar.lock` and `mix.lock` files and manages the local `.pplt` cache.
+%% @doc Parses `rebar.lock` and `mix.lock` files and finds the `.pplt` of each locked dependency.
 %%
-%% Resolves locked dependencies and OTP base applications into cached `.pplt`
-%% files indexed by OTP release, package name, and version.
+%% There is no server to ask. For every dependency of the lock, in this order:
+%%   1. the `.pplt` that the library ships with its code, `priv/<app>.pplt` in `_build/*/lib/<app>` or `deps/<app>`
+%%      (the author makes it with `prisma build --output priv/<app>.pplt <ebin>`);
+%%   2. the one Prisma built before, in `.prisma/` next to the lock file;
+%%   3. a new one, built from the dependency's beams in `_build` and saved in `.prisma/`.
+%% The base OTP applications are cached per OTP release, in the user's cache directory.
 -module(prisma_lock).
 
 -include("prisma.hrl").
@@ -11,6 +15,8 @@
     parse_mix_lock/1,
     discover_deps/1,
     default_cache_dir/0,
+    project_cache_dir/1,
+    shipped_pplt/2,
     cache_path/3,
     otp_cache_path/2,
     ensure_otp_pplt/2,
@@ -152,7 +158,24 @@ default_cache_dir() ->
 cache_path(CacheDir, Name, Version) ->
     OtpRel = erlang:system_info(otp_release),
     FileName = binary_to_list(<<Name/binary, "-", Version/binary, ".pplt">>),
-    filename:join([unicode:characters_to_list(CacheDir), "otp-" ++ OtpRel, "hex", FileName]).
+    filename:join([unicode:characters_to_list(CacheDir), "otp-" ++ OtpRel, FileName]).
+
+%% @doc The directory where what Prisma builds for a project's dependencies is kept: `.prisma/` next to `rebar.lock` / `mix.lock`.
+-spec project_cache_dir(file:filename_all()) -> string().
+project_cache_dir(ProjectRoot) ->
+    filename:join(unicode:characters_to_list(ProjectRoot), ".prisma").
+
+%% @doc The `.pplt` that a library ships with its code (`priv/<app>.pplt`), in the build directory of rebar3 or Mix, or in `deps/`.
+-spec shipped_pplt(file:filename_all(), binary()) -> {ok, string()} | error.
+shipped_pplt(ProjectRoot, Name) ->
+    Root = unicode:characters_to_list(ProjectRoot),
+    App = binary_to_list(Name),
+    Candidates = filelib:wildcard(filename:join([Root, "_build", "*", "lib", App, "priv", App ++ ".pplt"])) ++
+                 filelib:wildcard(filename:join([Root, "deps", App, "priv", App ++ ".pplt"])),
+    case [C || C <- Candidates, filelib:is_regular(C)] of
+        [First | _] -> {ok, First};
+        [] -> error
+    end.
 
 %% @doc Returns the `.pplt` cache file path for an OTP application on the current OTP release.
 -spec otp_cache_path(file:filename_all(), atom()) -> string().
@@ -192,7 +215,7 @@ ensure_otp_pplt(OtpApp, Opts) ->
 -spec resolve_project_pplts(file:filename_all(), map()) ->
     {ok, #prisma_pplt{}} | {error, term()}.
 resolve_project_pplts(ProjectRoot, Opts) ->
-    CacheDir = maps:get(cache_dir, Opts, default_cache_dir()),
+    CacheDir = maps:get(cache_dir, Opts, project_cache_dir(ProjectRoot)),
     OtpApps = maps:get(otp_apps, Opts, []),
     Deps = discover_deps(ProjectRoot),
     OtpPlts = lists:filtermap(
@@ -206,7 +229,7 @@ resolve_project_pplts(ProjectRoot, Opts) ->
     ),
     DepPlts = lists:filtermap(
         fun(#{name := Name, version := Vsn}) ->
-            case resolve_single_dep(ProjectRoot, CacheDir, Name, Vsn, Opts) of
+            case resolve_single_dep(ProjectRoot, CacheDir, Name, Vsn) of
                 {ok, Pplt} -> {true, Pplt};
                 _ -> false
             end
@@ -215,41 +238,16 @@ resolve_project_pplts(ProjectRoot, Opts) ->
     ),
     {ok, prisma_pplt:merge(OtpPlts ++ DepPlts)}.
 
-resolve_single_dep(ProjectRoot, CacheDir, Name, Vsn, Opts) ->
-    Path = cache_path(CacheDir, Name, Vsn),
-    case filelib:is_regular(Path) of
-        true ->
-            prisma_pplt:load(Path);
-        false ->
-            case try_remote_fetcher(Name, Vsn, Path, Opts) of
-                {ok, Pplt} ->
-                    {ok, Pplt};
-                error ->
-                    build_and_cache_local_dep(ProjectRoot, Path, Name, Vsn)
+resolve_single_dep(ProjectRoot, CacheDir, Name, Vsn) ->
+    case shipped_pplt(ProjectRoot, Name) of
+        {ok, Shipped} ->
+            prisma_pplt:load(Shipped);
+        error ->
+            Path = cache_path(CacheDir, Name, Vsn),
+            case filelib:is_regular(Path) of
+                true -> prisma_pplt:load(Path);
+                false -> build_and_cache_local_dep(ProjectRoot, Path, Name, Vsn)
             end
-    end.
-
-try_remote_fetcher(Name, Vsn, CachePath, Opts) ->
-    case maps:find(fetcher, Opts) of
-        {ok, FetcherFun} when is_function(FetcherFun, 3) ->
-            OtpRel = list_to_binary(erlang:system_info(otp_release)),
-            case FetcherFun(OtpRel, Name, Vsn) of
-                {ok, #prisma_pplt{} = Pplt} ->
-                    _ = prisma_pplt:save(Pplt, CachePath),
-                    {ok, Pplt};
-                {ok, Bin} when is_binary(Bin) ->
-                    case prisma_pplt:decode(Bin) of
-                        {ok, Pplt} ->
-                            _ = prisma_pplt:save(Pplt, CachePath),
-                            {ok, Pplt};
-                        _ ->
-                            error
-                    end;
-                _ ->
-                    error
-            end;
-        _ ->
-            error
     end.
 
 build_and_cache_local_dep(ProjectRoot, CachePath, Name, Vsn) ->

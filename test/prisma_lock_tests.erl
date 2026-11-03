@@ -101,7 +101,7 @@ resolve_and_cache_project_pplts_test() ->
 
     os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache).
 
-otp_pplt_fetcher_and_mix_lock_discovery_test() ->
+otp_pplt_and_mix_lock_discovery_test() ->
     TmpProj = "/tmp/prisma_dev/tmp_mix_lock_proj",
     TmpCache = "/tmp/prisma_dev/tmp_pplt_cache2",
     os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache),
@@ -115,22 +115,13 @@ otp_pplt_fetcher_and_mix_lock_discovery_test() ->
     {ok, OtpPlt2} = prisma_lock:ensure_otp_pplt(compiler, #{cache_dir => TmpCache}),
     ?assertEqual(prisma_pplt:modules(OtpPlt1), prisma_pplt:modules(OtpPlt2)),
 
-    %% Write mix.lock and resolve using a custom fetcher
+    %% Write mix.lock; the dependency has nothing built and nothing shipped: it is simply left out
     MixLockPath = filename:join(TmpProj, "mix.lock"),
     MixLockText = "%{\n  \"jason\": {:hex, :jason, \"1.4.1\", \"h1\", [:mix], [], \"hexpm\", \"h2\"}\n}\n",
     ok = file:write_file(MixLockPath, MixLockText),
     ?assertEqual([#{name => <<"jason">>, version => <<"1.4.1">>, source => hex}], prisma_lock:discover_deps(TmpProj)),
-
-    FakeJasonPplt = prisma_pplt:new(<<"jason">>, <<"1.4.1">>),
-    EncodedJason = prisma_pplt:encode(FakeJasonPplt),
-    Fetcher = fun(_OtpRel, <<"jason">>, <<"1.4.1">>) -> {ok, EncodedJason} end,
-
-    {ok, Resolved} = prisma_lock:resolve_project_pplts(TmpProj, #{
-        cache_dir => TmpCache,
-        fetcher => Fetcher
-    }),
-    ?assertMatch(#prisma_pplt{}, Resolved),
-    ?assert(filelib:is_regular(prisma_lock:cache_path(TmpCache, <<"jason">>, <<"1.4.1">>))),
+    {ok, Resolved} = prisma_lock:resolve_project_pplts(TmpProj, #{cache_dir => TmpCache}),
+    ?assertEqual([], prisma_pplt:modules(Resolved)),
 
     %% Extra rebar.lock variants and CLI helpers
     ExtraRebar = "[{<<\"a\">>,{pkg,a,\"1.0\",[]},0},{<<\"b\">>,{git,\"u\",{branch,\"main\"}},0},{<<\"c\">>,{git,\"u\",{tag,\"v1\"}},0}].",
@@ -205,3 +196,58 @@ candidate_build_ebins_default_fallback_test() ->
     ?assertEqual([DevEbin], prisma_lock:discover_project_ebins(TmpProj, #{})),
     ?assertEqual({ok, []}, prisma:analyze_project(TmpProj)),
     os:cmd("rm -rf " ++ TmpProj).
+
+
+%% A library can publish its PPLT with the code (`priv/<app>.pplt`, made with `prisma build --output priv/<app>.pplt <ebin>`):
+%% the dependency in `_build/*/lib/<app>` or `deps/<app>` is read from it, without its beams and without building anything.
+dep_lib_beam() ->
+    Forms = [
+        {attribute, 1, module, dep_lib},
+        {attribute, 2, export, [{fetch_count, 1}]},
+        {attribute, 3, spec, {{fetch_count, 1}, [
+            {type, 3, 'fun', [{type, 3, product, [{type, 3, binary, []}]}, {type, 3, non_neg_integer, []}]}
+        ]}},
+        {function, 4, fetch_count, 1, [
+            {clause, 4, [{var, 4, 'B'}], [], [{call, 4, {atom, 4, byte_size}, [{var, 4, 'B'}]}]}
+        ]}
+    ],
+    {ok, dep_lib, Beam} = compile:forms(Forms, [debug_info]),
+    Beam.
+
+shipped_pplt_is_used_before_building_test_() ->
+    [{atom_to_list(Where), fun() -> shipped_pplt_case(Where) end} || Where <- [rebar3_build, mix_deps]].
+
+shipped_pplt_case(Where) ->
+    Proj = "/tmp/prisma_dev/tmp_shipped_proj_" ++ atom_to_list(Where),
+    os:cmd("rm -rf " ++ Proj),
+    LibDir = case Where of
+        rebar3_build -> filename:join([Proj, "_build", "default", "lib", "dep_lib"]);
+        mix_deps -> filename:join([Proj, "deps", "dep_lib"])
+    end,
+    PrivFile = filename:join([LibDir, "priv", "dep_lib.pplt"]),
+    ok = filelib:ensure_dir(PrivFile),
+    {ok, Built} = prisma_pplt:from_beams([dep_lib_beam()], #{package => <<"dep_lib">>, package_vsn => <<"1.2.3">>}),
+    ok = prisma_pplt:save(Built, PrivFile),
+    ok = file:write_file(filename:join(Proj, "rebar.lock"),
+                         "{\"1.2.0\", [{<<\"dep_lib\">>, {pkg, <<\"dep_lib\">>, <<\"1.2.3\">>}, 0}]}.\n"),
+    {ok, Resolved} = prisma_lock:resolve_project_pplts(Proj, #{}),
+    ?assertEqual([dep_lib], prisma_pplt:modules(Resolved)),
+    %% nothing was built, so nothing was cached next to the lock
+    ?assertNot(filelib:is_dir(filename:join(Proj, ".prisma"))),
+    os:cmd("rm -rf " ++ Proj).
+
+%% What Prisma has to build is kept next to `rebar.lock` / `mix.lock`, in `.prisma/`, not in a place shared by every project.
+a_built_dependency_is_cached_next_to_the_lock_test() ->
+    Proj = "/tmp/prisma_dev/tmp_project_cache",
+    os:cmd("rm -rf " ++ Proj),
+    Ebin = filename:join([Proj, "_build", "default", "lib", "dep_lib", "ebin"]),
+    ok = filelib:ensure_dir(filename:join(Ebin, "dummy")),
+    ok = file:write_file(filename:join(Ebin, "dep_lib.beam"), dep_lib_beam()),
+    ok = file:write_file(filename:join(Proj, "rebar.lock"),
+                         "{\"1.2.0\", [{<<\"dep_lib\">>, {pkg, <<\"dep_lib\">>, <<\"1.2.3\">>}, 0}]}.\n"),
+    {ok, Resolved} = prisma_lock:resolve_project_pplts(Proj, #{}),
+    ?assertEqual([dep_lib], prisma_pplt:modules(Resolved)),
+    Cached = prisma_lock:cache_path(prisma_lock:project_cache_dir(Proj), <<"dep_lib">>, <<"1.2.3">>),
+    ?assertEqual(filename:join(Proj, ".prisma"), prisma_lock:project_cache_dir(Proj)),
+    ?assert(filelib:is_regular(Cached)),
+    os:cmd("rm -rf " ++ Proj).
