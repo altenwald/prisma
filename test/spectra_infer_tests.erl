@@ -681,3 +681,48 @@ a_failing_call_in_a_guard_or_a_nested_construct_does_not_name_its_callers_test()
           "g(X) -> f(X) =:= yes.\n",
     %% only the guard test of f/1 is named, not g/1 which calls it
     ?assertEqual([{discrepancy, 3}], plain_warnings(Src)).
+
+%% A call to a function that does not exist in a module Spectra knows is reported; a module it does not know says nothing.
+
+missing_callee() ->
+    "-export([g/1]).\n-spec g(integer()) -> ok.\ng(_) -> ok.\nhidden() -> ok.\n".
+
+missing_hits(Body, Mode) ->
+    Caller = "-export([f/0]).\nf() ->\n" ++ Body ++ ".\n",
+    [L || {unknown_function, L} <- two_module_warnings(Caller, missing_callee(), Mode)].
+
+call_to_a_function_that_does_not_exist_test() ->
+    ?assertEqual([4], missing_hits("    ov_callee:nonexistent(1)", discrepancy)),
+    ?assertEqual([4], missing_hits("    ov_callee:nonexistent(1)", hybrid)),
+    %% wrong arity: g/1 exists, g/2 does not
+    ?assertEqual([4], missing_hits("    ov_callee:g(1, 2)", discrepancy)),
+    %% not exported but defined: left alone (a module may export everything with a compile attribute)
+    ?assertEqual([], missing_hits("    ov_callee:hidden()", discrepancy)).
+
+call_to_a_function_that_exists_is_fine_test() ->
+    ?assertEqual([], missing_hits("    ov_callee:g(1)", discrepancy)),
+    %% what the compiler adds without it being in the code
+    ?assertEqual([], missing_hits("    ov_callee:module_info(),\n    ov_callee:module_info(exports),\n    ov_callee:behaviour_info(callbacks)", discrepancy)).
+
+call_to_a_module_that_is_not_known_says_nothing_test() ->
+    ?assertEqual([], missing_hits("    not_a_module_of_the_plt:anything(1),\n    erlang:anything_at_all(2)", discrepancy)).
+
+missing_function_is_reported_inside_nested_constructs_test() ->
+    ?assertEqual([4], missing_hits("    F = fun() -> ov_callee:nonexistent(1) end,\n    F()", discrepancy)),
+    ?assertEqual([5], missing_hits("    try ok of\n        ok -> ov_callee:nonexistent(1)\n    catch _:_ -> b\n    end", discrepancy)).
+
+%% A saved .splt only needs contracts, not the code of every function.
+
+saved_plt_keeps_contracts_and_drops_the_code_test() ->
+    Text = "-module(plt_lean).\n-export([f/1]).\n-spec f(integer()) -> integer().\nf(X) -> X + 1.\n",
+    {ok, Toks, _} = erl_scan:string(Text),
+    {ok, plt_lean, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+    {ok, Plt} = spectra_plt:from_beams([Beam]),
+    #module_summary{functions = Before} = maps:get(plt_lean, Plt#spectra_plt.modules),
+    ?assertMatch(#func_contract{clauses = [_ | _]}, maps:get({plt_lean, f, 1}, Before)),
+    {ok, Loaded} = spectra_plt:decode(spectra_plt:encode(Plt)),
+    #module_summary{functions = After} = maps:get(plt_lean, Loaded#spectra_plt.modules),
+    #func_contract{clauses = [], declared_specs = Specs, inferred_type = Inferred, exported = true} = maps:get({plt_lean, f, 1}, After),
+    #func_contract{declared_specs = Specs0, inferred_type = Inferred0} = maps:get({plt_lean, f, 1}, Before),
+    ?assertEqual(Specs0, Specs),
+    ?assertEqual(Inferred0, Inferred).

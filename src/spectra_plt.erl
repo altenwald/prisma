@@ -19,6 +19,7 @@
     encode/1,
     decode/1,
     lookup_mfa/2,
+    lookup_module/2,
     lookup_type/2,
     resolve_type/3,
     resolve_type/4,
@@ -91,9 +92,18 @@ merge(#spectra_plt{modules = M1} = Plt1, #spectra_plt{modules = M2}) ->
 
 %% @doc Serializes a `#spectra_plt{}` into a compressed binary with header magic.
 -spec encode(#spectra_plt{}) -> binary().
-encode(#spectra_plt{} = Plt) ->
-    Payload = term_to_binary(Plt, [compressed, {minor_version, 2}]),
+encode(#spectra_plt{modules = Modules} = Plt) ->
+    Lean = Plt#spectra_plt{modules = maps:map(fun(_Mod, Summary) -> without_code(Summary) end, Modules)},
+    Payload = term_to_binary(Lean, [compressed, {minor_version, 2}]),
     <<?SPECTRA_PLT_MAGIC, Payload/binary>>.
+
+%% What is saved are the contracts. The abstract code of every function (`clauses`) is only needed while the module itself is
+%% inferred and by the oxbow detector, which runs on the modules being analyzed and never on a dependency loaded from a .splt:
+%% in the file it was most of the size and of the time spent writing and reading it.
+without_code(#module_summary{functions = Funcs} = Summary) ->
+    Summary#module_summary{functions = maps:map(fun(_MFA, #func_contract{} = FC) -> FC#func_contract{clauses = []};
+                                                   (_MFA, Other) -> Other
+                                                end, Funcs)}.
 
 %% @doc Decodes a `.splt` binary into a `#spectra_plt{}` record.
 -spec decode(binary()) -> {ok, #spectra_plt{}} | {error, term()}.
@@ -191,6 +201,11 @@ load(FilePath) ->
         {ok, Bin} -> decode(Bin);
         {error, Reason} -> {error, Reason}
     end.
+
+%% @doc Looks up what is known about module `Mod` in the PLT.
+-spec lookup_module(module(), #spectra_plt{}) -> {ok, #module_summary{}} | error.
+lookup_module(Mod, #spectra_plt{modules = Mods}) ->
+    maps:find(Mod, Mods).
 
 %% @doc Looks up a function contract `{M, F, A}` in the PLT.
 -spec lookup_mfa(mfa_key(), #spectra_plt{}) -> {ok, #func_contract{}} | error.

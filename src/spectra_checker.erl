@@ -110,8 +110,38 @@ check_remote_discrepancy_call({CallerMod, _, _} = CallerMFA, Line, {CalleeMod, _
                     []
             end;
         error ->
-            []
+            unknown_function_warnings(CallerMFA, Line, CalleeMFA, Plt)
     end.
+
+%% A call to a function that does not exist in a module the PLT knows. A module that is not in the PLT proves nothing (it may just
+%% not have been analyzed), a module that is not Erlang (Elixir's generated functions) is left alone, `erlang` is the BIFs, and
+%% the compiler adds `module_info/0,1` and `behaviour_info/1` without them being in the code. A function that exists without being
+%% exported is not reported either: a module can export everything with a compile attribute.
+unknown_function_warnings(CallerMFA, Line, {Mod, F, A} = CalleeMFA, Plt) ->
+    case provided_by_the_compiler(Mod, F, A) of
+        true ->
+            [];
+        false ->
+            case spectra_plt:lookup_module(Mod, Plt) of
+                {ok, #module_summary{language = Language, functions = Funcs}} when Language =/= elixir ->
+                    Arities = lists:sort([FA || {M, Fn, FA} <- maps:keys(Funcs), M =:= Mod, Fn =:= F]),
+                    Msg = iolist_to_binary(io_lib:format(
+                        "Call to ~s:~s/~B: ~s has no such function~s",
+                        [Mod, F, A, Mod, case Arities of
+                                             [] -> "";
+                                             _ -> io_lib:format(" (it has ~s/~s)", [F, lists:join(", ", [integer_to_list(X) || X <- Arities])])
+                                         end])),
+                    [#spectra_warning{kind = unknown_function, mfa = CallerMFA, line = Line, message = Msg, callee = CalleeMFA}];
+                _ ->
+                    []
+            end
+    end.
+
+provided_by_the_compiler(erlang, _, _) -> true;
+provided_by_the_compiler(_, module_info, 0) -> true;
+provided_by_the_compiler(_, module_info, 1) -> true;
+provided_by_the_compiler(_, behaviour_info, 1) -> true;
+provided_by_the_compiler(_, _, _) -> false.
 
 verify_gradual_calls(#func_contract{mfa = {CallerMod, _, _} = CallerMFA, call_sites = Sites}, Plt) ->
     lists:flatmap(

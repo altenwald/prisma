@@ -173,8 +173,21 @@ from_type_attr(Mod, Kind, {Name, BodyAst, ParamAsts}) ->
 
 %% @doc Flattens, deduplicates, and simplifies a list of union member types.
 -spec normalize_union([stype()]) -> stype().
+normalize_union([]) ->
+    none;
+normalize_union([{union, _} | _] = Types) ->
+    normalize_union_general(Types);
+normalize_union([T]) ->
+    %% what the general path gives for a single type that is not a union (including `none` and `any`)
+    T;
+normalize_union([T, T]) ->
+    T;
 normalize_union(Types) ->
-    Flattened = flatten_unions(Types),
+    normalize_union_general(Types).
+
+%% It is called all the time, mostly on lists of one or two types: the clauses above are the shortcuts for those.
+normalize_union_general(Types) ->
+    Flattened = flatten_unions(Types, []),
     WithoutNone = [T || T <- Flattened, T =/= none],
     case lists:member(any, WithoutNone) of
         true ->
@@ -816,12 +829,13 @@ resolve_constraint_fixpoint(Constraints) ->
         Constraints
     ).
 
-flatten_unions([]) ->
-    [];
-flatten_unions([{union, Nested} | Rest]) ->
-    flatten_unions(Nested) ++ flatten_unions(Rest);
-flatten_unions([H | Rest]) ->
-    [H | flatten_unions(Rest)].
+%% In no particular order: the caller sorts.
+flatten_unions([], Acc) ->
+    Acc;
+flatten_unions([{union, Nested} | Rest], Acc) ->
+    flatten_unions(Rest, flatten_unions(Nested, Acc));
+flatten_unions([H | Rest], Acc) ->
+    flatten_unions(Rest, [H | Acc]).
 
 collapse_booleans(Types) ->
     HasTrue = lists:member({atom_lit, true}, Types),

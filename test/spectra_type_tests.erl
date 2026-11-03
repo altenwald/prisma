@@ -308,3 +308,19 @@ type_format_elixir_and_erlang_test() ->
 
     ?assertEqual("MyApp.User", spectra_type:clean_module('Elixir.MyApp.User')),
     ?assertEqual("my_erlang_mod", spectra_type:clean_module(my_erlang_mod)).
+
+%% normalize_union/1 is called on very short lists all the time: the shortcuts must give exactly what the general path gives.
+
+normalize_union_shortcuts_agree_with_the_general_path_test() ->
+    General = fun(Ts) ->
+        Flat = lists:flatten([case T of {union, Ms} -> Ms; _ -> [T] end || T <- Ts]),
+        spectra_type:normalize_union(Flat ++ [none])   %% the extra `none` keeps it off the shortcuts
+    end,
+    Samples = [any, none, boolean, integer, {atom_lit, true}, {atom_lit, false}, {atom_lit, a}, {int_lit, 1},
+               {list, integer}, {union, [integer, atom]}, {union, [{atom_lit, true}, {atom_lit, false}]},
+               {union, [{union, [integer, float]}, atom]}],
+    [?assertEqual(General([T]), spectra_type:normalize_union([T])) || T <- Samples],
+    [?assertEqual(General([A, B]), spectra_type:normalize_union([A, B])) || A <- Samples, B <- Samples],
+    ?assertEqual(integer, spectra_type:normalize_union([integer, integer])),
+    ?assertEqual(boolean, spectra_type:normalize_union([{atom_lit, true}, {atom_lit, false}])),
+    ?assertEqual(none, spectra_type:normalize_union([])).
