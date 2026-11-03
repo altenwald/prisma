@@ -20,19 +20,32 @@ One of the greatest points of friction when running static type analysis on the 
 ### The Prisma PPLT Architecture
 Prisma introduces the portable, binary **`.pplt`** format:
 - **Modular & Granular:** Every dependency in `rebar.lock` or `mix.lock`, as well as base Erlang/OTP modules, has its own isolated `.pplt`.
-- **No server:** Prisma looks for the `.pplt` of each locked dependency, in this order: (1) the one the **library ships with its code**, `priv/<app>.pplt` in `_build/*/lib/<app>` or `deps/<app>`; (2) the one Prisma built before, in **`.prisma/` next to `rebar.lock` / `mix.lock`**; (3) a new one built from the dependency's beams in `_build`, saved in `.prisma/`. Nothing is downloaded and there is nothing to keep running.
-- **Zero Redundant Rebuilds:** If a dependency's package name and version have not changed, its `.pplt` is loaded directly from `.prisma/`. You can commit that directory to share it with your team and CI, or ignore it.
+- **No server:** Prisma looks for the `.pplt` of each locked dependency, in this order: (1) the ones the **library ships at the root of its package**, `deps/<app>/*.pplt` (Mix) and `_build/*/lib/<app>/*.pplt` (where rebar3 puts its dependencies), whatever their names; (2) the one Prisma built before, `_build/<app>_<vsn>.pplt`; (3) a new one, built from the dependency's beams in `_build` and saved there. Nothing is downloaded and there is nothing to keep running.
+- **One file per system:** `_build/otp_<release>.pplt` for the OTP applications and `_build/elixir_<version>.pplt` for Elixir. They are made with `prisma build` and passed with `--pplt` (the analysis of a project only builds them if it is asked to).
+- **Zero Redundant Rebuilds:** If a dependency's package name and version have not changed, its `.pplt` is loaded directly from `_build/`.
 - **Sub-Second Merging:** At analysis time, Prisma dynamically merges dependency `.pplt` files in-memory in milliseconds, focusing analysis purely on your project's application code.
 
 ### Publishing a `.pplt` with your library
 
-A library author makes it once per release and ships it in `priv/`, which Hex packages and releases already include:
+**Please ship the `.pplt` in your package.** Make it once per release, call it `<app>_<vsn>.pplt` and leave it at the root of the package, next to `mix.exs` or `rebar.config` (not in `priv/`, which is for what ends up in a release, not for checking tools):
 
 ```bash
-prisma build --output priv/my_lib.pplt _build/default/lib/my_lib/ebin
+prisma build --output my_lib_1.2.3.pplt _build/default/lib/my_lib/ebin
 ```
 
-Whoever depends on the library then gets its contracts without building anything. Keep the file next to the code it was made from: Prisma trusts it as it trusts the beams.
+and add it to what you upload to Hex:
+
+```elixir
+# mix.exs
+files: ~w(lib mix.exs README* LICENSE* my_lib_*.pplt)
+```
+
+```erlang
+%% src/my_lib.app.src
+{files, ["src", "include", "rebar.config", "README.md", "my_lib_1.2.3.pplt"]}
+```
+
+Whoever depends on the library then gets its contracts without building anything. One or more files, with any names, are read from the root of the dependency; keep them next to the code they were made from: Prisma trusts them as it trusts the beams.
 
 ---
 

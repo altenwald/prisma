@@ -1,11 +1,11 @@
 %% @doc Parses `rebar.lock` and `mix.lock` files and finds the `.pplt` of each locked dependency.
 %%
 %% There is no server to ask. For every dependency of the lock, in this order:
-%%   1. the `.pplt` that the library ships with its code, `priv/<app>.pplt` in `_build/*/lib/<app>` or `deps/<app>`
-%%      (the author makes it with `prisma build --output priv/<app>.pplt <ebin>`);
-%%   2. the one Prisma built before, in `.prisma/` next to the lock file;
-%%   3. a new one, built from the dependency's beams in `_build` and saved in `.prisma/`.
-%% The base OTP applications are cached per OTP release, in the user's cache directory.
+%%   1. the `.pplt` files that the library ships at the root of its package, `deps/<app>/*.pplt` (Mix, any name; the
+%%      convention is `<app>_<vsn>.pplt`) and `_build/*/lib/<app>/*.pplt` (where rebar3 puts the dependencies);
+%%   2. the one Prisma built before, `_build/<app>_<vsn>.pplt`;
+%%   3. a new one, built from the dependency's beams in `_build` and saved there.
+%% The base systems have one file each: `_build/otp_<release>.pplt` and `_build/elixir_<version>.pplt`.
 -module(prisma_lock).
 
 -include("prisma.hrl").
@@ -16,10 +16,12 @@
     discover_deps/1,
     default_cache_dir/0,
     project_cache_dir/1,
-    shipped_pplt/2,
+    shipped_pplts/2,
     cache_path/3,
-    otp_cache_path/2,
+    otp_cache_path/1,
     ensure_otp_pplt/2,
+    elixir_cache_path/1,
+    ensure_elixir_pplt/1,
     resolve_project_pplts/2,
     discover_project_ebins/2
 ]).
@@ -153,62 +155,100 @@ default_cache_dir() ->
         EnvDir -> EnvDir
     end.
 
-%% @doc Returns the `.pplt` cache file path for a package and version on the current OTP release.
+%% @doc The `.pplt` of a package and version that Prisma builds: `<dir>/<name>_<version>.pplt`.
 -spec cache_path(file:filename_all(), binary(), binary()) -> string().
 cache_path(CacheDir, Name, Version) ->
-    OtpRel = erlang:system_info(otp_release),
-    FileName = binary_to_list(<<Name/binary, "-", Version/binary, ".pplt">>),
-    filename:join([unicode:characters_to_list(CacheDir), "otp-" ++ OtpRel, FileName]).
+    FileName = binary_to_list(<<Name/binary, "_", Version/binary, ".pplt">>),
+    filename:join(unicode:characters_to_list(CacheDir), FileName).
 
-%% @doc The directory where what Prisma builds for a project's dependencies is kept: `.prisma/` next to `rebar.lock` / `mix.lock`.
+%% @doc Where what Prisma builds is kept: the `_build` directory of the project, next to `rebar.lock` / `mix.lock`.
 -spec project_cache_dir(file:filename_all()) -> string().
 project_cache_dir(ProjectRoot) ->
-    filename:join(unicode:characters_to_list(ProjectRoot), ".prisma").
+    filename:join(unicode:characters_to_list(ProjectRoot), "_build").
 
-%% @doc The `.pplt` that a library ships with its code (`priv/<app>.pplt`), in the build directory of rebar3 or Mix, or in `deps/`.
--spec shipped_pplt(file:filename_all(), binary()) -> {ok, string()} | error.
-shipped_pplt(ProjectRoot, Name) ->
+%% @doc The `.pplt` files that a library ships at the root of its package: `deps/<app>/*.pplt`, and `_build/*/lib/<app>/*.pplt`
+%% (where rebar3 puts its dependencies). `priv/` is not used: it is for what ends up in a release, not for checking tools.
+-spec shipped_pplts(file:filename_all(), binary()) -> [string()].
+shipped_pplts(ProjectRoot, Name) ->
     Root = unicode:characters_to_list(ProjectRoot),
     App = binary_to_list(Name),
-    Candidates = filelib:wildcard(filename:join([Root, "_build", "*", "lib", App, "priv", App ++ ".pplt"])) ++
-                 filelib:wildcard(filename:join([Root, "deps", App, "priv", App ++ ".pplt"])),
-    case [C || C <- Candidates, filelib:is_regular(C)] of
-        [First | _] -> {ok, First};
-        [] -> error
-    end.
+    Found = filelib:wildcard(filename:join([Root, "deps", App, "*.pplt"])) ++
+            filelib:wildcard(filename:join([Root, "_build", "*", "lib", App, "*.pplt"])),
+    lists:usort([F || F <- Found, filelib:is_regular(F)]).
 
-%% @doc Returns the `.pplt` cache file path for an OTP application on the current OTP release.
--spec otp_cache_path(file:filename_all(), atom()) -> string().
-otp_cache_path(CacheDir, OtpApp) ->
-    OtpRel = erlang:system_info(otp_release),
-    FileName = atom_to_list(OtpApp) ++ ".pplt",
-    filename:join([unicode:characters_to_list(CacheDir), "otp-" ++ OtpRel, "otp", FileName]).
+%% @doc `<dir>/otp_<release>.pplt`: the PPLT of the OTP applications, one file for the release that is running.
+-spec otp_cache_path(file:filename_all()) -> string().
+otp_cache_path(CacheDir) ->
+    filename:join(unicode:characters_to_list(CacheDir), "otp_" ++ erlang:system_info(otp_release) ++ ".pplt").
 
-%% @doc Loads or builds and caches the `.pplt` for an OTP application (e.g. `stdlib`).
--spec ensure_otp_pplt(atom(), map()) -> {ok, #prisma_pplt{}} | {error, term()}.
-ensure_otp_pplt(OtpApp, Opts) ->
+%% @doc Loads the PPLT of OTP, or builds it from the beams of the applications and saves it. The applications are
+%% `otp_apps`; a file that is already there is used as it is. Analysing a project adds it only if `otp_apps` is given.
+-spec ensure_otp_pplt([atom()], map()) -> {ok, #prisma_pplt{}} | {error, term()}.
+ensure_otp_pplt(OtpApps, Opts) ->
     CacheDir = maps:get(cache_dir, Opts, default_cache_dir()),
-    Path = otp_cache_path(CacheDir, OtpApp),
+    Path = otp_cache_path(CacheDir),
     case filelib:is_regular(Path) of
         true ->
             prisma_pplt:load(Path);
         false ->
-            case code:lib_dir(OtpApp) of
-                {error, Reason} ->
-                    {error, Reason};
-                LibDir ->
-                    EbinDir = filename:join(LibDir, "ebin"),
-                    PkgName = atom_to_binary(OtpApp, utf8),
-                    OtpRel = list_to_binary(erlang:system_info(otp_release)),
-                    Beams = filelib:wildcard(filename:join(EbinDir, "*.beam")),
-                    case prisma_pplt:from_beams(Beams, #{package => PkgName, package_vsn => OtpRel}) of
-                        {ok, Pplt} ->
-                            _ = prisma_pplt:save(Pplt, Path),
-                            {ok, Pplt};
-                        Error ->
-                            Error
+            build_system_pplt(OtpApps, Path, <<"otp">>, list_to_binary(erlang:system_info(otp_release)))
+    end.
+
+%% @doc `<dir>/elixir_<version>.pplt`, for the Elixir that is running (none if there is no Elixir).
+-spec elixir_cache_path(file:filename_all()) -> {ok, string()} | error.
+elixir_cache_path(CacheDir) ->
+    case elixir_version() of
+        {ok, Vsn} -> {ok, filename:join(unicode:characters_to_list(CacheDir), "elixir_" ++ Vsn ++ ".pplt")};
+        error -> error
+    end.
+
+%% @doc Loads the PPLT of Elixir, or builds it from the beams of the `elixir` application and saves it.
+-spec ensure_elixir_pplt(map()) -> {ok, #prisma_pplt{}} | {error, term()}.
+ensure_elixir_pplt(Opts) ->
+    CacheDir = maps:get(cache_dir, Opts, default_cache_dir()),
+    case elixir_cache_path(CacheDir) of
+        error ->
+            {error, no_elixir};
+        {ok, Path} ->
+            case filelib:is_regular(Path) of
+                true ->
+                    prisma_pplt:load(Path);
+                false ->
+                    {ok, Vsn} = elixir_version(),
+                    build_system_pplt([elixir], Path, <<"elixir">>, list_to_binary(Vsn))
+            end
+    end.
+
+elixir_version() ->
+    case application:get_key(elixir, vsn) of
+        {ok, Vsn} ->
+            {ok, Vsn};
+        undefined ->
+            case code:lib_dir(elixir) of
+                {error, _} ->
+                    error;
+                Dir ->
+                    case file:consult(filename:join([Dir, "ebin", "elixir.app"])) of
+                        {ok, [{application, elixir, Props}]} -> {ok, proplists:get_value(vsn, Props, "unknown")};
+                        _ -> error
                     end
             end
+    end.
+
+build_system_pplt(Apps, Path, Package, Vsn) ->
+    Dirs = [{App, code:lib_dir(App)} || App <- Apps],
+    case [App || {App, {error, _}} <- Dirs] of
+        [] ->
+            Beams = lists:append([filelib:wildcard(filename:join([Dir, "ebin", "*.beam"])) || {_, Dir} <- Dirs]),
+            case prisma_pplt:from_beams(Beams, #{package => Package, package_vsn => Vsn}) of
+                {ok, Pplt} ->
+                    _ = prisma_pplt:save(Pplt, Path),
+                    {ok, Pplt};
+                Error ->
+                    Error
+            end;
+        Missing ->
+            {error, {unknown_applications, Missing}}
     end.
 
 %% @doc Resolves, builds/fetches, caches, and merges `.pplt` files for a project's locked dependencies.
@@ -216,38 +256,33 @@ ensure_otp_pplt(OtpApp, Opts) ->
     {ok, #prisma_pplt{}} | {error, term()}.
 resolve_project_pplts(ProjectRoot, Opts) ->
     CacheDir = maps:get(cache_dir, Opts, project_cache_dir(ProjectRoot)),
-    OtpApps = maps:get(otp_apps, Opts, []),
+    SysOpts = Opts#{cache_dir => CacheDir},
     Deps = discover_deps(ProjectRoot),
-    OtpPlts = lists:filtermap(
-        fun(App) ->
-            case ensure_otp_pplt(App, Opts) of
-                {ok, Pplt} -> {true, Pplt};
-                _ -> false
-            end
-        end,
-        OtpApps
+    OtpApps = maps:get(otp_apps, Opts, []),
+    Otp = case OtpApps of
+        [] -> [];
+        _ -> [P || {ok, P} <- [ensure_otp_pplt(OtpApps, SysOpts)]]
+    end,
+    Elixir = case maps:get(elixir, Opts, false) of
+        true -> [P || {ok, P} <- [ensure_elixir_pplt(SysOpts)]];
+        false -> []
+    end,
+    DepPplts = lists:append(
+        [resolve_single_dep(ProjectRoot, CacheDir, Name, Vsn) || #{name := Name, version := Vsn} <- Deps]
     ),
-    DepPlts = lists:filtermap(
-        fun(#{name := Name, version := Vsn}) ->
-            case resolve_single_dep(ProjectRoot, CacheDir, Name, Vsn) of
-                {ok, Pplt} -> {true, Pplt};
-                _ -> false
-            end
-        end,
-        Deps
-    ),
-    {ok, prisma_pplt:merge(OtpPlts ++ DepPlts)}.
+    {ok, prisma_pplt:merge(Otp ++ Elixir ++ DepPplts)}.
 
 resolve_single_dep(ProjectRoot, CacheDir, Name, Vsn) ->
-    case shipped_pplt(ProjectRoot, Name) of
-        {ok, Shipped} ->
-            prisma_pplt:load(Shipped);
-        error ->
+    case shipped_pplts(ProjectRoot, Name) of
+        [_ | _] = Shipped ->
+            [P || {ok, P} <- [prisma_pplt:load(F) || F <- Shipped]];
+        [] ->
             Path = cache_path(CacheDir, Name, Vsn),
-            case filelib:is_regular(Path) of
+            Result = case filelib:is_regular(Path) of
                 true -> prisma_pplt:load(Path);
                 false -> build_and_cache_local_dep(ProjectRoot, Path, Name, Vsn)
-            end
+            end,
+            [P || {ok, P} <- [Result]]
     end.
 
 build_and_cache_local_dep(ProjectRoot, CachePath, Name, Vsn) ->
