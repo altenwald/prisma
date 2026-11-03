@@ -26,7 +26,7 @@ extract_and_portable_plt_test() ->
     ?assertMatch({error, {beam_extract_failed, _, _}}, prisma_plt:from_beams(["/bad.beam", BeamFile])),
 
     TmpPltFile = "/tmp/prisma_dev/test_out.pplt",
-    {ok, BuiltPlt} = prisma:build_plt([EbinDir], TmpPltFile),
+    {ok, BuiltPlt} = prisma:build([EbinDir], TmpPltFile),
     ?assert(lists:member(prisma, prisma_plt:modules(BuiltPlt))),
     ?assertMatch({ok, []}, prisma:analyze_dirs([EbinDir], #{plts => [TmpPltFile]})),
     ?assertMatch({ok, []}, prisma:analyze_dirs([BeamFile])),

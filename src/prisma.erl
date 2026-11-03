@@ -7,7 +7,7 @@
     init/1,
     main/1,
     version/0,
-    build_plt/2,
+    build/2,
     analyze_project/1,
     analyze_project/2,
     analyze_dirs/1,
@@ -28,9 +28,9 @@ version() ->
     <<"0.1.0">>.
 
 %% @doc Builds a portable `.pplt` file from BEAM directories or files.
--spec build_plt([file:filename_all()], file:filename_all()) ->
+-spec build([file:filename_all()], file:filename_all()) ->
     {ok, #prisma_plt{}} | {error, term()}.
-build_plt(Inputs, OutputFile) ->
+build(Inputs, OutputFile) ->
     Beams = expand_beams(Inputs),
     case prisma_plt:from_beams(Beams) of
         {ok, Plt} ->
@@ -104,14 +104,14 @@ resolve_lock_plt(Opts) ->
 main(["version"]) ->
     io:format("prisma ~s (OTP ~s)~n", [version(), erlang:system_info(otp_release)]),
     erlang:halt(0);
-main(["build-plt", "--output", OutFile | Inputs]) when Inputs =/= [] ->
-    case build_plt(Inputs, OutFile) of
+main(["build", "--output", OutFile | Inputs]) when Inputs =/= [] ->
+    case build(Inputs, OutFile) of
         {ok, Plt} ->
             Mods = prisma_plt:modules(Plt),
-            io:format("Built portable PLT ~s (~B modules)~n", [OutFile, length(Mods)]),
+            io:format("Built PPLT ~s (~B modules)~n", [OutFile, length(Mods)]),
             erlang:halt(0);
         {error, Reason} ->
-            io:format(standard_error, "Failed to build PLT: ~p~n", [Reason]),
+            io:format(standard_error, "Failed to build PPLT: ~p~n", [Reason]),
             erlang:halt(1)
     end;
 main(["check" | Rest]) ->
@@ -144,7 +144,7 @@ main(_) ->
     io:format(
         "Usage:~n"
         "  prisma version~n"
-        "  prisma build-plt --output <file.pplt> <ebin_or_beam...>~n"
+        "  prisma build --output <file.pplt> <ebin_or_beam...>~n"
         "  prisma check [--format <human|pretty|oneline|json>] [--no-color] [--color] [--plt <file.pplt>...] [<ebin_or_beam...>]~n"
     ),
     erlang:halt(1).

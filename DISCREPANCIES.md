@@ -219,7 +219,7 @@ Prisma builds the `.pplt` of a package once per version and loads it on demand.
 
 | Step | Wall | Peak memory | Warnings (all kinds) |
 | :--- | :---: | :---: | :---: |
-| `build-plt` of the 6 dependency apps of `rabbit` (206 modules, 441 KiB file) | 1.45 s | 344 MiB | n/a |
+| `build` of the 6 dependency apps of `rabbit` (206 modules, 441 KiB file) | 1.45 s | 344 MiB | n/a |
 | `check rabbit` without `--plt` | 1.2 - 1.4 s | 333 - 342 MiB | 177 |
 | `check rabbit` with the dependencies' `.pplt` | 1.7 s | 343 - 379 MiB | 221 |
 
@@ -238,7 +238,7 @@ Same corpus, same machine and harness (`rabbit`, discrepancy mode, 5 runs), star
 | User CPU | 0.62 s | 1.00 s | +60% |
 | System CPU | 0.25 s | 0.25 s | equal |
 | Peak memory | 281 MB | 284 - 313 MB | +1% to +11% |
-| `build-plt` of the 6 dependency apps | 3.9 s, 2.4 MB, 331 MiB | 1.45 s, 441 KiB, 344 MiB | faster, smaller |
+| `build` of the 6 dependency apps | 3.9 s, 2.4 MB, 331 MiB | 1.45 s, 441 KiB, 344 MiB | faster, smaller |
 | `.pplt` of OTP `compiler` (60 modules) | 0.51 s, 2,065 KiB | ~0.40 s, ~360 KiB | faster, smaller |
 
 The analysis is slower because it does more (it looks inside `fun`, `try`, `receive` and comprehensions, trusts declared specs, subtracts patterns in every `case`, bounds types with `widen/1`); the PLT is smaller
