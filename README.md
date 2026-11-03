@@ -7,7 +7,7 @@
 > *"If a static analysis tool produces false positives, developers lose confidence and stop using it or disable the checks. When code is flagged as dead, you should be able to kill it with fire with absolute certainty."*  
 > — **Fernando "Brujo" Benavides & Laura M. Castro** (*Detecting Oxbow Code in Erlang Codebases with the Highest Degree of Certainty*)
 
-**Prisma** is a fast, hybrid static type analyzer for **Erlang** and **Elixir** that combines the sound pragmatism of **Success Typing**, the contract enforcement of **Gradual Typing**, and portable, modular **`.splt` (Prisma Persistent Lookup Table)** files.
+**Prisma** is a fast, hybrid static type analyzer for **Erlang** and **Elixir** that combines the sound pragmatism of **Success Typing**, the contract enforcement of **Gradual Typing**, and portable, modular **`.pplt` (Prisma Persistent Lookup Table)** files.
 
 ---
 
@@ -18,11 +18,11 @@ One of the greatest points of friction when running static type analysis on the 
 - **Cache Invalidation:** A small change or rebuilding in a clean CI environment often triggers redundant, full-scale PLT re-analysis.
 
 ### The Prisma SPLT Architecture
-Prisma introduces the portable, binary **`.splt`** format:
-- **Modular & Granular:** Every dependency in `rebar.lock` or `mix.lock`, as well as base Erlang/OTP modules, is compiled into its own isolated `.splt` cache.
-- **Zero Redundant Rebuilds:** If a dependency's package name and version have not changed, its `.splt` is loaded directly from the local cache.
-- **Sub-Second Merging:** At analysis time, Prisma dynamically merges dependency `.splt` files in-memory in milliseconds, focusing analysis purely on your project's application code.
-- **Prisma Hub Ready:** Built-in client support for fetching pre-compiled `.splt` files on-demand for Hex.pm packages and target OTP versions, eliminating the need to compile dependency PLTs locally.
+Prisma introduces the portable, binary **`.pplt`** format:
+- **Modular & Granular:** Every dependency in `rebar.lock` or `mix.lock`, as well as base Erlang/OTP modules, is compiled into its own isolated `.pplt` cache.
+- **Zero Redundant Rebuilds:** If a dependency's package name and version have not changed, its `.pplt` is loaded directly from the local cache.
+- **Sub-Second Merging:** At analysis time, Prisma dynamically merges dependency `.pplt` files in-memory in milliseconds, focusing analysis purely on your project's application code.
+- **Prisma Hub Ready:** Built-in client support for fetching pre-compiled `.pplt` files on-demand for Hex.pm packages and target OTP versions, eliminating the need to compile dependency PLTs locally.
 
 ---
 
@@ -74,7 +74,7 @@ Or reference the Git repository directly:
 Run `rebar3 prisma` inside your project:
 
 ```bash
-# Basic check (automatically compiles and analyzes project apps against locked .splt deps)
+# Basic check (automatically compiles and analyzes project apps against locked .pplt deps)
 rebar3 prisma
 
 # Output format: human (default), oneline (for editor linters), or json (for CI)
@@ -103,7 +103,7 @@ You can set project-wide defaults under the `{prisma, [...]}` key in `rebar.conf
     {format, human},        %% human | oneline | json
     {oxbow, true},          %% true | false (detect dead functions and ignored parameters)
     {color, auto},          %% auto | always | never
-    {plts, ["custom.splt"]} %% optional extra .splt files to include
+    {plts, ["custom.pplt"]} %% optional extra .pplt files to include
 ]}.
 ```
 
@@ -176,7 +176,7 @@ def project do
       format: :human,       # :human | :oneline | :json
       oxbow: true,          # true | false
       color: :auto,         # :auto | :always | :never
-      plts: []              # optional extra .splt paths
+      plts: []              # optional extra .pplt paths
     ],
     deps: deps()
   ]
@@ -220,7 +220,7 @@ prisma check --no-color
 NO_COLOR=1 prisma check
 
 # Analyze specific BEAM directories against a custom SPLT
-prisma check --splt /path/to/project.splt _build/default/lib/*/ebin
+prisma check --pplt /path/to/project.pplt _build/default/lib/*/ebin
 ```
 
 ---

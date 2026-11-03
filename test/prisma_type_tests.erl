@@ -172,7 +172,7 @@ polymorphic_substitute_and_bounded_fun_test() ->
     ?assertEqual({opaque, m, t, [integer], atom}, prisma_type:substitute({opaque, m, t, [{var, 'A'}], {var, 'B'}}, Env)),
     ?assertEqual({recursive_ref, {m, t, 1}, [integer]}, prisma_type:substitute({recursive_ref, {m, t, 1}, [{var, 'A'}]}, Env)).
 
-remote_opaque_and_recursive_types_in_splt_test() ->
+remote_opaque_and_recursive_types_in_pplt_test() ->
     FormsA = [
         {attribute, 1, module, mod_a},
         {attribute, 2, export_type, [{user_id, 0}, {secret_token, 0}, {tree, 1}]},

@@ -1,6 +1,6 @@
-%% @doc Parses `rebar.lock` and `mix.lock` files and manages the local `.splt` cache.
+%% @doc Parses `rebar.lock` and `mix.lock` files and manages the local `.pplt` cache.
 %%
-%% Resolves locked dependencies and OTP base applications into cached `.splt`
+%% Resolves locked dependencies and OTP base applications into cached `.pplt`
 %% files indexed by OTP release, package name, and version.
 -module(prisma_lock).
 
@@ -139,7 +139,7 @@ discover_deps(ProjectRoot) ->
     end,
     sort_deps(RebarDeps ++ MixDeps).
 
-%% @doc Returns the default directory for storing cached `.splt` files.
+%% @doc Returns the default directory for storing cached `.pplt` files.
 -spec default_cache_dir() -> string().
 default_cache_dir() ->
     case os:getenv("PRISMA_CACHE_DIR") of
@@ -147,21 +147,21 @@ default_cache_dir() ->
         EnvDir -> EnvDir
     end.
 
-%% @doc Returns the `.splt` cache file path for a package and version on the current OTP release.
+%% @doc Returns the `.pplt` cache file path for a package and version on the current OTP release.
 -spec cache_path(file:filename_all(), binary(), binary()) -> string().
 cache_path(CacheDir, Name, Version) ->
     OtpRel = erlang:system_info(otp_release),
-    FileName = binary_to_list(<<Name/binary, "-", Version/binary, ".splt">>),
+    FileName = binary_to_list(<<Name/binary, "-", Version/binary, ".pplt">>),
     filename:join([unicode:characters_to_list(CacheDir), "otp-" ++ OtpRel, "hex", FileName]).
 
-%% @doc Returns the `.splt` cache file path for an OTP application on the current OTP release.
+%% @doc Returns the `.pplt` cache file path for an OTP application on the current OTP release.
 -spec otp_cache_path(file:filename_all(), atom()) -> string().
 otp_cache_path(CacheDir, OtpApp) ->
     OtpRel = erlang:system_info(otp_release),
-    FileName = atom_to_list(OtpApp) ++ ".splt",
+    FileName = atom_to_list(OtpApp) ++ ".pplt",
     filename:join([unicode:characters_to_list(CacheDir), "otp-" ++ OtpRel, "otp", FileName]).
 
-%% @doc Loads or builds and caches the `.splt` for an OTP application (e.g. `stdlib`).
+%% @doc Loads or builds and caches the `.pplt` for an OTP application (e.g. `stdlib`).
 -spec ensure_otp_plt(atom(), map()) -> {ok, #prisma_plt{}} | {error, term()}.
 ensure_otp_plt(OtpApp, Opts) ->
     CacheDir = maps:get(cache_dir, Opts, default_cache_dir()),
@@ -188,7 +188,7 @@ ensure_otp_plt(OtpApp, Opts) ->
             end
     end.
 
-%% @doc Resolves, builds/fetches, caches, and merges `.splt` files for a project's locked dependencies.
+%% @doc Resolves, builds/fetches, caches, and merges `.pplt` files for a project's locked dependencies.
 -spec resolve_project_plts(file:filename_all(), map()) ->
     {ok, #prisma_plt{}} | {error, term()}.
 resolve_project_plts(ProjectRoot, Opts) ->

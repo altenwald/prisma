@@ -42,7 +42,7 @@ parse_mix_lock_test() ->
 
 resolve_and_cache_project_plts_test() ->
     TmpProj = "/tmp/prisma_dev/tmp_lock_proj",
-    TmpCache = "/tmp/prisma_dev/tmp_splt_cache",
+    TmpCache = "/tmp/prisma_dev/tmp_pplt_cache",
     os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache),
 
     DepEbin = filename:join([TmpProj, "_build", "default", "lib", "dep_lib", "ebin"]),
@@ -68,13 +68,13 @@ resolve_and_cache_project_plts_test() ->
     LockText = "{\"1.2.0\", [{<<\"dep_lib\">>, {pkg, <<\"dep_lib\">>, <<\"1.2.3\">>}, 0}]}.\n",
     ok = file:write_file(filename:join(TmpProj, "rebar.lock"), LockText),
 
-    %% First resolution builds dep_lib-1.2.3.splt and caches it in TmpCache
+    %% First resolution builds dep_lib-1.2.3.pplt and caches it in TmpCache
     {ok, ResolvedPlt1} = prisma_lock:resolve_project_plts(TmpProj, #{cache_dir => TmpCache}),
     ?assertEqual([dep_lib], prisma_plt:modules(ResolvedPlt1)),
     ExpectedCachePath = prisma_lock:cache_path(TmpCache, <<"dep_lib">>, <<"1.2.3">>),
     ?assert(filelib:is_regular(ExpectedCachePath)),
 
-    %% Delete the _build beam to prove the second resolution loads from the .splt cache!
+    %% Delete the _build beam to prove the second resolution loads from the .pplt cache!
     ok = file:delete(filename:join(DepEbin, "dep_lib.beam")),
     {ok, ResolvedPlt2} = prisma_lock:resolve_project_plts(TmpProj, #{cache_dir => TmpCache}),
     ?assertEqual([dep_lib], prisma_plt:modules(ResolvedPlt2)),
@@ -103,7 +103,7 @@ resolve_and_cache_project_plts_test() ->
 
 otp_plt_fetcher_and_mix_lock_discovery_test() ->
     TmpProj = "/tmp/prisma_dev/tmp_mix_lock_proj",
-    TmpCache = "/tmp/prisma_dev/tmp_splt_cache2",
+    TmpCache = "/tmp/prisma_dev/tmp_pplt_cache2",
     os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache),
     ok = filelib:ensure_dir(filename:join(TmpProj, "dummy")),
 
@@ -137,7 +137,7 @@ otp_plt_fetcher_and_mix_lock_discovery_test() ->
     {ok, ExtraDeps} = prisma_lock:parse_rebar_lock(list_to_binary(ExtraRebar)),
     ?assertEqual(3, length(ExtraDeps)),
 
-    ?assertEqual({["a.splt"], ["ebin"]}, prisma:parse_check_args(["--plt", "a.splt", "ebin"])),
+    ?assertEqual({["a.pplt"], ["ebin"]}, prisma:parse_check_args(["--plt", "a.pplt", "ebin"])),
     ?assert(is_list(lists:flatten(prisma_prv:format_error({warnings_found, 2})))),
     ?assert(is_list(lists:flatten(prisma_prv:format_error(custom_err)))),
 
@@ -191,7 +191,7 @@ auto_separate_deps_from_project_apps_test() ->
     ProjectEbins = prisma_lock:discover_project_ebins(TmpProj, #{env => "dev"}),
     ?assertEqual([OwnEbin], ProjectEbins),
 
-    %% analyze_project analyzes ONLY own_app against cached noisy_dep.splt -> 0 warnings!
+    %% analyze_project analyzes ONLY own_app against cached noisy_dep.pplt -> 0 warnings!
     {ok, Warnings} = prisma:analyze_project(TmpProj, #{cache_dir => TmpCache, env => "dev"}),
     ?assertEqual([], Warnings),
 

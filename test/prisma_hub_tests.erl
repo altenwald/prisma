@@ -48,9 +48,9 @@ hub_lifecycle_and_most_demanded_ranking_test() ->
     ),
     ?assertMatch(
         {200, _, _},
-        prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/29/cowboy/2.10.0.splt">>, #{})
+        prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/29/cowboy/2.10.0.pplt">>, #{})
     ),
-    {200, _, SpltBin} = prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/29/cowboy/2.10.0.splt">>, #{}),
+    {200, _, SpltBin} = prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/29/cowboy/2.10.0.pplt">>, #{}),
     ?assertMatch({ok, #prisma_plt{package = <<"cowboy">>, package_vsn = <<"2.10.0">>}}, prisma_plt:decode(SpltBin)),
 
     ?assertMatch(
@@ -116,7 +116,7 @@ async_build_and_api_routes_test() ->
     %% Unknown routes -> 404
     ?assertMatch({404, _, _}, prisma_hub:handle_request(Pid, 'GET', <<"/unknown">>, #{})),
     ?assertMatch({404, _, _}, prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/bad_route">>, #{})),
-    ?assertMatch({404, _, _}, prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/29/nope/1.0.0.splt">>, #{})),
+    ?assertMatch({404, _, _}, prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/29/nope/1.0.0.pplt">>, #{})),
 
     %% Async request returns 202 building initially
     ?assertMatch(
@@ -130,7 +130,7 @@ async_build_and_api_routes_test() ->
     timer:sleep(50),
     ?assertMatch(
         {200, _, _},
-        prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/29/ranch/1.8.0.splt">>, #{})
+        prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/29/ranch/1.8.0.pplt">>, #{})
     ),
 
     %% Broken package build transitions to failed (500 on subsequent request)

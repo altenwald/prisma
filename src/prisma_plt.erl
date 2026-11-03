@@ -1,4 +1,4 @@
-%% @doc Manages portable, path-independent Prisma PLT files (`.splt`).
+%% @doc Manages portable, path-independent Prisma PLT files (`.pplt`).
 %%
 %% Supports building a PLT from BEAM files, encoding/decoding compressed
 %% binaries, merging multiple PLTs in memory, and resolving remote/opaque types.
@@ -103,14 +103,14 @@ encode(#prisma_plt{modules = Modules} = Plt) ->
     <<?PRISMA_PLT_MAGIC, Payload/binary>>.
 
 %% What is saved are the contracts. The abstract code of every function (`clauses`) is only needed while the module itself is
-%% inferred and by the oxbow detector, which runs on the modules being analyzed and never on a dependency loaded from a .splt:
+%% inferred and by the oxbow detector, which runs on the modules being analyzed and never on a dependency loaded from a .pplt:
 %% in the file it was most of the size and of the time spent writing and reading it.
 without_code(#module_summary{functions = Funcs} = Summary) ->
     Summary#module_summary{functions = maps:map(fun(_MFA, #func_contract{} = FC) -> FC#func_contract{clauses = []};
                                                    (_MFA, Other) -> Other
                                                 end, Funcs)}.
 
-%% @doc Decodes a `.splt` binary into a `#prisma_plt{}` record.
+%% @doc Decodes a `.pplt` binary into a `#prisma_plt{}` record.
 -spec decode(binary()) -> {ok, #prisma_plt{}} | {error, term()}.
 decode(<<?PRISMA_PLT_MAGIC, Payload/binary>>) ->
     try binary_to_term(Payload, [safe]) of

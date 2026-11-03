@@ -18,7 +18,7 @@
     {color, undefined, "color", boolean, "Force ANSI colors"},
     {no_oxbow, undefined, "no-oxbow", boolean, "Disable oxbow code detection"},
     {oxbow, undefined, "oxbow", boolean, "Enable oxbow code detection"},
-    {plt, undefined, "plt", string, "Path to .splt file (can be specified multiple times)"}
+    {plt, undefined, "plt", string, "Path to .pplt file (can be specified multiple times)"}
 ]).
 
 %% @doc Registers the `prisma` provider with Rebar3.

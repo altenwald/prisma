@@ -114,7 +114,7 @@ On this benchmark hardware, building Dialyzer's minimal base PLT required **13.8
 
 | Analyzer | Cold-Start Setup | Project Analysis (440 mods) | Total Cold-Start Time |
 | :--- | :---: | :---: | :---: |
-| **Prisma** | **0.00 s** (Modular `.splt` loading on-demand) | **3.92 s** | **3.92 s** |
+| **Prisma** | **0.00 s** (Modular `.pplt` loading on-demand) | **3.92 s** | **3.92 s** |
 | **Dialyzer** | **13.80 s** (Monolithic PLT creation) | **20.72 s** | **34.52 s** |
 
 In continuous integration (CI) environments running clean, non-cached containers, **Prisma is 8.8× faster from cold clone to complete verification**.
@@ -153,7 +153,7 @@ nothing about quality. Two false positives are already confirmed against the sou
 
 Dialyzer was run without the PLT of the dependencies, as in the benchmarks above; a run with a full PLT is still pending.
 
-## 📦 `.splt` cache: cold vs warm
+## 📦 `.pplt` cache: cold vs warm
 
 `prisma build-plt` over the six dependencies of `rabbit` (206 modules) and `prisma check` over `rabbit/ebin`
 (single runs on the same machine, `/usr/bin/time -l`; hyperfine runs are pending):
@@ -162,9 +162,9 @@ Dialyzer was run without the PLT of the dependencies, as in the benchmarks above
 | :--- | :---: | :---: | :---: |
 | `build-plt` of the 6 dependency apps (cold, once per version) | 3.9 s | 331 MiB | n/a (2.3 MB file) |
 | `check rabbit` **without** `--plt` | 1.2 – 1.4 s | 360 – 480 MiB | 246 |
-| `check rabbit` **with** the dependency `.splt` | 1.9 – 2.8 s | 585 MiB | 291 |
+| `check rabbit` **with** the dependency `.pplt` | 1.9 – 2.8 s | 585 MiB | 291 |
 
-The cache is not free: loading a 2.3 MB `.splt` adds roughly 0.6 – 1.4 s and about 110 MiB, and it changes the result
+The cache is not free: loading a 2.3 MB `.pplt` adds roughly 0.6 – 1.4 s and about 110 MiB, and it changes the result
 (+45 warnings: 14 discrepancy and 31 contract; presumably calls into the dependencies, not yet checked one by one). The "0.00 s cold start" in the table above
 is therefore only true when dependencies are not analysed at all.
 
@@ -174,14 +174,14 @@ sub-second figures above. Not yet reproduced with hyperfine or split by module.
 
 ## Update after the fixes of CORRECTNESS.md
 
-The `.splt` table above was measured at the start; the PLT no longer keeps the abstract code of every function. Single runs, same machine (other applications
+The `.pplt` table above was measured at the start; the PLT no longer keeps the abstract code of every function. Single runs, same machine (other applications
 running), `/usr/bin/time -l`:
 
 | | before | after |
 | :--- | :---: | :---: |
 | `build-plt` of the 6 dependency apps (206 modules) | 3.9 s, 2.4 MB, 331 MiB | 1.6 s, 442 KiB, 335 MiB |
 | `check deps/rabbit` without `--plt` | 1.2 - 1.4 s, 360 - 480 MiB | 1.7 s, 430 - 540 MiB |
-| `check deps/rabbit` with the dependencies `.splt` | 1.9 - 2.8 s, 585 MiB | 2.2 s, 490 MiB |
+| `check deps/rabbit` with the dependencies `.pplt` | 1.9 - 2.8 s, 585 MiB | 2.2 s, 490 MiB |
 | PLT of OTP `compiler` (60 modules) | 0.5 s, 2065 KiB | ~0.4 s, ~360 KiB |
 
 A bug made in between (commit `04b2e2c`, found and fixed the same day) took the dependencies' PLT to 235 s and 48,900 million words once written out; the story

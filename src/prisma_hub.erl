@@ -1,7 +1,7 @@
-%% @doc Prisma Hub server, REST API router, and HTML dashboard for Hex.pm `.splt` files.
+%% @doc Prisma Hub server, REST API router, and HTML dashboard for Hex.pm `.pplt` files.
 %%
-%% Verifies packages against Hex.pm, builds `.splt` artifacts on demand (synchronously
-%% or in background workers), tracks demand rankings, and serves `.splt` binaries.
+%% Verifies packages against Hex.pm, builds `.pplt` artifacts on demand (synchronously
+%% or in background workers), tracks demand rankings, and serves `.pplt` binaries.
 -module(prisma_hub).
 
 -behaviour(gen_server).
@@ -17,7 +17,7 @@
     handle_request/4,
     local_fetcher/1,
     render_dashboard/1,
-    splt_storage_path/4
+    pplt_storage_path/4
 ]).
 
 -export([
@@ -46,13 +46,13 @@ start_link(Opts) ->
 stop(Pid) ->
     gen_server:stop(Pid).
 
-%% @doc Requests generation or lookup of a package `.splt` for `{Otp, Pkg, Vsn}`.
+%% @doc Requests generation or lookup of a package `.pplt` for `{Otp, Pkg, Vsn}`.
 -spec request_plt(pid(), binary(), binary(), binary()) ->
     {ok, ready | building | failed, map()} | {error, term()}.
 request_plt(Pid, Otp, Pkg, Vsn) ->
     gen_server:call(Pid, {request_plt, Otp, Pkg, Vsn}, 30000).
 
-%% @doc Retrieves the `.splt` binary for `{Otp, Pkg, Vsn}` or triggers generation if absent.
+%% @doc Retrieves the `.pplt` binary for `{Otp, Pkg, Vsn}` or triggers generation if absent.
 -spec get_plt(pid(), binary(), binary(), binary()) ->
     {ok, ready, binary()} | {ok, building | failed, binary()} | {error, term()}.
 get_plt(Pid, Otp, Pkg, Vsn) ->
@@ -68,7 +68,7 @@ get_plt(Pid, Otp, Pkg, Vsn) ->
             {error, Reason}
     end.
 
-%% @doc Returns the top `Limit` most requested `.splt` entries ordered by hit count.
+%% @doc Returns the top `Limit` most requested `.pplt` entries ordered by hit count.
 -spec top_demanded(pid(), pos_integer()) -> [map()].
 top_demanded(Pid, Limit) ->
     gen_server:call(Pid, {top_demanded, Limit}).
@@ -137,7 +137,7 @@ handle_request(_Pid, _Method, _Path, _Params) ->
 parse_plt_route(Route) ->
     case binary:split(Route, <<"/">>, [global]) of
         [Otp, Pkg, VsnFile] ->
-            case binary:split(VsnFile, <<".splt">>) of
+            case binary:split(VsnFile, <<".pplt">>) of
                 [Vsn, <<>>] when Otp =/= <<>>, Pkg =/= <<>>, Vsn =/= <<>> ->
                     {ok, Otp, Pkg, Vsn};
                 _ ->
@@ -147,10 +147,10 @@ parse_plt_route(Route) ->
             error
     end.
 
-%% @doc Computes the filesystem storage path for a Hub `.splt` artifact.
--spec splt_storage_path(file:filename_all(), binary(), binary(), binary()) -> string().
-splt_storage_path(StorageDir, Otp, Pkg, Vsn) ->
-    File = binary_to_list(<<Pkg/binary, "-", Vsn/binary, ".splt">>),
+%% @doc Computes the filesystem storage path for a Hub `.pplt` artifact.
+-spec pplt_storage_path(file:filename_all(), binary(), binary(), binary()) -> string().
+pplt_storage_path(StorageDir, Otp, Pkg, Vsn) ->
+    File = binary_to_list(<<Pkg/binary, "-", Vsn/binary, ".pplt">>),
     filename:join([unicode:characters_to_list(StorageDir), "otp-" ++ binary_to_list(Otp), File]).
 
 %% @doc Renders the HTML dashboard with the request form and most demanded PLTs table.
@@ -161,12 +161,12 @@ render_dashboard(TopEntries) ->
         <<"<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">">>,
         <<"<title>Prisma Hub - Modular BEAM PLTs</title></head><body>">>,
         <<"<h1>Prisma Hub</h1>">>,
-        <<"<p>On-demand portable <code>.splt</code> generator and cache for Hex.pm packages.</p>">>,
+        <<"<p>On-demand portable <code>.pplt</code> generator and cache for Hex.pm packages.</p>">>,
         <<"<form method=\"POST\" action=\"/api/v1/plts/request\">">>,
         <<"<input name=\"otp\" placeholder=\"OTP (e.g. 29)\" required>">>,
         <<"<input name=\"package\" placeholder=\"Hex Package (e.g. cowboy)\" required>">>,
         <<"<input name=\"version\" placeholder=\"Version (e.g. 2.10.0)\" required>">>,
-        <<"<button type=\"submit\">Request .splt</button></form>">>,
+        <<"<button type=\"submit\">Request .pplt</button></form>">>,
         <<"<h2>Most Demanded PLTs</h2>">>,
         <<"<table><thead><tr><th>OTP</th><th>Package</th><th>Version</th><th>Status</th><th>Hits</th><th>Download</th></tr></thead><tbody>">>,
         Rows,
@@ -176,11 +176,11 @@ render_dashboard(TopEntries) ->
 render_row(#{otp := Otp, package := Pkg, version := Vsn, status := Status, hits := Hits}) ->
     StatusBin = atom_to_binary(Status, utf8),
     HitsBin = integer_to_binary(Hits),
-    Url = <<"/api/v1/plts/", Otp/binary, "/", Pkg/binary, "/", Vsn/binary, ".splt">>,
+    Url = <<"/api/v1/plts/", Otp/binary, "/", Pkg/binary, "/", Vsn/binary, ".pplt">>,
     [
         <<"<tr><td>">>, Otp, <<"</td><td>">>, Pkg, <<"</td><td>">>, Vsn,
         <<"</td><td>">>, StatusBin, <<"</td><td>">>, HitsBin,
-        <<"</td><td><a href=\"">>, Url, <<"\">.splt</a></td></tr>">>
+        <<"</td><td><a href=\"">>, Url, <<"\">.pplt</a></td></tr>">>
     ].
 
 encode_top_json(Entries) ->
@@ -264,7 +264,7 @@ handle_new_plt_request({Otp, Pkg, Vsn} = Key, #state{
 } = State) ->
     case HexChecker(Pkg, Vsn) of
         ok ->
-            Path = splt_storage_path(StorageDir, Otp, Pkg, Vsn),
+            Path = pplt_storage_path(StorageDir, Otp, Pkg, Vsn),
             BaseEntry = #{
                 otp => Otp,
                 package => Pkg,

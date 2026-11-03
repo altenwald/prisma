@@ -27,7 +27,7 @@ init(State) ->
 version() ->
     <<"0.1.0">>.
 
-%% @doc Builds a portable `.splt` file from BEAM directories or files.
+%% @doc Builds a portable `.pplt` file from BEAM directories or files.
 -spec build_plt([file:filename_all()], file:filename_all()) ->
     {ok, #prisma_plt{}} | {error, term()}.
 build_plt(Inputs, OutputFile) ->
@@ -42,7 +42,7 @@ build_plt(Inputs, OutputFile) ->
             {error, Reason}
     end.
 
-%% @doc Analyzes only the project's own applications in `ProjectRoot`, caching locked dependencies as `.splt` files.
+%% @doc Analyzes only the project's own applications in `ProjectRoot`, caching locked dependencies as `.pplt` files.
 -spec analyze_project(file:filename_all()) ->
     {ok, [#prisma_warning{}]} | {error, term()}.
 analyze_project(ProjectRoot) ->
@@ -144,8 +144,8 @@ main(_) ->
     io:format(
         "Usage:~n"
         "  prisma version~n"
-        "  prisma build-plt --output <file.splt> <ebin_or_beam...>~n"
-        "  prisma check [--format <human|pretty|oneline|json>] [--no-color] [--color] [--plt <file.splt>...] [<ebin_or_beam...>]~n"
+        "  prisma build-plt --output <file.pplt> <ebin_or_beam...>~n"
+        "  prisma check [--format <human|pretty|oneline|json>] [--no-color] [--color] [--plt <file.pplt>...] [<ebin_or_beam...>]~n"
     ),
     erlang:halt(1).
 

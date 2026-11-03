@@ -34,7 +34,7 @@
     type_lookup_fun/0
 ]).
 
-%% @typedoc Normalized type term stored in `.splt` files and used by the checker.
+%% @typedoc Normalized type term stored in `.pplt` files and used by the checker.
 -type map_field() :: {exact | assoc, stype(), stype()}.
 
 -type stype() ::

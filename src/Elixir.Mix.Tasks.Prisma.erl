@@ -1,7 +1,7 @@
 %% @doc Mix task (`mix prisma`) compiled directly as a BEAM module for Elixir projects.
 %%
 %% Automatically resolves `_build/<env>/lib/<app>/ebin` paths for the project's
-%% own applications while caching locked dependencies as `.splt` files.
+%% own applications while caching locked dependencies as `.pplt` files.
 -module('Elixir.Mix.Tasks.Prisma').
 
 -moduledoc """
@@ -15,7 +15,7 @@ Runs Prisma hybrid type and discrepancy analysis on compiled BEAM files.
   * `--color` - Forces ANSI color output
   * `--no-oxbow` - Disables oxbow (dead/unreachable code and unused clauses) analysis
   * `--oxbow` - Enables oxbow analysis (default: enabled)
-  * `--plt <path>` - Path to extra `.splt` files (can be repeated)
+  * `--plt <path>` - Path to extra `.pplt` files (can be repeated)
   * `--env <name>` - Mix environment (default: `dev` or `$MIX_ENV`)
 
 ## Configuration

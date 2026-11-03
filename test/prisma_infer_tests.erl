@@ -196,7 +196,7 @@ discrepancy_detection_no_false_positives_test() ->
     ?assert(lists:member({discrepancy, {discrepancy_sample, bad_map_update, 0}}, WarningMFAs)),
     ?assertNot(lists:keymember({discrepancy_sample, optimistic_ok, 1}, 2, WarningMFAs)).
 
-cross_module_splt_discrepancy_test() ->
+cross_module_pplt_discrepancy_test() ->
     DepForms = [
         {attribute, 1, module, dep_mod},
         {attribute, 2, export, [{parse_bin, 1}]},
@@ -222,7 +222,7 @@ cross_module_splt_discrepancy_test() ->
     ],
     {ok, dep_mod, DepBeam} = compile:forms(DepForms, [debug_info]),
     {ok, caller_mod, CallerBeam} = compile:forms(CallerForms, [debug_info]),
-    TmpDepPlt = "/tmp/prisma_dev/dep_mod.splt",
+    TmpDepPlt = "/tmp/prisma_dev/dep_mod.pplt",
     {ok, DepPlt} = prisma_plt:from_beams([DepBeam]),
     ok = prisma_plt:save(DepPlt, TmpDepPlt),
 
@@ -711,7 +711,7 @@ missing_function_is_reported_inside_nested_constructs_test() ->
     ?assertEqual([4], missing_hits("    F = fun() -> ov_callee:nonexistent(1) end,\n    F()", discrepancy)),
     ?assertEqual([5], missing_hits("    try ok of\n        ok -> ov_callee:nonexistent(1)\n    catch _:_ -> b\n    end", discrepancy)).
 
-%% A saved .splt only needs contracts, not the code of every function.
+%% A saved .pplt only needs contracts, not the code of every function.
 
 saved_plt_keeps_contracts_and_drops_the_code_test() ->
     Text = "-module(plt_lean).\n-export([f/1]).\n-spec f(integer()) -> integer().\nf(X) -> X + 1.\n",
@@ -824,7 +824,7 @@ spec_of_a_dependency_loaded_from_a_plt_is_used_test() ->
     end,
     CalleeBeam = Compile("ov_callee", return_callee()),
     {ok, DepPlt} = prisma_plt:from_beams([CalleeBeam]),
-    File = "ext_specs_test.splt",
+    File = "ext_specs_test.pplt",
     ok = file:write_file(File, prisma_plt:encode(DepPlt)),
     try
         Caller = Compile("ov_caller", "-export([f/0]).\nf() ->\n    {ok, V} = ov_callee:f(),\n    V.\n"),

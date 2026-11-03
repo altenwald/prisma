@@ -119,12 +119,12 @@ mix_task_ebin_resolution_test() ->
     Parsed = 'Elixir.Mix.Tasks.Prisma':parse_args([
         <<"--mode">>, <<"gradual">>,
         <<"--env">>, <<"test">>,
-        <<"--plt">>, <<"base.splt">>,
+        <<"--plt">>, <<"base.pplt">>,
         <<"custom/ebin">>
     ]),
     ?assertEqual(gradual, maps:get(mode, Parsed)),
     ?assertEqual("test", maps:get(env, Parsed)),
-    ?assertEqual(["base.splt"], maps:get(plts, Parsed)),
+    ?assertEqual(["base.pplt"], maps:get(plts, Parsed)),
     ?assertEqual(["custom/ebin"], maps:get(targets, Parsed)),
 
     os:cmd("rm -rf " ++ TmpRoot).

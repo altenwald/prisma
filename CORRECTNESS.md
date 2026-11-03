@@ -213,7 +213,7 @@ Costs and losses, so nobody finds them by surprise:
 
 - **Precision.** `hd([])` is no longer reported (the type has no "non-empty improper list" to tell it from `hd([1 | 2])`); the Erlang
   compiler already warns about it. In exchange `tl(X) + 1` is no longer reported as `badarith`, which was a false positive.
-- **Speed.** Building the `.splt` of OTP's `compiler` application went from ~0.65 s to ~1.0 s (more unions in the types). A full
+- **Speed.** Building the `.pplt` of OTP's `compiler` application went from ~0.65 s to ~1.0 s (more unions in the types). A full
   `prisma check` of `deps/rabbit` is unchanged (~1.2 s).
 - **Depth.** The exact meet of two improper lists with list-able tails is cut at a nesting depth of 2 (counted across the recursion),
   then a safe superset; without the cut `compiler` took minutes.
@@ -266,7 +266,7 @@ Where Prisma looks, it finds them (52 of 52, two more than Dialyzer). The 73 mis
 1. **Calls inside `fun`, `try` and record fields are not checked** (15 mutants; also part of the `r4` and `r6` ones in those contexts). Not
    investigated further: the construct is simply not reported.
 2. **BIF arguments in guards are not checked** (17 mutants, all `r3`): a clause with `when length(foo) > N` can never match and Prisma says nothing.
-3. **A call to a function that does not exist is not reported** (`r4`, 25 mutants): the checker looks the callee up in the `.splt` and, when it
+3. **A call to a function that does not exist is not reported** (`r4`, 25 mutants): the checker looks the callee up in the `.pplt` and, when it
    is not there, stays silent. This is what `xref` is for; Prisma has an `unknown_function` kind and never produces it for this.
 4. **The return type of a call to another module is `any`** (`r6`, 25 mutants): inference only knows the contracts of the module it is
    analyzing, so `{ok, V} = other:f()` is never compared with the `-spec` of `other:f/0`.
@@ -328,7 +328,7 @@ that *uses* the result gets a warning that says what does not fit (a `gradual_mi
 That is not Dialyzer's silent cascade, but it is still an effect in the callers; the way to remove it is to let callers trust the declared `-spec`
 of a function over what was inferred from its (wrong) body. Not done.
 
-**Gap 3.** The checker looked a callee up in the `.splt` and, if it was not there, kept quiet. Now a call to `m:f/A` where `m` is a module of the PLT (and
+**Gap 3.** The checker looked a callee up in the `.pplt` and, if it was not there, kept quiet. Now a call to `m:f/A` where `m` is a module of the PLT (and
 not Elixir) has a warning of its own, `unknown_function`, that says which arities `m` does have. Not reported: modules that are not in the PLT (it proves
 nothing), `erlang:` (the BIFs), what the compiler adds without it being in the code (`module_info/0,1`, `behaviour_info/1`), and a function that exists
 without being exported (a module can export everything with a compile attribute). Three mutants still got through, for a second reason: the log macros
@@ -336,7 +336,7 @@ expand to `(ra_env:logger_mod()):log(...)`, a call in the *module position* of a
 literal. It is now (and that also closed the last `r2`).
 
 **Gap 4.** Inference never knew what the other modules return, so `{ok, V} = other:f()` was never compared with the spec of `f/0`. Now the specs of every module
-that is analyzed (and of the dependencies loaded from a `.splt`) are collected first, and the return type that a callee declares is what a call gives. The same is
+that is analyzed (and of the dependencies loaded from a `.pplt`) are collected first, and the return type that a callee declares is what a call gives. The same is
 done inside a module: a call goes by what the callee *declares*, not by what its body happens to return. That is what removes the effect in the callers: a function
 whose body contradicts its spec is reported there, and nowhere else (the 6 collateral warnings of the mutants are now **0**, Dialyzer's 201 unchanged). Names that
 cannot be resolved while a module is inferred (`t()`, `other:t()`, an opaque, a type variable) are unknown, not impossible (Prisma's own test caught that one).
@@ -432,7 +432,7 @@ I had measured `check` on `deps/rabbit` and the PLT of OTP's `compiler`, not **t
   pass in the next one. Before the fix everything collapsed into `ne(any)`. Fixing one case was not enough, so the inferred types are bounded by
   `prisma_type:widen/1`: nesting beyond four levels, and unions of more than 16 members, become `any` (or `atom` / `integer` for a crowd of literals). It is a supertype,
   so what held keeps holding.
-- the `.splt` kept the abstract code of every function (`func_contract.clauses`), only needed while a module is being inferred. It is no longer saved.
+- the `.pplt` kept the abstract code of every function (`func_contract.clauses`), only needed while a module is being inferred. It is no longer saved.
 - `normalize_union/1`, called 500,000 times per PLT, has shortcuts for the lists of one or two types it nearly always gets.
 
 Regression tests: two small recursive list builders (a synthetic copy of the parser), `widen/1`, and the equivalence of the shortcuts with the general path.

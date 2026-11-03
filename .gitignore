@@ -1,7 +1,7 @@
 /_build/
 /rebar3.crashdump
 *.plt
-*.splt
+*.pplt
 /.rebar3/
 *.tar
 /doc/
