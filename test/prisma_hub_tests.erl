@@ -50,8 +50,8 @@ hub_lifecycle_and_most_demanded_ranking_test() ->
         {200, _, _},
         prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/29/cowboy/2.10.0.pplt">>, #{})
     ),
-    {200, _, SpltBin} = prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/29/cowboy/2.10.0.pplt">>, #{}),
-    ?assertMatch({ok, #prisma_plt{package = <<"cowboy">>, package_vsn = <<"2.10.0">>}}, prisma_plt:decode(SpltBin)),
+    {200, _, PpltBin} = prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/29/cowboy/2.10.0.pplt">>, #{}),
+    ?assertMatch({ok, #prisma_plt{package = <<"cowboy">>, package_vsn = <<"2.10.0">>}}, prisma_plt:decode(PpltBin)),
 
     ?assertMatch(
         {200, _, _},

@@ -11,13 +11,13 @@
 
 ---
 
-## ⚡ The Core Problem & The SPLT Solution
+## ⚡ The Core Problem & The PPLT Solution
 
 One of the greatest points of friction when running static type analysis on the BEAM (such as with Dialyzer) is managing the PLT (*Persistent Lookup Table*):
 - **Monolithic & Slow:** Building PLTs for large Erlang/OTP releases and third-party dependencies can take minutes or even hours.
 - **Cache Invalidation:** A small change or rebuilding in a clean CI environment often triggers redundant, full-scale PLT re-analysis.
 
-### The Prisma SPLT Architecture
+### The Prisma PPLT Architecture
 Prisma introduces the portable, binary **`.pplt`** format:
 - **Modular & Granular:** Every dependency in `rebar.lock` or `mix.lock`, as well as base Erlang/OTP modules, is compiled into its own isolated `.pplt` cache.
 - **Zero Redundant Rebuilds:** If a dependency's package name and version have not changed, its `.pplt` is loaded directly from the local cache.
@@ -219,7 +219,7 @@ prisma check --format json
 prisma check --no-color
 NO_COLOR=1 prisma check
 
-# Analyze specific BEAM directories against a custom SPLT
+# Analyze specific BEAM directories against a custom PPLT
 prisma check --pplt /path/to/project.pplt _build/default/lib/*/ebin
 ```
 
@@ -231,10 +231,10 @@ Real-world benchmark on **RabbitMQ** (438,000+ lines of Erlang, 440 core modules
 
 | Suite | Prisma Wall Time | Dialyzer Wall Time | Speedup | Peak RAM (Prisma vs Dialyzer) |
 | :--- | :---: | :---: | :---: | :---: |
-| **Broker Core** (`rabbit`, 245 modules) | **856.2 ms** | 8,781.6 ms | **10.3× faster** | **319.4 MiB** vs 372.5 MiB |
-| **Full Core** (440 modules across 7 apps) | **3.922 s** | 20.722 s | **5.3× faster** | **441.0 MiB** vs **1,286.8 MiB** (2.9× less RAM) |
+| **Broker Core** (`rabbit`, 234 modules) | **1.08 s** | 6.75 s | **6.3× faster** | **295.5 MiB** vs 405.1 MiB |
+| **Full Core** (440 modules across 7 apps) | **3.02 s** | 17.27 s | **5.7× faster** | **536.0 MiB** vs **1,456.7 MiB** (2.7× less RAM) |
 
-See the complete telemetry, CPU metrics, and reproduction instructions in [BENCHMARK.md](BENCHMARK.md).
+See the correctness review, the comparison with Dialyzer and the complete telemetry in [DISCREPANCIES.md](DISCREPANCIES.md).
 
 ---
 

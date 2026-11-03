@@ -1,9 +1,9 @@
 # Faults Prisma does not report
 
 `caller.erl` makes the same kind of fault in several places; `callee.erl` has `-spec g(integer()) -> ok.`.
-Compile with `erlc +debug_info` and analyze both `.beam` files together. Prisma now reports every one of these lines (at the start it reported 5 and 19 only: see CORRECTNESS.md).
+Compile with `erlc +debug_info` and analyze both `.beam` files together. Prisma now reports every one of these lines (at the start it reported 5 and 19 only: see DISCREPANCIES.md).
 
-| Line | Fault | Reported? | Why (see CORRECTNESS.md) |
+| Line | Fault | Reported? | Why (see DISCREPANCIES.md) |
 | :--- | :--- | :---: | :--- |
 | 5  | `callee:g(oops)` in a plain body | yes | |
 | 7  | `callee:g(oops)` inside an anonymous `fun` | fixed | calls inside `fun` bodies are not checked |

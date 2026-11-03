@@ -1,6 +1,6 @@
 # bench/
 
-Measurements of Prisma on real code. Speed and memory: `../BENCHMARK.md`. Warnings and correctness: `../CORRECTNESS.md`.
+Measurements of Prisma on real code. Correctness, comparison with Dialyzer and benchmark: `../DISCREPANCIES.md`.
 
 - `corpus.config.json`: pinned corpora (repository, commit, ebin directories).
 - `adapters.py`: runs one analyzer and prints its warnings as normalized JSON (see its docstring for the categories).
