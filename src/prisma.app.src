@@ -23,7 +23,7 @@
         "rebar.lock",
         "mix.exs",
         "README.md",
-        "DISCREPANCIES.md",
+        "DISCREPANCIES.md", "GRADUAL.md",
         "LICENSE"
     ]}
 ]}.

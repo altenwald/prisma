@@ -34,7 +34,7 @@ defmodule Prisma.MixProject do
       name: "prisma",
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url},
-      files: ~w(src include assets mix.exs rebar.config rebar.lock README* DISCREPANCIES* LICENSE*)
+      files: ~w(src include assets mix.exs rebar.config rebar.lock README* DISCREPANCIES* GRADUAL* LICENSE*)
     ]
   end
 
@@ -45,7 +45,7 @@ defmodule Prisma.MixProject do
       assets: %{"assets" => "assets"},
       source_url: @source_url,
       source_ref: "v#{@version}",
-      extras: ["README.md", "DISCREPANCIES.md", "LICENSE"]
+      extras: ["README.md", "DISCREPANCIES.md", "GRADUAL.md", "LICENSE"]
     ]
   end
 end

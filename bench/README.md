@@ -1,6 +1,6 @@
 # bench/
 
-Measurements of Prisma on real code. Correctness, comparison with Dialyzer and benchmark: `../DISCREPANCIES.md`.
+Measurements of Prisma on real code. Correctness, comparison with Dialyzer and benchmark: `../DISCREPANCIES.md`; the gradual check against Gradualizer: `../GRADUAL.md`.
 
 - `corpus.config.json`: pinned corpora (repository, commit, ebin directories).
 - `adapters.py`: runs one analyzer and prints its warnings as normalized JSON (see its docstring for the categories).

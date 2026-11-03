@@ -234,7 +234,7 @@ Real-world benchmark on **RabbitMQ** (438,000+ lines of Erlang, 440 core modules
 | **Broker Core** (`rabbit`, 234 modules) | **1.08 s** | 6.75 s | **6.3× faster** | **295.5 MiB** vs 405.1 MiB |
 | **Full Core** (440 modules across 7 apps) | **3.02 s** | 17.27 s | **5.7× faster** | **536.0 MiB** vs **1,456.7 MiB** (2.7× less RAM) |
 
-See the correctness review, the comparison with Dialyzer and the complete telemetry in [DISCREPANCIES.md](DISCREPANCIES.md).
+See the correctness review, the comparison with Dialyzer and the complete telemetry in [DISCREPANCIES.md](DISCREPANCIES.md), and the comparison of the gradual check with Gradualizer in [GRADUAL.md](GRADUAL.md).
 
 ---
 
