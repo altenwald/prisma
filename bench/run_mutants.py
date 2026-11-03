@@ -5,7 +5,8 @@
 
 For each mutant the mutated .beam replaces the original in a scratch copy of its ebin directory, and Prisma
 (contracts on, oxbow off) and Dialyzer (default warnings) analyze that directory. A tool detects the mutant when it
-gives, inside the mutated function, a warning that it did not give for the unmodified directory (module, line, kind).
+gives, inside the mutated function, a warning that it did not give for the unmodified directory (module, line, kind, and for
+Prisma the type found: a line that already warned but now for another type is a new finding).
 erlc counts as a third tool, but only warnings that say the code fails (not unused variables, which the mutation causes).
 """
 import collections, concurrent.futures as cf, json, os, re, shutil, subprocess, sys, tempfile
@@ -21,7 +22,9 @@ def prisma(directory):
     out = subprocess.run([adapters.PRISMA, "check", "--format", "json", "--no-color", "--no-oxbow", directory],
                          capture_output=True, text=True)
     try:
-        return [(w.get("module"), w.get("line", 0), w["kind"]) for w in json.loads(out.stdout or "[]")]
+        # the type found is part of the key: a mutation that changes what an already warned line returns is a new finding
+        return [(w.get("module"), w.get("line", 0), w["kind"], w.get("actual") or w.get("message"))
+                for w in json.loads(out.stdout or "[]")]
     except json.JSONDecodeError:
         return None
 

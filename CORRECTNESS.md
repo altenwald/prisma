@@ -282,12 +282,18 @@ Same 125 mutants after each fix (the counts for Dialyzer and `erlc` do not chang
 | 2. BIFs with arguments of the wrong type inside guards | 74 / 125 | `r3` 8 -> **25 of 25**; nothing lost |
 | 3. calls to a function that does not exist, and calls inside the target of another call | 100 / 125 | `r4` 0 -> **25 of 25**, `r2` 24 -> 25; nothing lost |
 | 4. the return type of a call comes from the callee's `-spec` (other modules and the same one) | **124 / 125** | `r6` 0 -> **25 of 25**; collateral warnings 6 -> **0** |
+| 5. (measurement fix) a line that already warned, now for another type, is a new finding | **125 / 125** | the last miss was not Prisma's: see below |
+
+**The 125th mutant was a flaw of the harness, not of Prisma.** `cuttlefish_unit:generate_config/3` already had a warning on the line of its return in the
+unmodified code (`{error, atom(), any()}` is not `[any()]`, true by contract); the mutation changed the returned type to `mutant_atom` and Prisma said so, on the same line
+and kind, so a comparison keyed on (module, line, kind) took it for the old warning. The key now includes the type found (`actual`), `bench/run_mutants.py`:
+**125 / 125**, collateral warnings still **0**, Dialyzer 123. The same run shows that nothing in the mutated functions was being hidden by an earlier warning.
+The earlier note about a missed `conf_parse` mutant is obsolete: it is detected.
 
 **Gap 1.** `infer_expr` answered `any` for every construct it did not know without looking inside. It now has a clause each for `fun`
 (and named funs), `try` (body, `of`, `catch`, `after`), `catch`, `receive`, list and binary comprehensions, record creation, update and access,
 and the elements of a binary. They are inferred for warnings and call sites only: patterns bind their variables to `any`, nothing bound
-inside reaches the code that follows, and the result stays `any`. One mutant of this class is still missed (`conf_parse`, generated parser
-code); not investigated.
+inside reaches the code that follows, and the result stays `any`.
 
 Three things turned up on the way, none of them in the mutants:
 - the first version typed a `fun` as `any_fun`, which is not consistent with a declared `fun((A) -> B)`: **Prisma's own test, which analyzes
