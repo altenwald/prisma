@@ -389,3 +389,19 @@ meet_of_binary_types_test_() ->
      ?_assertEqual(none, prisma_type:meet({binary, 20, 0}, {binary, 0, 8})),
      ?_assertEqual({binary, 8, 0}, prisma_type:meet({binary, 8, 0}, {binary, 8, 0})),
      ?_assertEqual(none, prisma_type:meet({binary, 8, 0}, {binary, 16, 0}))].
+
+%% The meet of two chains whose tails are big unions of nested improper lists (what the inference builds for a parser that
+%% conses onto unknown tails; the arguments are the first call that meets them in OTP's `calendar`, saved in
+%% slow_meet_args.bin) used to answer something five times larger than its operands, and the inference that kept asking for
+%% such meets did not end: building the PPLT of `calendar`, `uri_string`, `file_sorter` and `dist_util` took minutes.
+%% Past a size the meet is a safe superset (the smaller operand), not an exact result at any cost.
+meet_of_big_improper_unions_is_bounded_test() ->
+    {ok, Bin} = file:read_file(filename:join(filename:dirname(?FILE), "slow_meet_args.bin")),
+    {E1, T1, E2, T2} = binary_to_term(Bin),
+    A = {improper_list, E1, T1},
+    B = {improper_list, E2, T2},
+    R = prisma_type:meet(A, B),
+    ?assertNotEqual(none, R),
+    ?assert(erts_debug:flat_size(R) =< erts_debug:flat_size(A) + erts_debug:flat_size(B)),
+    %% a superset of the exact meet: every operand fits in it or it fits in the operands
+    ?assert(prisma_type:consistent_subtype(R, A) orelse prisma_type:consistent_subtype(R, B)).

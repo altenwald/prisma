@@ -226,7 +226,8 @@ Prisma builds the `.pplt` of a package once per version and loads it on demand.
 The cache is not free (it adds about 0.4 s) and it changes the result: the extra 44 warnings are calls into the dependencies, checked against their real specs. The "no cold start" of Prisma is
 only true when dependencies are not analyzed. Dialyzer was run without the PLT of the dependencies, as above; a run with a full PLT is pending.
 
-Also observed once, not reproduced: `prisma check` over the 100 modules of OTP `stdlib` took 3 min 34 s (207 s of CPU).
+The PPLT of OTP's `kernel` and `stdlib` (202 modules, 1.1 MB): **2.4 s**, 419 MiB. It did not end in 5 minutes before the fix below: `calendar`, `uri_string`, `file_sorter` and `dist_util` made the
+inference ask for meets of unions of nested improper lists that grew without end (the 100 modules of `stdlib` had taken 3 min 34 s once).
 
 ## 6. What the correctness work cost
 
@@ -259,6 +260,7 @@ Optimizations tried since, with measurements:
 | hash-consing (a map from id to type) | not built: the types are about 1.8 MB of a 67 MB process, and a perfect table would shrink them 3 to 4 times; type algebra is 13% of the profile; `widen/1` already bounds the explosion |
 | caching `declared_return` per callee | no gain (1.479 s to 1.475 s, noise) and it was reverted: eprof counted 1M cheap calls |
 | taking the abstract forms from the `debug_info` chunk already read instead of decoding the module again as `abstract_code` (twice per module) | **-8.2%** wall time, identical warnings (`erl_parse:anno_from_term` was 19% of own time in fprof) |
+| bounding `meet` (a chain whose tail is a big union of improper lists, and unions of structured types with more than 256 pairs of members, answer the smaller operand: a safe superset) | `kernel` + `stdlib` PPLT from over 5 minutes to **2.4 s**; same warnings on `rabbit` and the 440 modules, 125 / 125 mutants, collateral 0; `rabbit` 1.116 s to 1.085 s |
 | not re-inferring functions whose callees did not change between passes | not done, task #21 |
 
 The profile (fprof on `rabbit_common`, own time): `prisma_infer` 26%, `erl_parse` 19% before the change above, `lists` 17%, `prisma_type` 13%, `maps` 9.5%.

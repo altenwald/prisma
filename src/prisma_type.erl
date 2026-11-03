@@ -8,6 +8,8 @@
 -include("prisma.hrl").
 
 -define(MAX_IMPROPER_MEET_DEPTH, 2).
+-define(MAX_IMPROPER_MEET_WORDS, 300).
+-define(MAX_MEET_PAIRS, 256).
 -define(WIDEN_DEPTH, 4).
 -define(WIDEN_MEMBERS, 16).
 -define(WIDEN_LITERALS, 1024).
@@ -290,10 +292,16 @@ meet(T, {remote_type, _, _, _}) -> T;
 meet({opaque, _, _, _, Body}, T) -> meet(Body, T);
 meet(T, {opaque, _, _, _, Body}) -> meet(T, Body);
 meet(Same, Same) -> Same;
-meet({union, Members}, T2) ->
-    normalize_union([meet(M, T2) || M <- Members]);
-meet(T1, {union, Members}) ->
-    normalize_union([meet(T1, M) || M <- Members]);
+meet({union, Members} = T1, T2) ->
+    case too_many_pairs(Members, T2) of
+        true -> smaller(T1, T2);
+        false -> normalize_union([meet(M, T2) || M <- Members])
+    end;
+meet(T1, {union, Members} = T2) ->
+    case too_many_pairs(Members, T1) of
+        true -> smaller(T1, T2);
+        false -> normalize_union([meet(T1, M) || M <- Members])
+    end;
 meet(T1, T2) ->
     case is_numeric(T1) andalso is_numeric(T2) of
         true -> meet_numeric(T1, T2);
@@ -628,9 +636,20 @@ meet_improper(E1, T1, E2, T2) ->
     case meet(E1, E2) of
         none ->
             nil;
-        _ when Depth >= ?MAX_IMPROPER_MEET_DEPTH ->
-            {improper_list, join(E1, E2), join(T1, T2)};
         E ->
+            meet_improper(E, E1, T1, E2, T2, Depth)
+    end.
+
+meet_improper(_E, E1, T1, E2, T2, Depth) when Depth >= ?MAX_IMPROPER_MEET_DEPTH ->
+    {improper_list, join(E1, E2), join(T1, T2)};
+meet_improper(E, E1, T1, E2, T2, Depth) ->
+    case Depth =:= 0 andalso too_big(T1, T2) of
+        true ->
+            %% Two big unions of chains (what a parser that conses onto unknown tails infers): the exact meet costs more than
+            %% it is worth (building the PPLT of OTP's `calendar` did not end), and the answer can be larger than its
+            %% operands. The meet is included in each of them: the smaller one is a safe superset.
+            smaller({improper_list, E1, T1}, {improper_list, E2, T2});
+        false ->
             put(prisma_meet_improper_depth, Depth + 1),
             try
                 Tails = [meet(T1, T2), meet_tail(T1, E2, T2), meet_tail(T2, E1, T1)],
@@ -639,6 +658,23 @@ meet_improper(E1, T1, E2, T2) ->
                 put(prisma_meet_improper_depth, Depth)
             end
     end.
+
+%% The meet of two unions is the meet of every pair of members, and the members of a union of structured types are structured
+%% types with unions inside: past a number of pairs the exact answer is not worth it (the inference that builds parser-like
+%% types did not end in `file_sorter`). The meet is included in each operand, so the smaller one is a safe superset. A union
+%% of literals only is never cut: it is cheap and a spec may list a hundred of them.
+too_many_pairs(Members, Other) ->
+    Pairs = length(Members) * case Other of {union, Ms} -> length(Ms); _ -> 1 end,
+    Pairs > ?MAX_MEET_PAIRS andalso not all_literals(Members) andalso not all_literals(case Other of {union, Os} -> Os; _ -> [Other] end).
+
+all_literals(Ms) ->
+    lists:all(fun({atom_lit, _}) -> true; ({int_lit, _}) -> true; (_) -> false end, Ms).
+
+too_big(T1, T2) ->
+    (is_union(T1) orelse is_union(T2)) andalso erts_debug:flat_size({T1, T2}) > ?MAX_IMPROPER_MEET_WORDS.
+
+smaller(A, B) ->
+    case erts_debug:flat_size(A) =< erts_debug:flat_size(B) of true -> A; false -> B end.
 
 %% T met with the improper list [E | Tail] (the other chain, seen from inside this tail).
 meet_tail({improper_list, E1, T1}, E2, T2) ->
