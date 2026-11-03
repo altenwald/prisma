@@ -36,3 +36,17 @@ union_of_tagged_tuples_still_catches_a_wrong_use_test() ->
           "-spec f(binary()) -> non_neg_integer() | string() | {error, atom()}.\n"
           "f(B) ->\n    case g(B) of\n        {ok, Etf} -> need(Etf);\n        {error, _} = E -> E\n    end.\n",
     ?assertNotEqual([], gradual_warnings(Src)).
+
+%% `#{k := _} = M` says that M is a map with k, not that k is its only key: when the type of the argument is not known
+%% (a local type, say), M is just a map
+
+map_pattern_does_not_close_the_map_test() ->
+    Src = "-export([f/1]).\n-type inv() :: #{states := map(), apps := map()}.\n"
+          "-spec f(inv()) -> {ok, inv()}.\n"
+          "f(#{states := _} = I) -> {ok, I}.\n",
+    ?assertEqual([], gradual_warnings(Src)).
+
+map_pattern_keeps_the_types_of_the_values_test() ->
+    Src = "-export([f/1]).\n-spec f(map()) -> integer().\n"
+          "f(#{k := V}) when is_integer(V) -> V;\nf(_) -> 0.\n",
+    ?assertEqual([], gradual_warnings(Src)).

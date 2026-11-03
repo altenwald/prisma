@@ -236,7 +236,12 @@ pattern_variables([H | T]) -> pattern_variables(H) ++ pattern_variables(T);
 pattern_variables(_) -> [].
 
 bind_map_pat_fields([], Expected, Env, Acc) ->
-    {spectra_type:meet({map, lists:usort(Acc)}, Expected), Env};
+    %% the keys of the pattern are not all the keys: with nothing known of the scrutinee it is a map, not a map with only those
+    Type = case unresolved(Expected) of
+        true -> any_map;
+        false -> spectra_type:meet({map, lists:usort(Acc)}, Expected)
+    end,
+    {Type, Env};
 bind_map_pat_fields([{map_field_exact, _, KAst, VP} | Rest], Expected, Env0, Acc) ->
     KType = literal_or_any(KAst),
     case bind_pattern(VP, any, Env0) of
@@ -245,6 +250,14 @@ bind_map_pat_fields([{map_field_exact, _, KAst, VP} | Rest], Expected, Env0, Acc
     end;
 bind_map_pat_fields([_ | Rest], Expected, Env, Acc) ->
     bind_map_pat_fields(Rest, Expected, Env, Acc).
+
+unresolved(any) -> true;
+unresolved({var, _}) -> true;
+unresolved({local_type, _, _}) -> true;
+unresolved({remote_type, _, _, _}) -> true;
+unresolved({opaque, _, _, _, _}) -> true;
+unresolved({recursive_ref, _, _}) -> true;
+unresolved(_) -> false.
 
 literal_or_any({atom, _, A}) -> {atom_lit, A};
 literal_or_any({integer, _, I}) -> {int_lit, I};
