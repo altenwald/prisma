@@ -1,5 +1,5 @@
 {
- "_doc": "The 55 contract (gradual_mismatch) warnings that the return-type-from-spec change adds in hybrid mode, over the 7 applications of rabbitmq-server 5dacb85. read_in_the_source: the code was read; the rest are classified by their shape only (not triaged).",
+ "_doc": "The 55 contract (gradual_mismatch) warnings that the return-type-from-spec change added in hybrid mode, over rabbitmq-server 5dacb85. Every one was read in the source. verdict: 'true by contract' = the spec says less than the code does; 'no longer reported' = a Spectra false positive fixed afterwards, or the numeric / non-empty-list tolerance (spectra_checker:accepts/2); 'known limitation' = Spectra is wrong and it is not fixed.",
  "categories": {
   "integer range wider than the declared one": [
    {
@@ -7,70 +7,80 @@
     "module": "cow_http3",
     "function": "data",
     "line": 486,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "no longer reported"
    },
    {
     "app": "cowlib",
     "module": "cow_http3",
     "function": "headers",
     "line": 492,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "no longer reported"
    },
    {
     "app": "cowlib",
     "module": "cow_http3",
     "function": "settings",
     "line": 501,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "no longer reported"
    },
    {
     "app": "cuttlefish",
     "module": "cuttlefish_duration",
     "function": "parse",
     "line": 58,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit_common",
     "module": "worker_pool_sup",
     "function": "start_link",
     "line": 32,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "no longer reported"
    },
    {
     "app": "rabbit",
     "module": "rabbit_amqqueue",
     "function": "count",
     "line": 1289,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "no longer reported"
    },
    {
     "app": "rabbit",
     "module": "rabbit_db_exchange",
     "function": "next_serial_in_khepri_tx",
     "line": 394,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "no longer reported"
    },
    {
     "app": "rabbit",
     "module": "rabbit_exchange",
     "function": "count",
     "line": 270,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "no longer reported"
    },
    {
     "app": "rabbit",
     "module": "rabbit_exchange",
     "function": "peek_serial",
     "line": 564,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "no longer reported"
    },
    {
     "app": "rabbit",
     "module": "rabbit_exchange",
     "function": "serial",
     "line": 109,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "no longer reported"
    }
   ],
   "argument: a value the callee spec does not take": [
@@ -79,49 +89,56 @@
     "module": "cuttlefish_conf",
     "function": "generate_element",
     "line": 168,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit_common",
     "module": "rabbit_term_decoding",
     "function": "decode_bounded",
     "line": 37,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "no longer reported"
    },
    {
     "app": "rabbit",
     "module": "rabbit_binding",
     "function": "process_deletions",
     "line": 475,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_binding",
     "function": "process_deletions",
     "line": 478,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_exchange",
     "function": "declare",
     "line": 153,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_exchange",
     "function": "recover",
     "line": 49,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_queue_decorator",
     "function": "maybe_recover",
     "line": 76,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    }
   ],
   "the value returned is not in the declared spec": [
@@ -130,245 +147,280 @@
     "module": "cuttlefish_unit",
     "function": "generate_config",
     "line": 50,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "cuttlefish",
     "module": "cuttlefish_unit",
     "function": "generate_config",
     "line": 62,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit_common",
     "module": "rabbit_framing_amqp_0_9_1",
     "function": "lookup_method_name",
     "line": 259,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "no longer reported"
    },
    {
     "app": "rabbit_common",
     "module": "rabbit_misc",
     "function": "ntoab",
     "line": 851,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit_common",
     "module": "rabbit_re",
     "function": "run",
     "line": 31,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_amqqueue",
     "function": "declare",
     "line": 217,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_amqqueue",
     "function": "is_replicable",
     "line": 2005,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_credential_validator_min_password_length",
     "function": "validate",
     "line": 26,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_credential_validator_password_regexp",
     "function": "validate",
     "line": 25,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_db_cluster",
     "function": "check_consistency",
     "line": 348,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_db_cluster",
     "function": "cli_cluster_status",
     "line": 361,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_db_cluster",
     "function": "forget_member",
     "line": 247,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_db_queue",
     "function": "update_decorators",
     "line": 532,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_db_queue",
     "function": "update_durable",
     "line": 568,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_definitions_import_https",
     "function": "load_with_hashing",
     "line": 62,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_definitions_import_local_filesystem",
     "function": "load_with_hashing",
     "line": 71,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_definitions_import_local_filesystem",
     "function": "load_with_hashing",
     "line": 80,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_ff_controller",
     "function": "enable_with_registry_locked",
     "line": 1054,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "no longer reported"
    },
    {
     "app": "rabbit",
     "module": "rabbit_ff_controller",
     "function": "run_callback",
     "line": 1914,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "known limitation (false positive)"
    },
    {
     "app": "rabbit",
     "module": "rabbit_member_placement_az",
     "function": "select_members",
     "line": 30,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_queue_type",
     "function": "default_alias",
     "line": 370,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_queue_type",
     "function": "handle_down",
     "line": 616,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_quorum_queue",
     "function": "dequeue",
     "line": 1244,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_quorum_queue",
     "function": "purge",
     "line": 1433,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_sup",
     "function": "start_delayed_restartable_child",
     "line": 92,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_sup",
     "function": "start_delayed_restartable_child",
     "line": 96,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_sup",
     "function": "start_restartable_child",
     "line": 84,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_sup",
     "function": "start_restartable_child",
     "line": 88,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_sup",
     "function": "start_supervisor_child",
     "line": 76,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit",
     "function": "set_log_level",
     "line": 1329,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "vm_memory_monitor",
     "function": "parse_mem_limit",
     "line": 381,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "ra",
     "module": "ra_kv",
     "function": "delete",
     "line": 230,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "ra",
     "module": "ra_kv",
     "function": "put",
     "line": 150,
-    "read_in_the_source": true
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "ra",
     "module": "ra",
     "function": "leave_and_delete_server",
     "line": 707,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "ra",
     "module": "ra",
     "function": "leave_and_delete_server",
     "line": 719,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    }
   ],
   "nonempty list where the spec asks for a non-empty one": [
@@ -377,21 +429,24 @@
     "module": "rabbit_amqp_management",
     "function": "queue_topology",
     "line": 492,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "true by contract"
    },
    {
     "app": "rabbit",
     "module": "rabbit_queue_location",
     "function": "do_select_leader_and_followers",
     "line": 77,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "no longer reported"
    },
    {
     "app": "rabbit",
     "module": "rabbit_queue_location",
     "function": "do_select_leader_and_followers",
     "line": 77,
-    "read_in_the_source": false
+    "read_in_the_source": true,
+    "verdict": "no longer reported"
    }
   ]
  }

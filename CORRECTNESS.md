@@ -380,12 +380,30 @@ What is left, **55 warnings**, in four kinds (`bench/triage/contract-warnings.js
 
 | Kind | n | read in the source | What they are |
 | :--- | :---: | :---: | :--- |
-| the value returned is not in the declared spec | 35 | 11 | **true by contract**: the spec says less than the code (`child_reply(X) -> X` returns the supervisor's error and `rabbit_sup` declares `ok`; `set_log_level` delegates to a function that may return `{error, _}`; `parse_mem_limit` declares `float()` and returns `{absolute, _}`; `ra_kv:put/delete`, `cuttlefish_*`...) |
-| an argument that the callee's spec does not take | 7 | 5 | **true by contract**: `rabbit_exchange:callback/4` declares its third argument `atom()` and is called with the serial (`none \| pos_integer()`), 4 times; `replace_match/2` gets `undefined \| string()` |
-| integer range wider than the declared one | 10 | 6 | by the strict reading of the gradual check: `integer()` for `non_neg_integer()` (`count/0`, `rabbit_db_queue:count/0` is declared `integer()`), `number()` for `integer()` (`Serial + 1` forces a number, not an integer), `non_neg_integer()` for `0..4611686018427387903` |
-| a list where the spec asks for a non-empty one | 3 | 0 | by the same strict reading: a `[atom()]` cannot be proved non-empty |
+| the value returned is not in the declared spec | 35 | 35 | **true by contract**: the spec says less than the code (`child_reply(X) -> X` returns the supervisor's error and `rabbit_sup` declares `ok`; `set_log_level` delegates to a function that may return `{error, _}`; `parse_mem_limit` declares `float()` and returns `{absolute, _}`; `ra_kv:put/delete`, `cuttlefish_*`...) |
+| an argument that the callee's spec does not take | 7 | 7 | **true by contract**: `rabbit_exchange:callback/4` declares its third argument `atom()` and is called with the serial (`none \| pos_integer()`), 4 times; `replace_match/2` gets `undefined \| string()` |
+| integer range wider than the declared one | 10 | 10 | by the strict reading of the gradual check: `integer()` for `non_neg_integer()` (`count/0`, `rabbit_db_queue:count/0` is declared `integer()`), `number()` for `integer()` (`Serial + 1` forces a number, not an integer), `non_neg_integer()` for `0..4611686018427387903` |
+| a list where the spec asks for a non-empty one | 3 | 3 | by the same strict reading: a `[atom()]` cannot be proved non-empty |
 
-**Not proved: 35 of the 55 were classified by their shape and not by reading the code.** They look like the ones that were read, but that is a guess until someone reads them.
+**All 55 were then read in the source** (`bench/triage/contract-warnings.json`, field `verdict`): **40 are true by contract** (the spec says less than the code: `rabbit_db_queue:update_durable/2` declares `ok` and returns `{error, _}`,
+`rabbit_db_cluster:check_consistency/0` declares `ok` and delegates to a function that may return `{error, _}`, `rabbit_queue_type:handle_down/4` lets `{protocol_error, ...}` through, `rabbit_quorum_queue:purge/1` and `dequeue/6`
+ignore the `{error | timeout, _}` of `rabbit_fifo_client`, `rabbit_amqqueue:is_replicable/1` declares `boolean()` over a callee whose spec says `undefine | module()`, a typo, `ra:leave_and_delete_server/3`, the password validators
+whose `validate/2` declares a 2-tuple error and delegates to a `validate/3` that returns a 3-tuple...), **14 are not reported any more** and **1 is a false positive that stays** (see below).
+Reading them found **four more false positives of Spectra, fixed, each with a test and a repro in `bench/repro/`**:
+
+- **`widen/1` collapsed a union of more than 16 literals to `atom()`**, so `rabbit_framing_amqp_0_9_1:lookup_method_name/1` (more than a hundred method names, and a spec that lists every one) did not fit its own spec.
+  A flat union of literals is cheap; what exploded was nesting. It is kept up to 1024 members now;
+- **a tuple pattern bound its variables from every tuple of a union scrutinee**, not only from the ones whose tag it matches: after `case g(B) of {ok, Etf} -> ...` against `{ok, binary()} | {error, atom()}`, `Etf` was `atom() | binary()`
+  (`rabbit_term_decoding:decode_bounded/3`). Each alternative is bound on its own now and the results are joined (`tagged_union_binding.erl`);
+- **`meet` of two binary types kept the weaker unit**: after `byte_size(Bin)` a `binary()` became a `bitstring()` (`rabbit_term_decoding`, found only once the previous one was fixed). `<<_:B, _:_*U>>` is the set of sizes B + k·U and the meet
+  is now the sizes both allow (`byte_size_loses_binary.erl`);
+- **a map pattern against an unknown type claimed that the map had only the pattern's keys**: `f(#{states := _} = I) -> {ok, I}` with `I :: inv()` (a local type the inference does not unfold) returned `#{states := any()}`, which does not fit
+  `{ok, inv()}`. It binds a plain `map()` when nothing is known of the scrutinee (`map_pattern_alias.erl`). **This one removes 41 warnings over the RabbitMQ dependencies** (`rabbit_ff_controller` and `rabbit_prelaunch_logging`
+  were full of them, and `ra`).
+
+**The false positive that stays:** `rabbit_ff_controller:run_callback/5`. Its `-spec` is overloaded by the value of `Command` (`enable` and `post_enable` give `ok`, `is_feature_used` gives `false`), and the clause that finds no callback computes
+`Ret = case Command of enable -> ok; post_enable -> ok; is_feature_used -> false end`. The code is right, but the return is `#{node() => ok | false}` and that fits neither overload: telling it needs the correlation between
+the parameter and the spec's clause, which Spectra does not follow.
 
 The 13 of the last two rows were a **policy question**, decided afterwards: a value known only by its wide type (`integer()`, `number()`, `[T]`) against a narrower contract
 (`non_neg_integer()`, `pos_integer()`, a range, `integer()`, `[T, ...]`) is **a gap in what is proven, not a contradiction**, and it is no longer reported
