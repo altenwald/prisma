@@ -25,18 +25,11 @@ PRISMA_KINDS = {
     "opacity_violation": "contract",
 }
 
-PRISMA_EBIN = os.path.join(ROOT, "_build/default/lib/prisma/ebin")
-API = """{ok, W} = prisma:analyze_dirs(init:get_plain_arguments(), #{mode => discrepancy, oxbow => false}),
-io:format("~ts", [prisma_checker:format_warnings(W, #{format => json, color => never})]), halt()."""
-
 def prisma(dirs, discrepancy_only=False):
-    # The escript has no --mode (it would be read as a path), so the discrepancy-only run goes through the API.
-    if discrepancy_only:
-        cmd = ["erl", "-noshell", "-pa", PRISMA_EBIN, "-eval", API, "-extra", *dirs]
-    else:
-        # BENCH_PPLTS=a.pplt:b.pplt gives it the contracts of OTP and of the dependencies (what Gradualizer reads from the code path)
-        plts = [x for p in os.environ.get("BENCH_PPLTS", "").split(":") if p for x in ("--pplt", p)]
-        cmd = [PRISMA, "check", "--format", "json", "--no-color", *plts, *dirs]
+    # BENCH_PPLTS=a.pplt:b.pplt gives it the contracts of OTP and of the dependencies (what Gradualizer reads from the code path)
+    plts = [x for p in os.environ.get("BENCH_PPLTS", "").split(":") if p for x in ("--pplt", p)]
+    mode = ["--mode", "discrepancy", "--no-oxbow"] if discrepancy_only else []
+    cmd = [PRISMA, "check", "--format", "json", "--no-color", *mode, *plts, *dirs]
     out = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
     for w in json.loads(out.stdout or "[]"):
         yield dict(tool="prisma-discrepancy" if discrepancy_only else "prisma", category=PRISMA_KINDS.get(w["kind"], w["kind"]),

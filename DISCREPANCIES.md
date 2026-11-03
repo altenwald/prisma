@@ -34,7 +34,7 @@ Three things to keep in mind when reading it:
 | Erlang/OTP | 29 (`erts-17.1.1`, JIT) |
 | Benchmark tool | [`hyperfine 2.0.0`](https://github.com/sharkdp/hyperfine) with `--metrics all`, 1 warm-up, 5 runs (3 for the 440 modules) |
 | Corpus | [rabbitmq-server `5dacb85`](https://github.com/rabbitmq/rabbitmq-server/commit/5dacb8531807bc4162ce36b210d50bc85b15801e) (`bench/corpus.config.json`): `rabbit` (234 modules) and 7 applications (`rabbit`, `rabbit_common`, `ra`, `khepri`, `cuttlefish`, `ranch`, `cowlib`: 440 modules) |
-| Prisma | commit `464afae`, discrepancy mode through the API (`mode => discrepancy, oxbow => false`: the escript has no `--mode` option yet, task #15) |
+| Prisma | commit `464afae`, discrepancy mode (`prisma check --mode discrepancy --no-oxbow`; the timed runs of section 5 went through the API with the same options, before the escript had `--mode`) |
 | Dialyzer | OTP 29, `--no_check_plt`, default warnings, base PLT of `erts`, `kernel`, `stdlib` |
 | xref | undefined calls and unused locals, with the dependencies on the code path |
 
@@ -188,7 +188,7 @@ All figures: `hyperfine 2.0.0 --metrics all --ignore-failure`, mean of the runs,
 
 ```bash
 hyperfine --metrics all --runs 5 --warmup 1 --ignore-failure \
-  -n "Prisma (discrepancy)" "bench/discrepancy.sh /path/to/deps/rabbit/ebin" \
+  -n "Prisma (discrepancy)" "prisma check --mode discrepancy --no-oxbow /path/to/deps/rabbit/ebin" \
   -n "Dialyzer"             "dialyzer --no_check_plt /path/to/deps/rabbit/ebin"
 ```
 
@@ -272,4 +272,4 @@ The profile (fprof on `rabbit_common`, own time): `prisma_infer` 26%, `erl_parse
 - **Oxbow** (80 on `rabbit`) against xref's unused locals: xref reports 0 because the compiler already warns on them, so most of the 80 are "ignored parameter" findings with no counterpart.
 - **Dialyzer with a full PLT of the dependencies**: this run lacks it, so Dialyzer sees fewer calls.
 - **A second corpus**, to know whether the 5 / 45 warnings and 125 / 125 mutants generalize.
-- **Speed**: the 55% slowdown (task #21) and the `--mode` option of the escript (task #15).
+- **Speed**: the 55% slowdown (task #21).

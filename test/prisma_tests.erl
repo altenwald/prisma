@@ -264,3 +264,12 @@ warning_formats_human_oneline_json_and_color_test() ->
         _ ->
             ?assertEqual({ok, dummy_state}, prisma_prv:init(dummy_state))
     end.
+
+cli_mode_option_test() ->
+    ?assertMatch(#{mode := discrepancy, targets := ["ebin"]}, prisma:parse_check_opts(["--mode", "discrepancy", "ebin"])),
+    ?assertMatch(#{mode := gradual}, prisma:parse_check_opts(["--mode", "gradual"])),
+    ?assertMatch(#{mode := hybrid}, prisma:parse_check_opts(["--mode", "hybrid"])),
+    %% without it the default of the analysis (hybrid) applies
+    ?assertNot(maps:is_key(mode, prisma:parse_check_opts(["ebin"]))),
+    %% a value that is not a mode is an error, not a path and not hybrid
+    ?assertMatch(#{error := {bad_mode, "fast"}}, prisma:parse_check_opts(["--mode", "fast"])).

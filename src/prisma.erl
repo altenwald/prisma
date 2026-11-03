@@ -211,6 +211,13 @@ main(["build", "--output", OutFile | Inputs]) when Inputs =/= [] ->
     end;
 main(["check" | Rest]) ->
     Opts = parse_check_opts(Rest),
+    case maps:find(error, Opts) of
+        {ok, {bad_mode, Bad}} ->
+            io:format(standard_error, "Unknown mode ~ts (hybrid, gradual or discrepancy)~n", [Bad]),
+            erlang:halt(2);
+        error ->
+            ok
+    end,
     Targets = maps:get(targets, Opts, []),
     Format = maps:get(format, Opts, human),
     Result = case Targets of
@@ -241,7 +248,7 @@ main(_) ->
         "  prisma version~n"
         "  prisma build~n"
         "  prisma build --output <file.pplt> <ebin_or_beam...>~n"
-        "  prisma check [--format <human|pretty|oneline|json>] [--no-color] [--color] [--pplt <file.pplt>...] [<ebin_or_beam...>]~n"
+        "  prisma check [--mode <hybrid|gradual|discrepancy>] [--format <human|pretty|oneline|json>] [--no-color] [--color] [--pplt <file.pplt>...] [<ebin_or_beam...>]~n"
     ),
     erlang:halt(1).
 
@@ -253,6 +260,13 @@ parse_check_opts(Args) ->
 parse_check_opts_loop(["--pplt", PpltFile | Rest], Acc) ->
     Pplts = maps:get(pplts, Acc),
     parse_check_opts_loop(Rest, Acc#{pplts => [PpltFile | Pplts]});
+parse_check_opts_loop(["--mode", Mode | Rest], Acc) ->
+    case Mode of
+        "discrepancy" -> parse_check_opts_loop(Rest, Acc#{mode => discrepancy});
+        "gradual" -> parse_check_opts_loop(Rest, Acc#{mode => gradual});
+        "hybrid" -> parse_check_opts_loop(Rest, Acc#{mode => hybrid});
+        _ -> parse_check_opts_loop(Rest, Acc#{error => {bad_mode, Mode}})
+    end;
 parse_check_opts_loop(["--format", Fmt | Rest], Acc) ->
     parse_check_opts_loop(Rest, Acc#{format => parse_format(Fmt)});
 parse_check_opts_loop(["--no-oxbow" | Rest], Acc) ->
