@@ -387,9 +387,12 @@ What is left, **55 warnings**, in four kinds (`bench/triage/contract-warnings.js
 
 **Not proved: 35 of the 55 were classified by their shape and not by reading the code.** They look like the ones that were read, but that is a guess until someone reads them.
 
-The 13 of the last two rows are the **policy question** that is left for the author, not a bug: the gradual check says "the inferred type must be a gradual subtype of the declared one", which is stricter
-than Dialyzer (it warns only when the two do not overlap). Accepting a numeric (and non-empty list) over-approximation as consistent would remove them; it would also stop reporting what
-the README advertises (a recursive call that violates `pos_integer()`). It was not decided here.
+The 13 of the last two rows were a **policy question**, decided afterwards: a value known only by its wide type (`integer()`, `number()`, `[T]`) against a narrower contract
+(`non_neg_integer()`, `pos_integer()`, a range, `integer()`, `[T, ...]`) is **a gap in what is proven, not a contradiction**, and it is no longer reported
+(`spectra_checker:accepts/2`; consistent_subtype itself is unchanged). What is proven to fall outside the contract still is: a literal (`0` for `pos_integer()`), a float or an atom
+for an integer, `[]` for a non-empty list, and `N - 1` with `N :: pos_integer()` for `pos_integer()` (the README example; the inference now types it `non_neg_integer()` so the tolerance does not hide it).
+Cost, accepted: an `integer()` that comes out of arithmetic (`A - B`) against `non_neg_integer()` is not reported either, because the type does not say where the `integer()` came from.
+Over the RabbitMQ dependencies the change only removes warnings (cowlib −5, khepri −2, ra −23, none new), mutants stay at 124/125 and collateral at 0; eunit 176/176, PropEr 10/10.
 
 ### A performance mistake of mine, how it was found, and what changed
 

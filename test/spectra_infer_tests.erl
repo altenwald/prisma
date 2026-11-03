@@ -969,6 +969,31 @@ a_callee_that_contradicts_its_spec_does_not_make_callers_wrong_test() ->
           "top() -> {f(), g()}.\n",
     ?assertEqual([{gradual_mismatch, 4}], gradual_warnings(Src)).
 
+%% A value only known by its wide declared type (`integer()`, `number()`, `[T]`) against a narrower contract is not shown to be wrong: it is
+%% a gap in what is proven, not a contradiction. What is proven to fall outside the contract is still reported.
+
+unproven_numeric_gap_is_not_reported_test() ->
+    Callee = "-export([f/0]).\n-spec n() -> integer().\nn() -> 1.\n",
+    ?assertEqual([], gradual_warnings(Callee ++ "-spec f() -> non_neg_integer().\nf() -> n().\n")),
+    ?assertEqual([], gradual_warnings(Callee ++ "-spec f() -> pos_integer().\nf() -> n().\n")),
+    ?assertEqual([], gradual_warnings(Callee ++ "-spec f() -> 0..10.\nf() -> n().\n")),
+    ?assertEqual([], gradual_warnings("-export([f/0]).\n-spec n() -> number().\nn() -> 1.\n-spec f() -> integer().\nf() -> n().\n")).
+
+unbounded_above_against_a_bounded_range_is_not_reported_test() ->
+    Src = "-export([f/0]).\n-spec n() -> non_neg_integer().\nn() -> 1.\n-spec f() -> 0..4611686018427387903.\nf() -> n().\n",
+    ?assertEqual([], gradual_warnings(Src)).
+
+proven_numeric_violations_are_still_reported_test() ->
+    ?assertMatch([{gradual_mismatch, _}], gradual_warnings("-export([f/1]).\n-spec f(pos_integer()) -> pos_integer().\nf(N) -> N - 1.\n")),
+    ?assertMatch([{gradual_mismatch, _}], gradual_warnings("-export([f/0]).\n-spec f() -> pos_integer().\nf() -> 0.\n")),
+    ?assertMatch([{gradual_mismatch, _}], gradual_warnings("-export([f/0]).\n-spec f() -> integer().\nf() -> 1.5.\n")),
+    ?assertMatch([{gradual_mismatch, _}], gradual_warnings("-export([f/0]).\n-spec f() -> integer().\nf() -> oops.\n")).
+
+unproven_non_emptiness_is_not_reported_test() ->
+    Callee = "-export([f/0]).\n-spec l() -> [atom()].\nl() -> [].\n",
+    ?assertEqual([], gradual_warnings(Callee ++ "-spec f() -> [atom(), ...].\nf() -> l().\n")),
+    ?assertMatch([{gradual_mismatch, _}], gradual_warnings("-export([f/0]).\n-spec f() -> [atom(), ...].\nf() -> [].\n")).
+
 gradual_warnings(Src) ->
     Text = "-module(cmp_sample).\n" ++ Src,
     {ok, Toks, _} = erl_scan:string(Text),

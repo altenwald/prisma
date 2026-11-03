@@ -162,10 +162,37 @@ verify_gradual_calls(#func_contract{mfa = {CallerMod, _, _} = CallerMFA, call_si
         Sites
     ).
 
+%% A value known only by its wide type (`integer()`, `number()`, `[T]`) against a narrower contract is a gap in what is proven, not a
+%% contradiction: it is not reported. What is proven to fall outside the contract (a literal, a range, another type) still is.
+-spec accepts(term(), term()) -> boolean().
+accepts(Actual, Expected) ->
+    spectra_type:consistent_subtype(Actual, Expected) orelse unproven_gap(Actual, Expected).
+
+unproven_gap({union, Members}, Expected) ->
+    lists:all(fun(M) -> accepts(M, Expected) end, Members);
+unproven_gap(Actual, {union, Members}) ->
+    lists:any(fun(M) -> unproven_gap(Actual, M) end, Members);
+unproven_gap(integer, Expected) ->
+    narrower_integer(Expected);
+unproven_gap(number, Expected) ->
+    Expected =:= integer orelse narrower_integer(Expected);
+unproven_gap(non_neg_integer, {int_range, 0, _}) ->
+    true;
+unproven_gap({list, Elem}, {nonempty_list, ExpectedElem}) ->
+    spectra_type:consistent_subtype(Elem, ExpectedElem);
+unproven_gap(_, _) ->
+    false.
+
+narrower_integer(non_neg_integer) -> true;
+narrower_integer(pos_integer) -> true;
+narrower_integer(neg_integer) -> true;
+narrower_integer({int_range, _, _}) -> true;
+narrower_integer(_) -> false.
+
 check_gradual_args(CallerMFA, Line, {CM, CF, CA}, ZipArgs) ->
     {Warns, _} = lists:foldl(
         fun({Actual, Expected}, {WAcc, Idx}) ->
-            case spectra_type:consistent_subtype(Actual, Expected) of
+            case accepts(Actual, Expected) of
                 true ->
                     {WAcc, Idx + 1};
                 false ->
@@ -256,7 +283,7 @@ verify_gradual_spec({Mod, _, _} = MFA, [_ | _] = SpecClauses, {fun_type, _Inferr
             [];
         _ ->
             DeclaredUnion = spectra_type:normalize_union(DeclaredReturns),
-            case spectra_type:consistent_subtype(InferredRet, DeclaredUnion) of
+            case accepts(InferredRet, DeclaredUnion) of
                 true ->
                     [];
                 false ->

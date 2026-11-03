@@ -193,6 +193,14 @@ bind_pattern({cons, _, H, T}, Expected, Env0) ->
                     end
             end
     end;
+bind_pattern({tuple, _, _} = Pattern, {union, Members}, Env0) ->
+    %% only the alternatives the pattern can match bind its variables: `{ok, B}` against `{ok, binary()} | {error, atom()}`
+    %% makes B a binary, not a binary or an atom
+    Bound = [R || {Type, _} = R <- [bind_pattern(Pattern, M, Env0) || M <- Members], Type =/= none],
+    case Bound of
+        [] -> {none, Env0};
+        _ -> {spectra_type:normalize_union([T || {T, _} <- Bound]), join_envs([E || {_, E} <- Bound])}
+    end;
 bind_pattern({tuple, _, PatElems}, Expected, Env0) ->
     case extract_tuple_elems(length(PatElems), Expected) of
         none ->
@@ -799,6 +807,7 @@ arith_result_type(_Op, float, _) -> float;
 arith_result_type(_Op, _, float) -> float;
 arith_result_type(_Op, number, _) -> number;
 arith_result_type(_Op, _, number) -> number;
+arith_result_type('-', pos_integer, {int_lit, 1}) -> non_neg_integer;
 arith_result_type(Op, L, R) -> integer_with_sign(Op, sign(L), sign(R)).
 
 %% What is known of the sign of an integer type: positive, not negative, or nothing.
