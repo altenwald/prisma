@@ -249,8 +249,8 @@ check(Src0, CalleeSrc0, Samples) ->
     ok = file:write_file(CalleeFile, CalleeBeam),
     {module, CalleeMod} = code:load_abs(filename:rootname(CalleeFile)),
     try
-        {ok, Plt} = prisma_plt:from_beams([Beam]),
-        #module_summary{functions = Funcs} = maps:get(Mod, Plt#prisma_plt.modules),
+        {ok, Pplt} = prisma_pplt:from_beams([Beam]),
+        #module_summary{functions = Funcs} = maps:get(Mod, Pplt#prisma_pplt.modules),
         {fun_type, Dom, Ret} = (maps:get({Mod, f, 2}, Funcs))#func_contract.inferred_type,
         {ok, Warnings} = prisma:analyze_beams([Beam, CalleeBeam], #{mode => discrepancy, oxbow => false}),
         Claims = [W || #prisma_warning{kind = K, mfa = {WMod, _, _}} = W <- Warnings, WMod =:= Mod,

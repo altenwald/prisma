@@ -29,13 +29,13 @@ version() ->
 
 %% @doc Builds a portable `.pplt` file from BEAM directories or files.
 -spec build([file:filename_all()], file:filename_all()) ->
-    {ok, #prisma_plt{}} | {error, term()}.
+    {ok, #prisma_pplt{}} | {error, term()}.
 build(Inputs, OutputFile) ->
     Beams = expand_beams(Inputs),
-    case prisma_plt:from_beams(Beams) of
-        {ok, Plt} ->
-            case prisma_plt:save(Plt, OutputFile) of
-                ok -> {ok, Plt};
+    case prisma_pplt:from_beams(Beams) of
+        {ok, Pplt} ->
+            case prisma_pplt:save(Pplt, OutputFile) of
+                ok -> {ok, Pplt};
                 {error, Reason} -> {error, Reason}
             end;
         {error, Reason} ->
@@ -72,14 +72,14 @@ analyze_dirs(Dirs, Opts) ->
 -spec analyze_beams([file:filename_all() | binary()], map()) ->
     {ok, [#prisma_warning{}]} | {error, term()}.
 analyze_beams(Beams, Opts) ->
-    PltFiles = maps:get(plts, Opts, []),
-    case load_plts(PltFiles) of
-        {ok, ExplicitPlt} ->
-            LockPlt = resolve_lock_plt(Opts),
-            DepsPlt = prisma_plt:merge(ExplicitPlt, LockPlt),
-            case prisma_plt:from_beams(Beams, Opts#{external_specs => prisma_plt:declared_specs(DepsPlt)}) of
-                {ok, TargetPlt} ->
-                    Warnings = prisma_checker:check_plt(TargetPlt, DepsPlt, Opts),
+    PpltFiles = maps:get(pplts, Opts, []),
+    case load_pplts(PpltFiles) of
+        {ok, ExplicitPplt} ->
+            LockPplt = resolve_lock_pplt(Opts),
+            DepsPplt = prisma_pplt:merge(ExplicitPplt, LockPplt),
+            case prisma_pplt:from_beams(Beams, Opts#{external_specs => prisma_pplt:declared_specs(DepsPplt)}) of
+                {ok, TargetPplt} ->
+                    Warnings = prisma_checker:check_pplt(TargetPplt, DepsPplt, Opts),
                     {ok, Warnings};
                 {error, Reason} ->
                     {error, Reason}
@@ -88,15 +88,15 @@ analyze_beams(Beams, Opts) ->
             {error, Reason}
     end.
 
-resolve_lock_plt(Opts) ->
+resolve_lock_pplt(Opts) ->
     case maps:find(project_root, Opts) of
         {ok, Root} ->
-            case prisma_lock:resolve_project_plts(Root, Opts) of
-                {ok, Plt} -> Plt;
-                _ -> prisma_plt:new()
+            case prisma_lock:resolve_project_pplts(Root, Opts) of
+                {ok, Pplt} -> Pplt;
+                _ -> prisma_pplt:new()
             end;
         error ->
-            prisma_plt:new()
+            prisma_pplt:new()
     end.
 
 %% @doc Escript CLI entrypoint.
@@ -106,8 +106,8 @@ main(["version"]) ->
     erlang:halt(0);
 main(["build", "--output", OutFile | Inputs]) when Inputs =/= [] ->
     case build(Inputs, OutFile) of
-        {ok, Plt} ->
-            Mods = prisma_plt:modules(Plt),
+        {ok, Pplt} ->
+            Mods = prisma_pplt:modules(Pplt),
             io:format("Built PPLT ~s (~B modules)~n", [OutFile, length(Mods)]),
             erlang:halt(0);
         {error, Reason} ->
@@ -145,18 +145,18 @@ main(_) ->
         "Usage:~n"
         "  prisma version~n"
         "  prisma build --output <file.pplt> <ebin_or_beam...>~n"
-        "  prisma check [--format <human|pretty|oneline|json>] [--no-color] [--color] [--plt <file.pplt>...] [<ebin_or_beam...>]~n"
+        "  prisma check [--format <human|pretty|oneline|json>] [--no-color] [--color] [--pplt <file.pplt>...] [<ebin_or_beam...>]~n"
     ),
     erlang:halt(1).
 
 %% @doc Parses CLI options for `prisma check` into a map.
 -spec parse_check_opts([string()]) -> map().
 parse_check_opts(Args) ->
-    parse_check_opts_loop(Args, #{plts => [], targets => [], format => human, color => auto}).
+    parse_check_opts_loop(Args, #{pplts => [], targets => [], format => human, color => auto}).
 
-parse_check_opts_loop(["--plt", PltFile | Rest], Acc) ->
-    Plts = maps:get(plts, Acc),
-    parse_check_opts_loop(Rest, Acc#{plts => [PltFile | Plts]});
+parse_check_opts_loop(["--pplt", PpltFile | Rest], Acc) ->
+    Pplts = maps:get(pplts, Acc),
+    parse_check_opts_loop(Rest, Acc#{pplts => [PpltFile | Pplts]});
 parse_check_opts_loop(["--format", Fmt | Rest], Acc) ->
     parse_check_opts_loop(Rest, Acc#{format => parse_format(Fmt)});
 parse_check_opts_loop(["--no-oxbow" | Rest], Acc) ->
@@ -171,9 +171,9 @@ parse_check_opts_loop([Target | Rest], Acc) ->
     Targets = maps:get(targets, Acc),
     parse_check_opts_loop(Rest, Acc#{targets => [Target | Targets]});
 parse_check_opts_loop([], Acc) ->
-    Plts = lists:reverse(maps:get(plts, Acc)),
+    Pplts = lists:reverse(maps:get(pplts, Acc)),
     Targets = lists:reverse(maps:get(targets, Acc)),
-    Acc#{plts => Plts, targets => Targets}.
+    Acc#{pplts => Pplts, targets => Targets}.
 
 parse_format("json") -> json;
 parse_format("oneline") -> oneline;
@@ -181,25 +181,25 @@ parse_format("pretty") -> human;
 parse_format("human") -> human;
 parse_format(_) -> human.
 
-%% @doc Parses CLI arguments for `prisma check` into `{Plts, Targets}` tuple.
+%% @doc Parses CLI arguments for `prisma check` into `{Pplts, Targets}` tuple.
 -spec parse_check_args([string()]) -> {[string()], [string()]}.
 parse_check_args(Args) ->
     Opts = parse_check_opts(Args),
-    {maps:get(plts, Opts), maps:get(targets, Opts)}.
+    {maps:get(pplts, Opts), maps:get(targets, Opts)}.
 
-load_plts(PltFiles) ->
+load_pplts(PpltFiles) ->
     lists:foldl(
         fun
             (File, {ok, Acc}) ->
-                case prisma_plt:load(File) of
-                    {ok, Plt} -> {ok, prisma_plt:merge(Acc, Plt)};
-                    {error, Reason} -> {error, {plt_load_failed, File, Reason}}
+                case prisma_pplt:load(File) of
+                    {ok, Pplt} -> {ok, prisma_pplt:merge(Acc, Pplt)};
+                    {error, Reason} -> {error, {pplt_load_failed, File, Reason}}
                 end;
             (_File, {error, _} = Err) ->
                 Err
         end,
-        {ok, prisma_plt:new()},
-        PltFiles
+        {ok, prisma_pplt:new()},
+        PpltFiles
     ).
 
 expand_beams(Inputs) ->

@@ -9,18 +9,18 @@ elixir_builtin_remote_types_test() ->
     KeywordTAst = {remote_type, 1, [{atom, 1, 'Elixir.Keyword'}, {atom, 1, t}, [{type, 1, integer, []}]]},
     RangeTAst = {remote_type, 1, [{atom, 1, 'Elixir.Range'}, {atom, 1, t}, []]},
 
-    Plt = prisma_plt:new(),
+    Pplt = prisma_pplt:new(),
     ?assertEqual(
         {ok, {binary, 0, 8}},
-        prisma_plt:resolve_type('Elixir.MyApp', prisma_type:from_abstract(StringTAst), Plt)
+        prisma_pplt:resolve_type('Elixir.MyApp', prisma_type:from_abstract(StringTAst), Pplt)
     ),
     ?assertEqual(
         {ok, {list, {tuple, [atom, integer]}}},
-        prisma_plt:resolve_type('Elixir.MyApp', prisma_type:from_abstract(KeywordTAst), Plt)
+        prisma_pplt:resolve_type('Elixir.MyApp', prisma_type:from_abstract(KeywordTAst), Pplt)
     ),
     ?assertMatch(
         {ok, {map, [{exact, {atom_lit, '__struct__'}, {atom_lit, 'Elixir.Range'}} | _]}},
-        prisma_plt:resolve_type('Elixir.MyApp', prisma_type:from_abstract(RangeTAst), Plt)
+        prisma_pplt:resolve_type('Elixir.MyApp', prisma_type:from_abstract(RangeTAst), Pplt)
     ).
 
 elixir_v1_dbgi_struct_and_ast_extraction_test() ->
@@ -95,8 +95,8 @@ elixir_v1_dbgi_struct_and_ast_extraction_test() ->
     ?assertEqual(elixir, Summary#module_summary.language),
     ?assert(maps:is_key({Mod, t, 0}, Summary#module_summary.types)),
 
-    Plt = (prisma_plt:new())#prisma_plt{modules = #{Mod => Summary}},
-    Warnings = prisma_checker:check_module(Summary, Plt, #{mode => hybrid}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    Warnings = prisma_checker:check_module(Summary, Pplt, #{mode => hybrid}),
     WarnMFAs = [{W#prisma_warning.kind, W#prisma_warning.mfa} || W <- Warnings],
     ?assert(lists:member({gradual_mismatch, {Mod, broken_id, 1}}, WarnMFAs)),
     ?assert(lists:member({gradual_mismatch, {Mod, bad_call, 0}}, WarnMFAs)).
@@ -119,12 +119,12 @@ mix_task_ebin_resolution_test() ->
     Parsed = 'Elixir.Mix.Tasks.Prisma':parse_args([
         <<"--mode">>, <<"gradual">>,
         <<"--env">>, <<"test">>,
-        <<"--plt">>, <<"base.pplt">>,
+        <<"--pplt">>, <<"base.pplt">>,
         <<"custom/ebin">>
     ]),
     ?assertEqual(gradual, maps:get(mode, Parsed)),
     ?assertEqual("test", maps:get(env, Parsed)),
-    ?assertEqual(["base.pplt"], maps:get(plts, Parsed)),
+    ?assertEqual(["base.pplt"], maps:get(pplts, Parsed)),
     ?assertEqual(["custom/ebin"], maps:get(targets, Parsed)),
 
     os:cmd("rm -rf " ++ TmpRoot).
@@ -299,10 +299,10 @@ elixir_ssa_versioning_and_wildcard_struct_test() ->
         language = elixir,
         exports = Exports
     }),
-    Plt = (prisma_plt:new())#prisma_plt{modules = #{Mod => Summary}},
-    Warnings = prisma_checker:check_module(Summary, Plt, #{mode => hybrid}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    Warnings = prisma_checker:check_module(Summary, Pplt, #{mode => hybrid}),
     ?assertEqual([], Warnings),
-    {ok, CompleteContract} = prisma_plt:lookup_mfa({Mod, complete, 2}, Plt),
+    {ok, CompleteContract} = prisma_pplt:lookup_mfa({Mod, complete, 2}, Pplt),
     ?assertMatch({fun_type, [any, any], _}, CompleteContract#func_contract.inferred_type),
-    {ok, AnyStructContract} = prisma_plt:lookup_mfa({Mod, handle_any_struct, 1}, Plt),
+    {ok, AnyStructContract} = prisma_pplt:lookup_mfa({Mod, handle_any_struct, 1}, Pplt),
     ?assertMatch({fun_type, [{map, [{exact, {atom_lit, '__struct__'}, any}]}], _}, AnyStructContract#func_contract.inferred_type).

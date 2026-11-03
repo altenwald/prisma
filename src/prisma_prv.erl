@@ -18,7 +18,7 @@
     {color, undefined, "color", boolean, "Force ANSI colors"},
     {no_oxbow, undefined, "no-oxbow", boolean, "Disable oxbow code detection"},
     {oxbow, undefined, "oxbow", boolean, "Enable oxbow code detection"},
-    {plt, undefined, "plt", string, "Path to .pplt file (can be specified multiple times)"}
+    {pplt, undefined, "pplt", string, "Path to .pplt file (can be specified multiple times)"}
 ]).
 
 %% @doc Registers the `prisma` provider with Rebar3.
@@ -112,8 +112,8 @@ parse_opts(State) ->
     end,
     Defaults = #{mode => hybrid, format => human, color => auto},
     Merged = maps:merge(Defaults, maps:merge(ConfigOpts, CliOpts)),
-    FinalPlts = maps:get(plts, ConfigOpts, []) ++ maps:get(plts, CliOpts, []),
-    {Merged#{plts => FinalPlts}, Targets}.
+    FinalPplts = maps:get(pplts, ConfigOpts, []) ++ maps:get(pplts, CliOpts, []),
+    {Merged#{pplts => FinalPplts}, Targets}.
 
 %% @doc Parses CLI options received from Rebar3.
 -spec parse_cli_args([term()]) -> map().
@@ -130,8 +130,8 @@ parse_cli_args(Args) ->
             (no_oxbow, Acc) -> Acc#{oxbow => false};
             ({oxbow, true}, Acc) -> Acc#{oxbow => true};
             (oxbow, Acc) -> Acc#{oxbow => true};
-            ({plt, PltPath}, #{plts := Plts} = Acc) -> Acc#{plts => Plts ++ [unicode:characters_to_list(PltPath)]};
-            ({plt, PltPath}, Acc) -> Acc#{plts => [unicode:characters_to_list(PltPath)]};
+            ({pplt, PpltPath}, #{pplts := Pplts} = Acc) -> Acc#{pplts => Pplts ++ [unicode:characters_to_list(PpltPath)]};
+            ({pplt, PpltPath}, Acc) -> Acc#{pplts => [unicode:characters_to_list(PpltPath)]};
             (_, Acc) -> Acc
         end,
         #{},
@@ -147,12 +147,12 @@ parse_config_opts(Opts) ->
             ({mode, Mode}, Acc) -> Acc#{mode => parse_mode(Mode)};
             ({color, Val}, Acc) when Val =:= always; Val =:= never; Val =:= auto -> Acc#{color => Val};
             ({oxbow, Val}, Acc) when is_boolean(Val) -> Acc#{oxbow => Val};
-            ({plts, Plts}, Acc) when is_list(Plts) ->
-                Acc#{plts => [unicode:characters_to_list(P) || P <- Plts]};
-            ({plt, Plt}, #{plts := Plts} = Acc) ->
-                Acc#{plts => Plts ++ [unicode:characters_to_list(Plt)]};
-            ({plt, Plt}, Acc) ->
-                Acc#{plts => [unicode:characters_to_list(Plt)]};
+            ({pplts, Pplts}, Acc) when is_list(Pplts) ->
+                Acc#{pplts => [unicode:characters_to_list(P) || P <- Pplts]};
+            ({pplt, Pplt}, #{pplts := Pplts} = Acc) ->
+                Acc#{pplts => Pplts ++ [unicode:characters_to_list(Pplt)]};
+            ({pplt, Pplt}, Acc) ->
+                Acc#{pplts => [unicode:characters_to_list(Pplt)]};
             (_, Acc) ->
                 Acc
         end,

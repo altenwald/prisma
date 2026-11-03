@@ -168,7 +168,7 @@ of the function and missed Dialyzer's invalid-spec warnings, which sit on the `-
 - `hd([])` is no longer reported: the type has no "non-empty improper list" to tell it from `hd([1 | 2])` (the compiler already warns about it). In exchange `tl(X) + 1` is no longer a false `badarith`.
 - Two `rabbit_vhost_limit` clauses (`{ok, Limit} when Limit < 0`, dead on purpose) are no longer reported: seeing them needs "a float that is not negative", which the type language lacks. The sound answer is "cannot tell".
 - What a `fun`, `try`, `receive` or comprehension binds does not reach the code after it (patterns inside bind to `any`, the result is `any`): faults that depend on those values are missed.
-- The exact meet of two improper lists with list-able tails is cut at depth 2 and then a safe superset (without the cut the PLT of OTP's `compiler` took minutes).
+- The exact meet of two improper lists with list-able tails is cut at depth 2 and then a safe superset (without the cut the PPLT of OTP's `compiler` took minutes).
 - In the gradual check, a value known only by a wide type (`integer()`, `number()`, `[T]`) against a narrower contract (`non_neg_integer()`, `pos_integer()`, `[T, ...]`) is a gap in what is proven, not a contradiction, and is not reported (`prisma_checker:accepts/2`). Literals, floats, atoms, `[]` for a non-empty list and `N - 1` with `N :: pos_integer()` for `pos_integer()` still are.
 
 ## 4. Where Prisma and Dialyzer differ
@@ -220,7 +220,7 @@ Prisma builds the `.pplt` of a package once per version and loads it on demand.
 | Step | Wall | Peak memory | Warnings (all kinds) |
 | :--- | :---: | :---: | :---: |
 | `build` of the 6 dependency apps of `rabbit` (206 modules, 441 KiB file) | 1.45 s | 344 MiB | n/a |
-| `check rabbit` without `--plt` | 1.2 - 1.4 s | 333 - 342 MiB | 177 |
+| `check rabbit` without `--pplt` | 1.2 - 1.4 s | 333 - 342 MiB | 177 |
 | `check rabbit` with the dependencies' `.pplt` | 1.7 s | 343 - 379 MiB | 221 |
 
 The cache is not free (it adds about 0.4 s) and it changes the result: the extra 44 warnings are calls into the dependencies, checked against their real specs. The "no cold start" of Prisma is
@@ -241,11 +241,11 @@ Same corpus, same machine and harness (`rabbit`, discrepancy mode, 5 runs), star
 | `build` of the 6 dependency apps | 3.9 s, 2.4 MB, 331 MiB | 1.45 s, 441 KiB, 344 MiB | faster, smaller |
 | `.pplt` of OTP `compiler` (60 modules) | 0.51 s, 2,065 KiB | ~0.40 s, ~360 KiB | faster, smaller |
 
-The analysis is slower because it does more (it looks inside `fun`, `try`, `receive` and comprehensions, trusts declared specs, subtracts patterns in every `case`, bounds types with `widen/1`); the PLT is smaller
+The analysis is slower because it does more (it looks inside `fun`, `try`, `receive` and comprehensions, trusts declared specs, subtracts patterns in every `case`, bounds types with `widen/1`); the PPLT is smaller
 because it no longer keeps the abstract code of each function.
 
 **A performance mistake, how it was found, and what changed.** The fix for improper cells made the inferred type of some recursive functions grow with every pass of the inference.
-It was missed because the measurement was `check` on `deps/rabbit` and the PLT of OTP's `compiler`, not the PLT of RabbitMQ's dependencies: building that one went from 3.9 s to 235 s
+It was missed because the measurement was `check` on `deps/rabbit` and the PPLT of OTP's `compiler`, not the PPLT of RabbitMQ's dependencies: building that one went from 3.9 s to 235 s
 and the operating system killed the process for its memory. A bisection found one module (`rabbit_binary_parser`) at **48,900 million words once written out** from 9,000 in memory, a factor
 of 113,000: Erlang shares equal sub-terms in memory, and `term_to_binary` and any recursion over the type expand them as if it were a tree. Fixes: the members of a union of proper lists
 make one `nonempty_list` (a cons distributed over K clauses gave K, K², K³ members); inferred types are bounded by `prisma_type:widen/1` (nesting beyond four levels, and unions of

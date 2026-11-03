@@ -15,7 +15,7 @@ Runs Prisma hybrid type and discrepancy analysis on compiled BEAM files.
   * `--color` - Forces ANSI color output
   * `--no-oxbow` - Disables oxbow (dead/unreachable code and unused clauses) analysis
   * `--oxbow` - Enables oxbow analysis (default: enabled)
-  * `--plt <path>` - Path to extra `.pplt` files (can be repeated)
+  * `--pplt <path>` - Path to extra `.pplt` files (can be repeated)
   * `--env <name>` - Mix environment (default: `dev` or `$MIX_ENV`)
 
 ## Configuration
@@ -31,7 +31,7 @@ def project do
       format: :human,
       oxbow: true,
       color: :auto,
-      plts: []
+      pplts: []
     ]
   ]
 end
@@ -86,10 +86,10 @@ run(RawArgs) ->
     code:add_patha(SelfBeamDir),
     ConfigOpts = read_mix_project_config(),
     CliOpts = parse_args(RawArgs),
-    CombinedPlts = maps:get(plts, ConfigOpts, []) ++ maps:get(plts, CliOpts, []),
+    CombinedPplts = maps:get(pplts, ConfigOpts, []) ++ maps:get(pplts, CliOpts, []),
     Defaults = #{mode => hybrid, format => human, color => auto},
     Merged = maps:merge(Defaults, maps:merge(ConfigOpts, CliOpts)),
-    Opts = Merged#{plts => CombinedPlts},
+    Opts = Merged#{pplts => CombinedPplts},
     Root = maps:get(root, Opts, "."),
     Dirs = resolve_ebin_dirs(maps:get(targets, Opts, []), Opts),
     Format = maps:get(format, Opts, human),
@@ -138,12 +138,12 @@ parse_mix_config(Conf) ->
             ({format, Fmt}, Acc) -> Acc#{format => parse_format(Fmt)};
             ({oxbow, Val}, Acc) when is_boolean(Val) -> Acc#{oxbow => Val};
             ({color, Val}, Acc) when Val =:= always; Val =:= never; Val =:= auto -> Acc#{color => Val};
-            ({plts, Plts}, Acc) when is_list(Plts) ->
-                Acc#{plts => [unicode:characters_to_list(P) || P <- Plts]};
-            ({plt, Plt}, #{plts := Plts} = Acc) ->
-                Acc#{plts => Plts ++ [unicode:characters_to_list(Plt)]};
-            ({plt, Plt}, Acc) ->
-                Acc#{plts => [unicode:characters_to_list(Plt)]};
+            ({pplts, Pplts}, Acc) when is_list(Pplts) ->
+                Acc#{pplts => [unicode:characters_to_list(P) || P <- Pplts]};
+            ({pplt, Pplt}, #{pplts := Pplts} = Acc) ->
+                Acc#{pplts => Pplts ++ [unicode:characters_to_list(Pplt)]};
+            ({pplt, Pplt}, Acc) ->
+                Acc#{pplts => [unicode:characters_to_list(Pplt)]};
             (_, Acc) ->
                 Acc
         end,
@@ -159,7 +159,7 @@ parse_args(RawArgs) ->
         false -> "dev";
         EnvVal -> EnvVal
     end,
-    parse_args_loop(StrArgs, #{env => DefaultEnv, plts => [], targets => []}).
+    parse_args_loop(StrArgs, #{env => DefaultEnv, pplts => [], targets => []}).
 
 parse_args_loop(["--mode", ModeStr | Rest], Acc) ->
     Mode = parse_mode(ModeStr),
@@ -176,8 +176,8 @@ parse_args_loop(["--no-color" | Rest], Acc) ->
     parse_args_loop(Rest, Acc#{color => never});
 parse_args_loop(["--color" | Rest], Acc) ->
     parse_args_loop(Rest, Acc#{color => always});
-parse_args_loop(["--plt", PltPath | Rest], #{plts := Plts} = Acc) ->
-    parse_args_loop(Rest, Acc#{plts => Plts ++ [unicode:characters_to_list(PltPath)]});
+parse_args_loop(["--pplt", PpltPath | Rest], #{pplts := Pplts} = Acc) ->
+    parse_args_loop(Rest, Acc#{pplts => Pplts ++ [unicode:characters_to_list(PpltPath)]});
 parse_args_loop([Target | Rest], #{targets := Targets} = Acc) ->
     parse_args_loop(Rest, Acc#{targets => Targets ++ [Target]});
 parse_args_loop([], Acc) ->

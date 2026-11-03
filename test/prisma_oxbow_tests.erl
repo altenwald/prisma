@@ -137,8 +137,8 @@ oxbow_disable_option_test() ->
         {function, 4, dead, 0, [{clause, 4, [], [], [{atom, 4, ok}]}]}
     ],
     Summary = prisma_abstract:parse_abstract_forms(Forms, [{entry, 0}], #module_summary{module = test_oxbow_opt}),
-    Plt = prisma_plt:new(),
-    WithOxbow = prisma_checker:check_module(Summary, Plt, #{oxbow => true}),
+    Pplt = prisma_pplt:new(),
+    WithOxbow = prisma_checker:check_module(Summary, Pplt, #{oxbow => true}),
     ?assertEqual(1, length(WithOxbow)),
-    WithoutOxbow = prisma_checker:check_module(Summary, Plt, #{oxbow => false}),
+    WithoutOxbow = prisma_checker:check_module(Summary, Pplt, #{oxbow => false}),
     ?assertEqual([], WithoutOxbow).

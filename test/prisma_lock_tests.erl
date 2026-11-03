@@ -40,7 +40,7 @@ parse_mix_lock_test() ->
         Deps
     ).
 
-resolve_and_cache_project_plts_test() ->
+resolve_and_cache_project_pplts_test() ->
     TmpProj = "/tmp/prisma_dev/tmp_lock_proj",
     TmpCache = "/tmp/prisma_dev/tmp_pplt_cache",
     os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache),
@@ -69,15 +69,15 @@ resolve_and_cache_project_plts_test() ->
     ok = file:write_file(filename:join(TmpProj, "rebar.lock"), LockText),
 
     %% First resolution builds dep_lib-1.2.3.pplt and caches it in TmpCache
-    {ok, ResolvedPlt1} = prisma_lock:resolve_project_plts(TmpProj, #{cache_dir => TmpCache}),
-    ?assertEqual([dep_lib], prisma_plt:modules(ResolvedPlt1)),
+    {ok, ResolvedPplt1} = prisma_lock:resolve_project_pplts(TmpProj, #{cache_dir => TmpCache}),
+    ?assertEqual([dep_lib], prisma_pplt:modules(ResolvedPplt1)),
     ExpectedCachePath = prisma_lock:cache_path(TmpCache, <<"dep_lib">>, <<"1.2.3">>),
     ?assert(filelib:is_regular(ExpectedCachePath)),
 
     %% Delete the _build beam to prove the second resolution loads from the .pplt cache!
     ok = file:delete(filename:join(DepEbin, "dep_lib.beam")),
-    {ok, ResolvedPlt2} = prisma_lock:resolve_project_plts(TmpProj, #{cache_dir => TmpCache}),
-    ?assertEqual([dep_lib], prisma_plt:modules(ResolvedPlt2)),
+    {ok, ResolvedPplt2} = prisma_lock:resolve_project_pplts(TmpProj, #{cache_dir => TmpCache}),
+    ?assertEqual([dep_lib], prisma_pplt:modules(ResolvedPplt2)),
 
     %% Compile an app module that calls dep_lib:fetch_count/1 with a wrong argument type (integer)
     AppForms = [
@@ -101,19 +101,19 @@ resolve_and_cache_project_plts_test() ->
 
     os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache).
 
-otp_plt_fetcher_and_mix_lock_discovery_test() ->
+otp_pplt_fetcher_and_mix_lock_discovery_test() ->
     TmpProj = "/tmp/prisma_dev/tmp_mix_lock_proj",
     TmpCache = "/tmp/prisma_dev/tmp_pplt_cache2",
     os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache),
     ok = filelib:ensure_dir(filename:join(TmpProj, "dummy")),
 
     ?assert(is_list(prisma_lock:default_cache_dir())),
-    ?assertMatch({error, _}, prisma_lock:ensure_otp_plt(non_existent_otp_app_xyz, #{cache_dir => TmpCache})),
-    {ok, OtpPlt1} = prisma_lock:ensure_otp_plt(compiler, #{cache_dir => TmpCache}),
-    ?assert(lists:member(compile, prisma_plt:modules(OtpPlt1))),
+    ?assertMatch({error, _}, prisma_lock:ensure_otp_pplt(non_existent_otp_app_xyz, #{cache_dir => TmpCache})),
+    {ok, OtpPlt1} = prisma_lock:ensure_otp_pplt(compiler, #{cache_dir => TmpCache}),
+    ?assert(lists:member(compile, prisma_pplt:modules(OtpPlt1))),
     %% Second call loads from cache
-    {ok, OtpPlt2} = prisma_lock:ensure_otp_plt(compiler, #{cache_dir => TmpCache}),
-    ?assertEqual(prisma_plt:modules(OtpPlt1), prisma_plt:modules(OtpPlt2)),
+    {ok, OtpPlt2} = prisma_lock:ensure_otp_pplt(compiler, #{cache_dir => TmpCache}),
+    ?assertEqual(prisma_pplt:modules(OtpPlt1), prisma_pplt:modules(OtpPlt2)),
 
     %% Write mix.lock and resolve using a custom fetcher
     MixLockPath = filename:join(TmpProj, "mix.lock"),
@@ -121,15 +121,15 @@ otp_plt_fetcher_and_mix_lock_discovery_test() ->
     ok = file:write_file(MixLockPath, MixLockText),
     ?assertEqual([#{name => <<"jason">>, version => <<"1.4.1">>, source => hex}], prisma_lock:discover_deps(TmpProj)),
 
-    FakeJasonPlt = prisma_plt:new(<<"jason">>, <<"1.4.1">>),
-    EncodedJason = prisma_plt:encode(FakeJasonPlt),
+    FakeJasonPplt = prisma_pplt:new(<<"jason">>, <<"1.4.1">>),
+    EncodedJason = prisma_pplt:encode(FakeJasonPplt),
     Fetcher = fun(_OtpRel, <<"jason">>, <<"1.4.1">>) -> {ok, EncodedJason} end,
 
-    {ok, Resolved} = prisma_lock:resolve_project_plts(TmpProj, #{
+    {ok, Resolved} = prisma_lock:resolve_project_pplts(TmpProj, #{
         cache_dir => TmpCache,
         fetcher => Fetcher
     }),
-    ?assertMatch(#prisma_plt{}, Resolved),
+    ?assertMatch(#prisma_pplt{}, Resolved),
     ?assert(filelib:is_regular(prisma_lock:cache_path(TmpCache, <<"jason">>, <<"1.4.1">>))),
 
     %% Extra rebar.lock variants and CLI helpers
@@ -137,7 +137,7 @@ otp_plt_fetcher_and_mix_lock_discovery_test() ->
     {ok, ExtraDeps} = prisma_lock:parse_rebar_lock(list_to_binary(ExtraRebar)),
     ?assertEqual(3, length(ExtraDeps)),
 
-    ?assertEqual({["a.pplt"], ["ebin"]}, prisma:parse_check_args(["--plt", "a.pplt", "ebin"])),
+    ?assertEqual({["a.pplt"], ["ebin"]}, prisma:parse_check_args(["--pplt", "a.pplt", "ebin"])),
     ?assert(is_list(lists:flatten(prisma_prv:format_error({warnings_found, 2})))),
     ?assert(is_list(lists:flatten(prisma_prv:format_error(custom_err)))),
 

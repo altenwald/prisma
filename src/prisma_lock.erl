@@ -13,8 +13,8 @@
     default_cache_dir/0,
     cache_path/3,
     otp_cache_path/2,
-    ensure_otp_plt/2,
-    resolve_project_plts/2,
+    ensure_otp_pplt/2,
+    resolve_project_pplts/2,
     discover_project_ebins/2
 ]).
 
@@ -162,13 +162,13 @@ otp_cache_path(CacheDir, OtpApp) ->
     filename:join([unicode:characters_to_list(CacheDir), "otp-" ++ OtpRel, "otp", FileName]).
 
 %% @doc Loads or builds and caches the `.pplt` for an OTP application (e.g. `stdlib`).
--spec ensure_otp_plt(atom(), map()) -> {ok, #prisma_plt{}} | {error, term()}.
-ensure_otp_plt(OtpApp, Opts) ->
+-spec ensure_otp_pplt(atom(), map()) -> {ok, #prisma_pplt{}} | {error, term()}.
+ensure_otp_pplt(OtpApp, Opts) ->
     CacheDir = maps:get(cache_dir, Opts, default_cache_dir()),
     Path = otp_cache_path(CacheDir, OtpApp),
     case filelib:is_regular(Path) of
         true ->
-            prisma_plt:load(Path);
+            prisma_pplt:load(Path);
         false ->
             case code:lib_dir(OtpApp) of
                 {error, Reason} ->
@@ -178,10 +178,10 @@ ensure_otp_plt(OtpApp, Opts) ->
                     PkgName = atom_to_binary(OtpApp, utf8),
                     OtpRel = list_to_binary(erlang:system_info(otp_release)),
                     Beams = filelib:wildcard(filename:join(EbinDir, "*.beam")),
-                    case prisma_plt:from_beams(Beams, #{package => PkgName, package_vsn => OtpRel}) of
-                        {ok, Plt} ->
-                            _ = prisma_plt:save(Plt, Path),
-                            {ok, Plt};
+                    case prisma_pplt:from_beams(Beams, #{package => PkgName, package_vsn => OtpRel}) of
+                        {ok, Pplt} ->
+                            _ = prisma_pplt:save(Pplt, Path),
+                            {ok, Pplt};
                         Error ->
                             Error
                     end
@@ -189,16 +189,16 @@ ensure_otp_plt(OtpApp, Opts) ->
     end.
 
 %% @doc Resolves, builds/fetches, caches, and merges `.pplt` files for a project's locked dependencies.
--spec resolve_project_plts(file:filename_all(), map()) ->
-    {ok, #prisma_plt{}} | {error, term()}.
-resolve_project_plts(ProjectRoot, Opts) ->
+-spec resolve_project_pplts(file:filename_all(), map()) ->
+    {ok, #prisma_pplt{}} | {error, term()}.
+resolve_project_pplts(ProjectRoot, Opts) ->
     CacheDir = maps:get(cache_dir, Opts, default_cache_dir()),
     OtpApps = maps:get(otp_apps, Opts, []),
     Deps = discover_deps(ProjectRoot),
     OtpPlts = lists:filtermap(
         fun(App) ->
-            case ensure_otp_plt(App, Opts) of
-                {ok, Plt} -> {true, Plt};
+            case ensure_otp_pplt(App, Opts) of
+                {ok, Pplt} -> {true, Pplt};
                 _ -> false
             end
         end,
@@ -207,23 +207,23 @@ resolve_project_plts(ProjectRoot, Opts) ->
     DepPlts = lists:filtermap(
         fun(#{name := Name, version := Vsn}) ->
             case resolve_single_dep(ProjectRoot, CacheDir, Name, Vsn, Opts) of
-                {ok, Plt} -> {true, Plt};
+                {ok, Pplt} -> {true, Pplt};
                 _ -> false
             end
         end,
         Deps
     ),
-    {ok, prisma_plt:merge(OtpPlts ++ DepPlts)}.
+    {ok, prisma_pplt:merge(OtpPlts ++ DepPlts)}.
 
 resolve_single_dep(ProjectRoot, CacheDir, Name, Vsn, Opts) ->
     Path = cache_path(CacheDir, Name, Vsn),
     case filelib:is_regular(Path) of
         true ->
-            prisma_plt:load(Path);
+            prisma_pplt:load(Path);
         false ->
             case try_remote_fetcher(Name, Vsn, Path, Opts) of
-                {ok, Plt} ->
-                    {ok, Plt};
+                {ok, Pplt} ->
+                    {ok, Pplt};
                 error ->
                     build_and_cache_local_dep(ProjectRoot, Path, Name, Vsn)
             end
@@ -234,14 +234,14 @@ try_remote_fetcher(Name, Vsn, CachePath, Opts) ->
         {ok, FetcherFun} when is_function(FetcherFun, 3) ->
             OtpRel = list_to_binary(erlang:system_info(otp_release)),
             case FetcherFun(OtpRel, Name, Vsn) of
-                {ok, #prisma_plt{} = Plt} ->
-                    _ = prisma_plt:save(Plt, CachePath),
-                    {ok, Plt};
+                {ok, #prisma_pplt{} = Pplt} ->
+                    _ = prisma_pplt:save(Pplt, CachePath),
+                    {ok, Pplt};
                 {ok, Bin} when is_binary(Bin) ->
-                    case prisma_plt:decode(Bin) of
-                        {ok, Plt} ->
-                            _ = prisma_plt:save(Plt, CachePath),
-                            {ok, Plt};
+                    case prisma_pplt:decode(Bin) of
+                        {ok, Pplt} ->
+                            _ = prisma_pplt:save(Pplt, CachePath),
+                            {ok, Pplt};
                         _ ->
                             error
                     end;
@@ -260,10 +260,10 @@ build_and_cache_local_dep(ProjectRoot, CachePath, Name, Vsn) ->
         [] ->
             error;
         Beams ->
-            case prisma_plt:from_beams(Beams, #{package => Name, package_vsn => Vsn}) of
-                {ok, Plt} ->
-                    _ = prisma_plt:save(Plt, CachePath),
-                    {ok, Plt};
+            case prisma_pplt:from_beams(Beams, #{package => Name, package_vsn => Vsn}) of
+                {ok, Pplt} ->
+                    _ = prisma_pplt:save(Pplt, CachePath),
+                    {ok, Pplt};
                 _ ->
                     error
             end

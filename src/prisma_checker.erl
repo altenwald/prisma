@@ -6,8 +6,8 @@
 -export([
     check_module/2,
     check_module/3,
-    check_plt/2,
-    check_plt/3,
+    check_pplt/2,
+    check_pplt/3,
     format_warning/1,
     format_warning/2,
     format_warnings/1,
@@ -16,34 +16,34 @@
     colorize/3
 ]).
 
-%% @doc Analyzes all modules in `TargetPlt` against `DepsPlt` in hybrid mode.
--spec check_plt(#prisma_plt{}, #prisma_plt{}) -> [#prisma_warning{}].
-check_plt(TargetPlt, DepsPlt) ->
-    check_plt(TargetPlt, DepsPlt, #{mode => hybrid}).
+%% @doc Analyzes all modules in `TargetPplt` against `DepsPplt` in hybrid mode.
+-spec check_pplt(#prisma_pplt{}, #prisma_pplt{}) -> [#prisma_warning{}].
+check_pplt(TargetPplt, DepsPplt) ->
+    check_pplt(TargetPplt, DepsPplt, #{mode => hybrid}).
 
-%% @doc Analyzes all modules in `TargetPlt` against `DepsPlt` with `Opts`.
--spec check_plt(#prisma_plt{}, #prisma_plt{}, map()) -> [#prisma_warning{}].
-check_plt(#prisma_plt{modules = TargetMods} = TargetPlt, DepsPlt, Opts) ->
-    CombinedPlt = prisma_plt:merge(DepsPlt, TargetPlt),
+%% @doc Analyzes all modules in `TargetPplt` against `DepsPplt` with `Opts`.
+-spec check_pplt(#prisma_pplt{}, #prisma_pplt{}, map()) -> [#prisma_warning{}].
+check_pplt(#prisma_pplt{modules = TargetMods} = TargetPplt, DepsPplt, Opts) ->
+    CombinedPplt = prisma_pplt:merge(DepsPplt, TargetPplt),
     lists:flatmap(
         fun({_Mod, Summary}) ->
-            check_module(Summary, CombinedPlt, Opts)
+            check_module(Summary, CombinedPplt, Opts)
         end,
         lists:sort(maps:to_list(TargetMods))
     ).
 
 %% @doc Analyzes a `#module_summary{}` in hybrid mode.
--spec check_module(#module_summary{}, #prisma_plt{}) -> [#prisma_warning{}].
-check_module(Summary, Plt) ->
-    check_module(Summary, Plt, #{mode => hybrid}).
+-spec check_module(#module_summary{}, #prisma_pplt{}) -> [#prisma_warning{}].
+check_module(Summary, Pplt) ->
+    check_module(Summary, Pplt, #{mode => hybrid}).
 
 %% @doc Analyzes a `#module_summary{}` using the configured mode (`hybrid`, `gradual`, `discrepancy`).
--spec check_module(#module_summary{}, #prisma_plt{}, map()) -> [#prisma_warning{}].
-check_module(#module_summary{file = File, functions = Funcs} = Summary, Plt, Opts) ->
+-spec check_module(#module_summary{}, #prisma_pplt{}, map()) -> [#prisma_warning{}].
+check_module(#module_summary{file = File, functions = Funcs} = Summary, Pplt, Opts) ->
     Mode = maps:get(mode, Opts, hybrid),
     ContractWarnings = lists:flatmap(
         fun({_MFA, Contract}) ->
-            check_contract(Contract, Plt, Mode)
+            check_contract(Contract, Pplt, Mode)
         end,
         lists:sort(maps:to_list(Funcs))
     ),
@@ -62,11 +62,11 @@ attach_file_to_warnings(Warns, File) ->
         _ -> W
      end || W <- Warns].
 
-check_contract(Contract, Plt, Mode) ->
+check_contract(Contract, Pplt, Mode) ->
     DiscrepancyWarnings =
         case Mode of
             gradual -> [];
-            _ -> collect_discrepancies(Contract, Plt)
+            _ -> collect_discrepancies(Contract, Pplt)
         end,
     GradualWarnings =
         case Mode of
@@ -78,31 +78,31 @@ check_contract(Contract, Plt, Mode) ->
                     Contract#func_contract.declared_specs,
                     Contract#func_contract.inferred_type,
                     Contract#func_contract.line,
-                    Plt
+                    Pplt
                 ),
-                CallWarnings = verify_gradual_calls(Contract, Plt),
+                CallWarnings = verify_gradual_calls(Contract, Pplt),
                 SpecBodyWarnings ++ CallWarnings
         end,
     lists:usort(DiscrepancyWarnings ++ GradualWarnings).
 
-collect_discrepancies(#func_contract{mfa = {CallerMod, _, _} = CallerMFA, local_warnings = LocalWarns, call_sites = Sites}, Plt) ->
+collect_discrepancies(#func_contract{mfa = {CallerMod, _, _} = CallerMFA, local_warnings = LocalWarns, call_sites = Sites}, Pplt) ->
     InterModWarns = lists:flatmap(
         fun({Line, {CalleeMod, _, _} = CalleeMFA, ActualArgs}) ->
             case CalleeMod =:= CallerMod of
                 true ->
                     [];
                 false ->
-                    check_remote_discrepancy_call(CallerMFA, Line, CalleeMFA, ActualArgs, Plt)
+                    check_remote_discrepancy_call(CallerMFA, Line, CalleeMFA, ActualArgs, Pplt)
             end
         end,
         Sites
     ),
     LocalWarns ++ InterModWarns.
 
-check_remote_discrepancy_call({CallerMod, _, _} = CallerMFA, Line, {CalleeMod, _, _} = CalleeMFA, ActualArgs, Plt) ->
-    case prisma_plt:lookup_mfa(CalleeMFA, Plt) of
+check_remote_discrepancy_call({CallerMod, _, _} = CallerMFA, Line, {CalleeMod, _, _} = CalleeMFA, ActualArgs, Pplt) ->
+    case prisma_pplt:lookup_mfa(CalleeMFA, Pplt) of
         {ok, #func_contract{declared_specs = Specs, inferred_type = Inferred}} ->
-            case resolve_expected_arg_vectors(CallerMod, CalleeMod, Specs, Inferred, Plt) of
+            case resolve_expected_arg_vectors(CallerMod, CalleeMod, Specs, Inferred, Pplt) of
                 {ok, Vectors} ->
                     check_vectors(Vectors, ActualArgs,
                                   fun(Zipped) -> prisma_infer:check_call_site(CallerMFA, Line, CalleeMFA, Zipped) end);
@@ -110,19 +110,19 @@ check_remote_discrepancy_call({CallerMod, _, _} = CallerMFA, Line, {CalleeMod, _
                     []
             end;
         error ->
-            unknown_function_warnings(CallerMFA, Line, CalleeMFA, Plt)
+            unknown_function_warnings(CallerMFA, Line, CalleeMFA, Pplt)
     end.
 
-%% A call to a function that does not exist in a module the PLT knows. A module that is not in the PLT proves nothing (it may just
+%% A call to a function that does not exist in a module the PPLT knows. A module that is not in the PPLT proves nothing (it may just
 %% not have been analyzed), a module that is not Erlang (Elixir's generated functions) is left alone, `erlang` is the BIFs, and
 %% the compiler adds `module_info/0,1` and `behaviour_info/1` without them being in the code. A function that exists without being
 %% exported is not reported either: a module can export everything with a compile attribute.
-unknown_function_warnings(CallerMFA, Line, {Mod, F, A} = CalleeMFA, Plt) ->
+unknown_function_warnings(CallerMFA, Line, {Mod, F, A} = CalleeMFA, Pplt) ->
     case provided_by_the_compiler(Mod, F, A) of
         true ->
             [];
         false ->
-            case prisma_plt:lookup_module(Mod, Plt) of
+            case prisma_pplt:lookup_module(Mod, Pplt) of
                 {ok, #module_summary{language = Language, functions = Funcs}} when Language =/= elixir ->
                     Arities = lists:sort([FA || {M, Fn, FA} <- maps:keys(Funcs), M =:= Mod, Fn =:= F]),
                     Msg = iolist_to_binary(io_lib:format(
@@ -143,12 +143,12 @@ provided_by_the_compiler(_, module_info, 1) -> true;
 provided_by_the_compiler(_, behaviour_info, 1) -> true;
 provided_by_the_compiler(_, _, _) -> false.
 
-verify_gradual_calls(#func_contract{mfa = {CallerMod, _, _} = CallerMFA, call_sites = Sites}, Plt) ->
+verify_gradual_calls(#func_contract{mfa = {CallerMod, _, _} = CallerMFA, call_sites = Sites}, Pplt) ->
     lists:flatmap(
         fun({Line, {CalleeMod, _, _} = CalleeMFA, ActualArgs}) ->
-            case prisma_plt:lookup_mfa(CalleeMFA, Plt) of
+            case prisma_pplt:lookup_mfa(CalleeMFA, Pplt) of
                 {ok, #func_contract{declared_specs = [ _ | _ ] = Specs, inferred_type = Inferred}} ->
-                    case resolve_expected_arg_vectors(CallerMod, CalleeMod, Specs, Inferred, Plt) of
+                    case resolve_expected_arg_vectors(CallerMod, CalleeMod, Specs, Inferred, Pplt) of
                         {ok, Vectors} ->
                             check_vectors(Vectors, ActualArgs,
                                           fun(Zipped) -> check_gradual_args(CallerMFA, Line, CalleeMFA, Zipped) end);
@@ -227,13 +227,13 @@ classify_gradual_failure(_, _) -> gradual_mismatch.
 
 %% The argument types a call may use: one vector per clause of an overloaded -spec (or the inferred ones when there is no
 %% spec). A call is acceptable when ANY vector accepts it as a whole, so clauses are never mixed position by position.
-resolve_expected_arg_vectors(CallerMod, CalleeMod, [_ | _] = SpecClauses, _Inferred, Plt) ->
+resolve_expected_arg_vectors(CallerMod, CalleeMod, [_ | _] = SpecClauses, _Inferred, Pplt) ->
     Vectors = lists:filtermap(
         fun(SpecClause) ->
             case prisma_type:unfold_bounded_fun(SpecClause) of
                 {fun_type, SpecArgs, _Ret} ->
                     {true, [
-                        case prisma_plt:resolve_type(CallerMod, CalleeMod, A, Plt) of
+                        case prisma_pplt:resolve_type(CallerMod, CalleeMod, A, Pplt) of
                             {ok, R} -> R;
                             _ -> A
                         end
@@ -249,7 +249,7 @@ resolve_expected_arg_vectors(CallerMod, CalleeMod, [_ | _] = SpecClauses, _Infer
         [] -> error;
         _ -> {ok, Vectors}
     end;
-resolve_expected_arg_vectors(_CallerMod, _CalleeMod, [], {fun_type, InferredArgs, _Ret}, _Plt) ->
+resolve_expected_arg_vectors(_CallerMod, _CalleeMod, [], {fun_type, InferredArgs, _Ret}, _Pplt) ->
     {ok, [InferredArgs]};
 resolve_expected_arg_vectors(_, _, _, _, _) ->
     error.
@@ -266,12 +266,12 @@ check_vectors(Vectors, ActualArgs, Check) ->
             end
     end.
 
-verify_gradual_spec(_MFA, [], _Inferred, _Line, _Plt) ->
+verify_gradual_spec(_MFA, [], _Inferred, _Line, _Pplt) ->
     [];
-verify_gradual_spec({Mod, _, _} = MFA, [_ | _] = SpecClauses, {fun_type, _InferredArgs, InferredRet}, Line, Plt) ->
+verify_gradual_spec({Mod, _, _} = MFA, [_ | _] = SpecClauses, {fun_type, _InferredArgs, InferredRet}, Line, Pplt) ->
     DeclaredReturns = lists:filtermap(
         fun(Clause) ->
-            case extract_spec_return(Mod, Clause, Plt) of
+            case extract_spec_return(Mod, Clause, Pplt) of
                 {ok, Ret} -> {true, Ret};
                 error -> false
             end
@@ -304,13 +304,13 @@ verify_gradual_spec({Mod, _, _} = MFA, [_ | _] = SpecClauses, {fun_type, _Inferr
                     }]
             end
     end;
-verify_gradual_spec(_MFA, _Specs, _Inferred, _Line, _Plt) ->
+verify_gradual_spec(_MFA, _Specs, _Inferred, _Line, _Pplt) ->
     [].
 
-extract_spec_return(Mod, SpecClause, Plt) ->
+extract_spec_return(Mod, SpecClause, Pplt) ->
     case prisma_type:unfold_bounded_fun(SpecClause) of
         {fun_type, _Args, RetType} ->
-            case prisma_plt:resolve_type(Mod, Mod, RetType, Plt) of
+            case prisma_pplt:resolve_type(Mod, Mod, RetType, Pplt) of
                 {ok, Resolved} -> {ok, Resolved};
                 {error, _} -> {ok, RetType}
             end;

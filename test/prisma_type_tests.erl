@@ -221,30 +221,30 @@ remote_opaque_and_recursive_types_in_pplt_test() ->
     {ok, mod_a, BeamA} = compile:forms(FormsA, [debug_info]),
     {ok, mod_b, BeamB} = compile:forms(FormsB, [debug_info]),
 
-    {ok, PltA} = prisma_plt:from_beams([BeamA], #{package => <<"pkg_a">>, package_vsn => <<"1.0.0">>}),
-    {ok, PltB} = prisma_plt:from_beams([BeamB], #{package => <<"pkg_b">>, package_vsn => <<"1.0.0">>}),
-    MergedPlt = prisma_plt:merge([PltA, PltB]),
+    {ok, PpltA} = prisma_pplt:from_beams([BeamA], #{package => <<"pkg_a">>, package_vsn => <<"1.0.0">>}),
+    {ok, PpltB} = prisma_pplt:from_beams([BeamB], #{package => <<"pkg_b">>, package_vsn => <<"1.0.0">>}),
+    MergedPplt = prisma_pplt:merge([PpltA, PpltB]),
 
-    {ok, InternalDecl} = prisma_plt:lookup_type({mod_a, internal_tag, 0}, MergedPlt),
+    {ok, InternalDecl} = prisma_pplt:lookup_type({mod_a, internal_tag, 0}, MergedPplt),
     ?assertEqual(false, InternalDecl#type_decl.exported),
-    {ok, OpaqueDecl} = prisma_plt:lookup_type({mod_a, secret_token, 0}, MergedPlt),
+    {ok, OpaqueDecl} = prisma_pplt:lookup_type({mod_a, secret_token, 0}, MergedPplt),
     ?assertEqual(true, OpaqueDecl#type_decl.exported),
     ?assertEqual(opaque, OpaqueDecl#type_decl.kind),
-    ?assertEqual(error, prisma_plt:lookup_type({unknown_mod, t, 0}, MergedPlt)),
+    ?assertEqual(error, prisma_pplt:lookup_type({unknown_mod, t, 0}, MergedPplt)),
 
     ?assertEqual(
         {ok, {binary, 0, 8}},
-        prisma_plt:resolve_type(mod_a, {local_type, secret_token, []}, MergedPlt)
+        prisma_pplt:resolve_type(mod_a, {local_type, secret_token, []}, MergedPplt)
     ),
     ?assertEqual(
         {ok, {opaque, mod_a, secret_token, [], {binary, 0, 8}}},
-        prisma_plt:resolve_type(mod_b, {remote_type, mod_a, secret_token, []}, MergedPlt)
+        prisma_pplt:resolve_type(mod_b, {remote_type, mod_a, secret_token, []}, MergedPplt)
     ),
 
-    {ok, ExpandedTree} = prisma_plt:resolve_type(
+    {ok, ExpandedTree} = prisma_pplt:resolve_type(
         mod_b,
         {remote_type, mod_a, tree, [integer]},
-        MergedPlt
+        MergedPplt
     ),
     ?assertEqual(
         {union, [
@@ -269,11 +269,11 @@ remote_opaque_and_recursive_types_in_pplt_test() ->
             [{list, pos_integer}, {nonempty_list, pos_integer}],
             {map, [{exact, {atom_lit, id}, {improper_list, pos_integer, nil}}]}
         }},
-        prisma_plt:resolve_type(mod_a, ComplexType, MergedPlt)
+        prisma_pplt:resolve_type(mod_a, ComplexType, MergedPplt)
     ),
     ?assertEqual(
         {error, {undefined_type, {mod_a, missing_type, 0}}},
-        prisma_plt:resolve_type(mod_a, {local_type, missing_type, []}, MergedPlt)
+        prisma_pplt:resolve_type(mod_a, {local_type, missing_type, []}, MergedPplt)
     ).
 
 type_format_elixir_and_erlang_test() ->

@@ -111,7 +111,7 @@ enrich_from_debug_info(Beam, Module, Dbgi, Exports, Summary, Opts) ->
 
 %% The abstract forms of a module. The debug_info chunk of an Erlang module already holds them, in the same form that
 %% `beam_lib:chunks(Beam, [abstract_code])` returns; asking for `abstract_code` decodes the chunk again and rebuilds every
-%% annotation (`erl_parse:anno_from_term` was a fifth of the time of building a PLT).
+%% annotation (`erl_parse:anno_from_term` was a fifth of the time of building a PPLT).
 abstract_forms(_Beam, {debug_info_v1, erl_abstract_code, {Forms, _Opts}}) when is_list(Forms) ->
     {ok, Forms};
 abstract_forms(Beam, _Dbgi) ->

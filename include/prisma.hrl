@@ -1,8 +1,8 @@
 -ifndef(PRISMA_HRL).
 -define(PRISMA_HRL, true).
 
--define(PRISMA_PLT_MAGIC, "PRISMA_PLT_V1").
--define(PRISMA_PLT_VERSION, 1).
+-define(PRISMA_PPLT_MAGIC, "PRISMA_PPLT_V1").
+-define(PRISMA_PPLT_VERSION, 1).
 
 -type mfa_key() :: {module(), atom(), arity()}.
 -type type_key() :: {module(), atom(), arity()}.
@@ -57,8 +57,8 @@
     file = undefined :: undefined | string()
 }).
 
--record(prisma_plt, {
-    version = ?PRISMA_PLT_VERSION :: pos_integer(),
+-record(prisma_pplt, {
+    version = ?PRISMA_PPLT_VERSION :: pos_integer(),
     package :: binary() | undefined,
     package_vsn :: binary() | undefined,
     otp_release :: binary(),

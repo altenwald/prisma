@@ -10,7 +10,7 @@ defmodule Prisma.MixProject do
       version: @version,
       language: :erlang,
       erlc_options: [:debug_info],
-      description: "Hybrid Success & Gradual Type Analyzer with Modular PLTs for Erlang and Elixir",
+      description: "Hybrid Success & Gradual Type Analyzer with Modular PPLTs for Erlang and Elixir",
       package: package(),
       docs: docs(),
       deps: deps()

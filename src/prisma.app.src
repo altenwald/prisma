@@ -1,5 +1,5 @@
 {application, prisma, [
-    {description, "Hybrid Success & Gradual Type Analyzer with Modular PLTs for Erlang and Elixir"},
+    {description, "Hybrid Success & Gradual Type Analyzer with Modular PPLTs for Erlang and Elixir"},
     {pkg_name, "prisma"},
     {vsn, "0.1.0"},
     {registered, []},

@@ -14,10 +14,10 @@ hub_lifecycle_and_most_demanded_ranking_test() ->
         (_, _) -> {error, not_found_in_hex}
     end,
 
-    %% Mock builder: generates a valid #prisma_plt{} for the requested package
+    %% Mock builder: generates a valid #prisma_pplt{} for the requested package
     Builder = fun(OtpRel, Pkg, Vsn) ->
-        Plt = (prisma_plt:new(Pkg, Vsn))#prisma_plt{otp_release = OtpRel},
-        {ok, Plt}
+        Pplt = (prisma_pplt:new(Pkg, Vsn))#prisma_pplt{otp_release = OtpRel},
+        {ok, Pplt}
     end,
 
     {ok,Pid} = prisma_hub:start_link(#{
@@ -30,7 +30,7 @@ hub_lifecycle_and_most_demanded_ranking_test() ->
     %% 1. Requesting a non-existent Hex package returns 404
     ?assertMatch(
         {404, _, _},
-        prisma_hub:handle_request(Pid, 'POST', <<"/api/v1/plts/request">>, #{
+        prisma_hub:handle_request(Pid, 'POST', <<"/api/v1/pplts/request">>, #{
             <<"otp">> => <<"29">>,
             <<"package">> => <<"unknown_pkg">>,
             <<"version">> => <<"0.0.1">>
@@ -40,7 +40,7 @@ hub_lifecycle_and_most_demanded_ranking_test() ->
     %% 2. Requesting cowboy 2.10.0 (3 times) and jason 1.4.1 (1 time)
     ?assertMatch(
         {200, _, _},
-        prisma_hub:handle_request(Pid, 'POST', <<"/api/v1/plts/request">>, #{
+        prisma_hub:handle_request(Pid, 'POST', <<"/api/v1/pplts/request">>, #{
             <<"otp">> => <<"29">>,
             <<"package">> => <<"cowboy">>,
             <<"version">> => <<"2.10.0">>
@@ -48,21 +48,21 @@ hub_lifecycle_and_most_demanded_ranking_test() ->
     ),
     ?assertMatch(
         {200, _, _},
-        prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/29/cowboy/2.10.0.pplt">>, #{})
+        prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/pplts/29/cowboy/2.10.0.pplt">>, #{})
     ),
-    {200, _, PpltBin} = prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/29/cowboy/2.10.0.pplt">>, #{}),
-    ?assertMatch({ok, #prisma_plt{package = <<"cowboy">>, package_vsn = <<"2.10.0">>}}, prisma_plt:decode(PpltBin)),
+    {200, _, PpltBin} = prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/pplts/29/cowboy/2.10.0.pplt">>, #{}),
+    ?assertMatch({ok, #prisma_pplt{package = <<"cowboy">>, package_vsn = <<"2.10.0">>}}, prisma_pplt:decode(PpltBin)),
 
     ?assertMatch(
         {200, _, _},
-        prisma_hub:handle_request(Pid, 'POST', <<"/api/v1/plts/request">>, #{
+        prisma_hub:handle_request(Pid, 'POST', <<"/api/v1/pplts/request">>, #{
             <<"otp">> => <<"29">>,
             <<"package">> => <<"jason">>,
             <<"version">> => <<"1.4.1">>
         })
     ),
 
-    %% 3. Top demanded PLTs ranking has cowboy first (3 hits) and jason second (1 hit)
+    %% 3. Top demanded PPLTs ranking has cowboy first (3 hits) and jason second (1 hit)
     Top = prisma_hub:top_demanded(Pid, 10),
     ?assertMatch(
         [
@@ -81,7 +81,7 @@ hub_lifecycle_and_most_demanded_ranking_test() ->
 
     %% 5. Client fetcher integrates with prisma_lock
     Fetcher = prisma_hub:local_fetcher(Pid),
-    ?assertMatch({ok, <<?PRISMA_PLT_MAGIC, _/binary>>}, Fetcher(<<"29">>, <<"cowboy">>, <<"2.10.0">>)),
+    ?assertMatch({ok, <<?PRISMA_PPLT_MAGIC, _/binary>>}, Fetcher(<<"29">>, <<"cowboy">>, <<"2.10.0">>)),
     ?assertEqual(error, Fetcher(<<"29">>, <<"unknown_pkg">>, <<"0.0.1">>)),
 
     prisma_hub:stop(Pid),
@@ -98,8 +98,8 @@ async_build_and_api_routes_test() ->
     end,
     Builder = fun
         (OtpRel, <<"ranch">> = Pkg, Vsn) ->
-            Plt = (prisma_plt:new(Pkg, Vsn))#prisma_plt{otp_release = OtpRel},
-            {ok, Plt};
+            Pplt = (prisma_pplt:new(Pkg, Vsn))#prisma_pplt{otp_release = OtpRel},
+            {ok, Pplt};
         (_OtpRel, <<"broken_pkg">>, _Vsn) ->
             {error, compile_failed}
     end,
@@ -112,16 +112,16 @@ async_build_and_api_routes_test() ->
     }),
 
     %% Missing params -> 400
-    ?assertMatch({400, _, _}, prisma_hub:handle_request(Pid, 'POST', <<"/api/v1/plts/request">>, #{})),
+    ?assertMatch({400, _, _}, prisma_hub:handle_request(Pid, 'POST', <<"/api/v1/pplts/request">>, #{})),
     %% Unknown routes -> 404
     ?assertMatch({404, _, _}, prisma_hub:handle_request(Pid, 'GET', <<"/unknown">>, #{})),
-    ?assertMatch({404, _, _}, prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/bad_route">>, #{})),
-    ?assertMatch({404, _, _}, prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/29/nope/1.0.0.pplt">>, #{})),
+    ?assertMatch({404, _, _}, prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/pplts/bad_route">>, #{})),
+    ?assertMatch({404, _, _}, prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/pplts/29/nope/1.0.0.pplt">>, #{})),
 
     %% Async request returns 202 building initially
     ?assertMatch(
         {202, _, _},
-        prisma_hub:handle_request(Pid, 'POST', <<"/api/v1/plts/request">>, #{
+        prisma_hub:handle_request(Pid, 'POST', <<"/api/v1/pplts/request">>, #{
             <<"otp">> => <<"29">>,
             <<"package">> => <<"ranch">>,
             <<"version">> => <<"1.8.0">>
@@ -130,13 +130,13 @@ async_build_and_api_routes_test() ->
     timer:sleep(50),
     ?assertMatch(
         {200, _, _},
-        prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/plts/29/ranch/1.8.0.pplt">>, #{})
+        prisma_hub:handle_request(Pid, 'GET', <<"/api/v1/pplts/29/ranch/1.8.0.pplt">>, #{})
     ),
 
     %% Broken package build transitions to failed (500 on subsequent request)
     ?assertMatch(
         {202, _, _},
-        prisma_hub:handle_request(Pid, 'POST', <<"/api/v1/plts/request">>, #{
+        prisma_hub:handle_request(Pid, 'POST', <<"/api/v1/pplts/request">>, #{
             <<"otp">> => <<"29">>,
             <<"package">> => <<"broken_pkg">>,
             <<"version">> => <<"1.0.0">>
@@ -145,7 +145,7 @@ async_build_and_api_routes_test() ->
     timer:sleep(50),
     ?assertMatch(
         {500, _, _},
-        prisma_hub:handle_request(Pid, 'POST', <<"/api/v1/plts/request">>, #{
+        prisma_hub:handle_request(Pid, 'POST', <<"/api/v1/pplts/request">>, #{
             <<"otp">> => <<"29">>,
             <<"package">> => <<"broken_pkg">>,
             <<"version">> => <<"1.0.0">>

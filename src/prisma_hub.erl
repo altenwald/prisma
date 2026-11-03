@@ -11,8 +11,8 @@
 -export([
     start_link/1,
     stop/1,
-    request_plt/4,
-    get_plt/4,
+    request_pplt/4,
+    get_pplt/4,
     top_demanded/2,
     handle_request/4,
     local_fetcher/1,
@@ -31,7 +31,7 @@
 -record(state, {
     storage_dir :: string(),
     hex_checker :: fun((binary(), binary()) -> ok | {error, term()}),
-    builder :: fun((binary(), binary(), binary()) -> {ok, #prisma_plt{}} | {error, term()}),
+    builder :: fun((binary(), binary(), binary()) -> {ok, #prisma_pplt{}} | {error, term()}),
     async_build = true :: boolean(),
     entries = #{} :: #{{binary(), binary(), binary()} => map()}
 }).
@@ -47,16 +47,16 @@ stop(Pid) ->
     gen_server:stop(Pid).
 
 %% @doc Requests generation or lookup of a package `.pplt` for `{Otp, Pkg, Vsn}`.
--spec request_plt(pid(), binary(), binary(), binary()) ->
+-spec request_pplt(pid(), binary(), binary(), binary()) ->
     {ok, ready | building | failed, map()} | {error, term()}.
-request_plt(Pid, Otp, Pkg, Vsn) ->
-    gen_server:call(Pid, {request_plt, Otp, Pkg, Vsn}, 30000).
+request_pplt(Pid, Otp, Pkg, Vsn) ->
+    gen_server:call(Pid, {request_pplt, Otp, Pkg, Vsn}, 30000).
 
 %% @doc Retrieves the `.pplt` binary for `{Otp, Pkg, Vsn}` or triggers generation if absent.
--spec get_plt(pid(), binary(), binary(), binary()) ->
+-spec get_pplt(pid(), binary(), binary(), binary()) ->
     {ok, ready, binary()} | {ok, building | failed, binary()} | {error, term()}.
-get_plt(Pid, Otp, Pkg, Vsn) ->
-    case request_plt(Pid, Otp, Pkg, Vsn) of
+get_pplt(Pid, Otp, Pkg, Vsn) ->
+    case request_pplt(Pid, Otp, Pkg, Vsn) of
         {ok, ready, #{path := Path}} ->
             case file:read_file(Path) of
                 {ok, Bin} -> {ok, ready, Bin};
@@ -73,11 +73,11 @@ get_plt(Pid, Otp, Pkg, Vsn) ->
 top_demanded(Pid, Limit) ->
     gen_server:call(Pid, {top_demanded, Limit}).
 
-%% @doc Returns a fetcher function compatible with `prisma_lock:resolve_project_plts/2`.
+%% @doc Returns a fetcher function compatible with `prisma_lock:resolve_project_pplts/2`.
 -spec local_fetcher(pid()) -> fun((binary(), binary(), binary()) -> {ok, binary()} | error).
 local_fetcher(Pid) ->
     fun(OtpRel, Pkg, Vsn) ->
-        case get_plt(Pid, OtpRel, Pkg, Vsn) of
+        case get_pplt(Pid, OtpRel, Pkg, Vsn) of
             {ok, ready, Bin} -> {ok, Bin};
             _ -> error
         end
@@ -94,7 +94,7 @@ handle_request(Pid, 'GET', <<"/api/v1/top">>, _Params) ->
     Top = top_demanded(Pid, 50),
     Json = encode_top_json(Top),
     {200, [{<<"content-type">>, <<"application/json">>}], Json};
-handle_request(Pid, 'POST', <<"/api/v1/plts/request">>, Params) ->
+handle_request(Pid, 'POST', <<"/api/v1/pplts/request">>, Params) ->
     Otp = maps:get(<<"otp">>, Params, <<>>),
     Pkg = maps:get(<<"package">>, Params, <<>>),
     Vsn = maps:get(<<"version">>, Params, <<>>),
@@ -102,7 +102,7 @@ handle_request(Pid, 'POST', <<"/api/v1/plts/request">>, Params) ->
         false ->
             {400, [{<<"content-type">>, <<"application/json">>}], <<"{\"error\":\"missing_parameters\"}">>};
         true ->
-            case request_plt(Pid, Otp, Pkg, Vsn) of
+            case request_pplt(Pid, Otp, Pkg, Vsn) of
                 {ok, ready, Entry} ->
                     {200, [{<<"content-type">>, <<"application/json">>}], encode_entry_json(Entry)};
                 {ok, building, Entry} ->
@@ -115,10 +115,10 @@ handle_request(Pid, 'POST', <<"/api/v1/plts/request">>, Params) ->
                     {500, [{<<"content-type">>, <<"application/json">>}], <<"{\"error\":\"build_failed\"}">>}
             end
     end;
-handle_request(Pid, 'GET', <<"/api/v1/plts/", Rest/binary>>, _Params) ->
-    case parse_plt_route(Rest) of
+handle_request(Pid, 'GET', <<"/api/v1/pplts/", Rest/binary>>, _Params) ->
+    case parse_pplt_route(Rest) of
         {ok, Otp, Pkg, Vsn} ->
-            case get_plt(Pid, Otp, Pkg, Vsn) of
+            case get_pplt(Pid, Otp, Pkg, Vsn) of
                 {ok, ready, Bin} ->
                     {200, [{<<"content-type">>, <<"application/octet-stream">>}], Bin};
                 {ok, building, _} ->
@@ -134,7 +134,7 @@ handle_request(Pid, 'GET', <<"/api/v1/plts/", Rest/binary>>, _Params) ->
 handle_request(_Pid, _Method, _Path, _Params) ->
     {404, [{<<"content-type">>, <<"application/json">>}], <<"{\"error\":\"not_found\"}">>}.
 
-parse_plt_route(Route) ->
+parse_pplt_route(Route) ->
     case binary:split(Route, <<"/">>, [global]) of
         [Otp, Pkg, VsnFile] ->
             case binary:split(VsnFile, <<".pplt">>) of
@@ -153,21 +153,21 @@ pplt_storage_path(StorageDir, Otp, Pkg, Vsn) ->
     File = binary_to_list(<<Pkg/binary, "-", Vsn/binary, ".pplt">>),
     filename:join([unicode:characters_to_list(StorageDir), "otp-" ++ binary_to_list(Otp), File]).
 
-%% @doc Renders the HTML dashboard with the request form and most demanded PLTs table.
+%% @doc Renders the HTML dashboard with the request form and most demanded PPLTs table.
 -spec render_dashboard([map()]) -> binary().
 render_dashboard(TopEntries) ->
     Rows = [render_row(E) || E <- TopEntries],
     iolist_to_binary([
         <<"<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">">>,
-        <<"<title>Prisma Hub - Modular BEAM PLTs</title></head><body>">>,
+        <<"<title>Prisma Hub - Modular BEAM PPLTs</title></head><body>">>,
         <<"<h1>Prisma Hub</h1>">>,
         <<"<p>On-demand portable <code>.pplt</code> generator and cache for Hex.pm packages.</p>">>,
-        <<"<form method=\"POST\" action=\"/api/v1/plts/request\">">>,
+        <<"<form method=\"POST\" action=\"/api/v1/pplts/request\">">>,
         <<"<input name=\"otp\" placeholder=\"OTP (e.g. 29)\" required>">>,
         <<"<input name=\"package\" placeholder=\"Hex Package (e.g. cowboy)\" required>">>,
         <<"<input name=\"version\" placeholder=\"Version (e.g. 2.10.0)\" required>">>,
         <<"<button type=\"submit\">Request .pplt</button></form>">>,
-        <<"<h2>Most Demanded PLTs</h2>">>,
+        <<"<h2>Most Demanded PPLTs</h2>">>,
         <<"<table><thead><tr><th>OTP</th><th>Package</th><th>Version</th><th>Status</th><th>Hits</th><th>Download</th></tr></thead><tbody>">>,
         Rows,
         <<"</tbody></table></body></html>">>
@@ -176,7 +176,7 @@ render_dashboard(TopEntries) ->
 render_row(#{otp := Otp, package := Pkg, version := Vsn, status := Status, hits := Hits}) ->
     StatusBin = atom_to_binary(Status, utf8),
     HitsBin = integer_to_binary(Hits),
-    Url = <<"/api/v1/plts/", Otp/binary, "/", Pkg/binary, "/", Vsn/binary, ".pplt">>,
+    Url = <<"/api/v1/pplts/", Otp/binary, "/", Pkg/binary, "/", Vsn/binary, ".pplt">>,
     [
         <<"<tr><td>">>, Otp, <<"</td><td>">>, Pkg, <<"</td><td>">>, Vsn,
         <<"</td><td>">>, StatusBin, <<"</td><td>">>, HitsBin,
@@ -200,7 +200,7 @@ encode_entry_json(#{otp := Otp, package := Pkg, version := Vsn, status := Status
 init(Opts) ->
     StorageDir = unicode:characters_to_list(maps:get(storage_dir, Opts, "/tmp/prisma_hub")),
     HexChecker = maps:get(hex_checker, Opts, fun default_hex_check/2),
-    Builder = maps:get(builder, Opts, fun default_plt_builder/3),
+    Builder = maps:get(builder, Opts, fun default_pplt_builder/3),
     Async = maps:get(async_build, Opts, true),
     {ok, #state{
         storage_dir = StorageDir,
@@ -210,14 +210,14 @@ init(Opts) ->
         entries = #{}
     }}.
 
-handle_call({request_plt, Otp, Pkg, Vsn}, _From, #state{entries = Entries} = State) ->
+handle_call({request_pplt, Otp, Pkg, Vsn}, _From, #state{entries = Entries} = State) ->
     Key = {Otp, Pkg, Vsn},
     case maps:find(Key, Entries) of
         {ok, #{hits := Hits, status := Status} = Existing} ->
             Updated = Existing#{hits => Hits + 1},
             {reply, {ok, Status, Updated}, State#state{entries = Entries#{Key => Updated}}};
         error ->
-            handle_new_plt_request(Key, State)
+            handle_new_pplt_request(Key, State)
     end;
 handle_call({top_demanded, Limit}, _From, #state{entries = Entries} = State) ->
     Sorted = lists:sort(
@@ -255,7 +255,7 @@ handle_info(_Info, State) ->
 terminate(_Reason, _State) ->
     ok.
 
-handle_new_plt_request({Otp, Pkg, Vsn} = Key, #state{
+handle_new_pplt_request({Otp, Pkg, Vsn} = Key, #state{
     storage_dir = StorageDir,
     hex_checker = HexChecker,
     builder = Builder,
@@ -297,10 +297,10 @@ handle_new_plt_request({Otp, Pkg, Vsn} = Key, #state{
 
 execute_build(Builder, Otp, Pkg, Vsn, Path) ->
     case Builder(Otp, Pkg, Vsn) of
-        {ok, #prisma_plt{} = Plt} ->
-            case prisma_plt:save(Plt, Path) of
+        {ok, #prisma_pplt{} = Pplt} ->
+            case prisma_pplt:save(Pplt, Path) of
                 ok ->
-                    {ok, Path, length(prisma_plt:modules(Plt))};
+                    {ok, Path, length(prisma_pplt:modules(Pplt))};
                 {error, Reason} ->
                     {error, Reason}
             end;
@@ -317,6 +317,6 @@ default_hex_check(Pkg, Vsn) when is_binary(Pkg), is_binary(Vsn) ->
         _ -> {error, hex_unreachable}
     end.
 
-default_plt_builder(Otp, Pkg, Vsn) ->
-    Plt = (prisma_plt:new(Pkg, Vsn))#prisma_plt{otp_release = Otp},
-    {ok, Plt}.
+default_pplt_builder(Otp, Pkg, Vsn) ->
+    Pplt = (prisma_pplt:new(Pkg, Vsn))#prisma_pplt{otp_release = Otp},
+    {ok, Pplt}.

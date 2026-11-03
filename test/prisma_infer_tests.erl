@@ -223,10 +223,10 @@ cross_module_pplt_discrepancy_test() ->
     {ok, dep_mod, DepBeam} = compile:forms(DepForms, [debug_info]),
     {ok, caller_mod, CallerBeam} = compile:forms(CallerForms, [debug_info]),
     TmpDepPlt = "/tmp/prisma_dev/dep_mod.pplt",
-    {ok, DepPlt} = prisma_plt:from_beams([DepBeam]),
-    ok = prisma_plt:save(DepPlt, TmpDepPlt),
+    {ok, DepPlt} = prisma_pplt:from_beams([DepBeam]),
+    ok = prisma_pplt:save(DepPlt, TmpDepPlt),
 
-    {ok, Warnings} = prisma:analyze_beams([CallerBeam], #{plts => [TmpDepPlt], mode => discrepancy}),
+    {ok, Warnings} = prisma:analyze_beams([CallerBeam], #{pplts => [TmpDepPlt], mode => discrepancy}),
     file:delete(TmpDepPlt),
     ?assertMatch([#prisma_warning{kind = discrepancy, mfa = {caller_mod, bad_remote, 0}}], Warnings).
 
@@ -294,8 +294,8 @@ inferred_return(Src) ->
     {ok, Toks, _} = erl_scan:string(Text),
     Forms = split_forms(Toks, [], []),
     {ok, unop_sample, Beam} = compile:forms(Forms, [debug_info, binary]),
-    {ok, Plt} = prisma_plt:from_beams([Beam]),
-    #module_summary{functions = Funcs} = maps:get(unop_sample, Plt#prisma_plt.modules),
+    {ok, Pplt} = prisma_pplt:from_beams([Beam]),
+    #module_summary{functions = Funcs} = maps:get(unop_sample, Pplt#prisma_pplt.modules),
     {fun_type, _Args, Ret} = (maps:get({unop_sample, f, 1}, Funcs))#func_contract.inferred_type,
     Ret.
 
@@ -705,7 +705,7 @@ call_to_a_function_that_exists_is_fine_test() ->
     ?assertEqual([], missing_hits("    ov_callee:module_info(),\n    ov_callee:module_info(exports),\n    ov_callee:behaviour_info(callbacks)", discrepancy)).
 
 call_to_a_module_that_is_not_known_says_nothing_test() ->
-    ?assertEqual([], missing_hits("    not_a_module_of_the_plt:anything(1),\n    erlang:anything_at_all(2)", discrepancy)).
+    ?assertEqual([], missing_hits("    not_a_module_of_the_pplt:anything(1),\n    erlang:anything_at_all(2)", discrepancy)).
 
 missing_function_is_reported_inside_nested_constructs_test() ->
     ?assertEqual([4], missing_hits("    F = fun() -> ov_callee:nonexistent(1) end,\n    F()", discrepancy)),
@@ -713,17 +713,17 @@ missing_function_is_reported_inside_nested_constructs_test() ->
 
 %% A saved .pplt only needs contracts, not the code of every function.
 
-saved_plt_keeps_contracts_and_drops_the_code_test() ->
-    Text = "-module(plt_lean).\n-export([f/1]).\n-spec f(integer()) -> integer().\nf(X) -> X + 1.\n",
+saved_pplt_keeps_contracts_and_drops_the_code_test() ->
+    Text = "-module(pplt_lean).\n-export([f/1]).\n-spec f(integer()) -> integer().\nf(X) -> X + 1.\n",
     {ok, Toks, _} = erl_scan:string(Text),
-    {ok, plt_lean, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
-    {ok, Plt} = prisma_plt:from_beams([Beam]),
-    #module_summary{functions = Before} = maps:get(plt_lean, Plt#prisma_plt.modules),
-    ?assertMatch(#func_contract{clauses = [_ | _]}, maps:get({plt_lean, f, 1}, Before)),
-    {ok, Loaded} = prisma_plt:decode(prisma_plt:encode(Plt)),
-    #module_summary{functions = After} = maps:get(plt_lean, Loaded#prisma_plt.modules),
-    #func_contract{clauses = [], declared_specs = Specs, inferred_type = Inferred, exported = true} = maps:get({plt_lean, f, 1}, After),
-    #func_contract{declared_specs = Specs0, inferred_type = Inferred0} = maps:get({plt_lean, f, 1}, Before),
+    {ok, pplt_lean, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+    {ok, Pplt} = prisma_pplt:from_beams([Beam]),
+    #module_summary{functions = Before} = maps:get(pplt_lean, Pplt#prisma_pplt.modules),
+    ?assertMatch(#func_contract{clauses = [_ | _]}, maps:get({pplt_lean, f, 1}, Before)),
+    {ok, Loaded} = prisma_pplt:decode(prisma_pplt:encode(Pplt)),
+    #module_summary{functions = After} = maps:get(pplt_lean, Loaded#prisma_pplt.modules),
+    #func_contract{clauses = [], declared_specs = Specs, inferred_type = Inferred, exported = true} = maps:get({pplt_lean, f, 1}, After),
+    #func_contract{declared_specs = Specs0, inferred_type = Inferred0} = maps:get({pplt_lean, f, 1}, Before),
     ?assertEqual(Specs0, Specs),
     ?assertEqual(Inferred0, Inferred).
 
@@ -816,19 +816,19 @@ the_result_of_a_remote_call_only_names_the_caller_test() ->
              "    V.\n",
     ?assertEqual([{discrepancy, 5}], two_module_warnings(Caller, return_callee(), discrepancy)).
 
-spec_of_a_dependency_loaded_from_a_plt_is_used_test() ->
+spec_of_a_dependency_loaded_from_a_pplt_is_used_test() ->
     Compile = fun(Name, Src) ->
         {ok, Toks, _} = erl_scan:string("-module(" ++ Name ++ ").\n" ++ Src),
         {ok, _, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
         Beam
     end,
     CalleeBeam = Compile("ov_callee", return_callee()),
-    {ok, DepPlt} = prisma_plt:from_beams([CalleeBeam]),
+    {ok, DepPlt} = prisma_pplt:from_beams([CalleeBeam]),
     File = "ext_specs_test.pplt",
-    ok = file:write_file(File, prisma_plt:encode(DepPlt)),
+    ok = file:write_file(File, prisma_pplt:encode(DepPlt)),
     try
         Caller = Compile("ov_caller", "-export([f/0]).\nf() ->\n    {ok, V} = ov_callee:f(),\n    V.\n"),
-        {ok, Ws} = prisma:analyze_beams([Caller], #{plts => [File], mode => discrepancy, oxbow => false}),
+        {ok, Ws} = prisma:analyze_beams([Caller], #{pplts => [File], mode => discrepancy, oxbow => false}),
         ?assertEqual([{discrepancy, 4}], [{K, L} || #prisma_warning{kind = K, line = L} <- Ws])
     after
         file:delete(File)
@@ -868,8 +868,8 @@ case_ret(Body) ->
         {ok, _, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
         Beam
     end,
-    {ok, Plt} = prisma_plt:from_beams([Compile("ov_caller", Caller), Compile("ov_callee", case_negation_callee())]),
-    #module_summary{functions = Funcs} = maps:get(ov_caller, Plt#prisma_plt.modules),
+    {ok, Pplt} = prisma_pplt:from_beams([Compile("ov_caller", Caller), Compile("ov_callee", case_negation_callee())]),
+    #module_summary{functions = Funcs} = maps:get(ov_caller, Pplt#prisma_pplt.modules),
     {fun_type, [], Ret} = (maps:get({ov_caller, f, 0}, Funcs))#func_contract.inferred_type,
     Ret.
 
@@ -1024,8 +1024,8 @@ fresh_ret(Body) ->
         {ok, _, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
         Beam
     end,
-    {ok, Plt} = prisma_plt:from_beams([Compile("ov_caller", Caller), Compile("ov_callee", fresh_callee())]),
-    #module_summary{functions = Funcs} = maps:get(ov_caller, Plt#prisma_plt.modules),
+    {ok, Pplt} = prisma_pplt:from_beams([Compile("ov_caller", Caller), Compile("ov_callee", fresh_callee())]),
+    #module_summary{functions = Funcs} = maps:get(ov_caller, Pplt#prisma_pplt.modules),
     {fun_type, [], Ret} = (maps:get({ov_caller, f, 0}, Funcs))#func_contract.inferred_type,
     Ret.
 

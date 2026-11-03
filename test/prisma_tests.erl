@@ -3,7 +3,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("prisma.hrl").
 
-extract_and_portable_plt_test() ->
+extract_and_portable_pplt_test() ->
     ?assertEqual(<<"0.1.0">>, prisma:version()),
     BeamFile = code:where_is_file("prisma.beam"),
     ?assert(is_list(BeamFile)),
@@ -14,28 +14,28 @@ extract_and_portable_plt_test() ->
     ?assertEqual(erlang, Summary#module_summary.language),
     ?assertMatch({error, _}, prisma_abstract:extract_beam("/nonexistent/file.beam")),
 
-    EmptyPlt = prisma_plt:new(),
-    ?assertEqual([], prisma_plt:modules(EmptyPlt)),
-    ?assertEqual(EmptyPlt, prisma_plt:merge([])),
+    EmptyPplt = prisma_pplt:new(),
+    ?assertEqual([], prisma_pplt:modules(EmptyPplt)),
+    ?assertEqual(EmptyPplt, prisma_pplt:merge([])),
 
-    {ok, DirPlt} = prisma_plt:from_dir(EbinDir),
-    ?assert( lists:member(prisma, prisma_plt:modules(DirPlt)) ),
+    {ok, DirPplt} = prisma_pplt:from_dir(EbinDir),
+    ?assert( lists:member(prisma, prisma_pplt:modules(DirPplt)) ),
 
-    {ok, BeamsPlt} = prisma_plt:from_beams([BeamFile]),
-    ?assertEqual([prisma], prisma_plt:modules(BeamsPlt)),
-    ?assertMatch({error, {beam_extract_failed, _, _}}, prisma_plt:from_beams(["/bad.beam", BeamFile])),
+    {ok, BeamsPplt} = prisma_pplt:from_beams([BeamFile]),
+    ?assertEqual([prisma], prisma_pplt:modules(BeamsPplt)),
+    ?assertMatch({error, {beam_extract_failed, _, _}}, prisma_pplt:from_beams(["/bad.beam", BeamFile])),
 
     TmpPltFile = "/tmp/prisma_dev/test_out.pplt",
-    {ok, BuiltPlt} = prisma:build([EbinDir], TmpPltFile),
-    ?assert(lists:member(prisma, prisma_plt:modules(BuiltPlt))),
-    ?assertMatch({ok, []}, prisma:analyze_dirs([EbinDir], #{plts => [TmpPltFile]})),
+    {ok, BuiltPplt} = prisma:build([EbinDir], TmpPltFile),
+    ?assert(lists:member(prisma, prisma_pplt:modules(BuiltPplt))),
+    ?assertMatch({ok, []}, prisma:analyze_dirs([EbinDir], #{pplts => [TmpPltFile]})),
     ?assertMatch({ok, []}, prisma:analyze_dirs([BeamFile])),
     file:delete(TmpPltFile),
 
-    ?assertMatch({error, _}, prisma_plt:load("/nonexistent.pplt")),
-    ?assertEqual({error, invalid_plt_magic}, prisma_plt:decode(<<"bad">>)),
-    BadRecordBin = <<?PRISMA_PLT_MAGIC, (term_to_binary({not_a_plt}))/binary>>,
-    ?assertEqual({error, invalid_plt_record}, prisma_plt:decode(BadRecordBin)).
+    ?assertMatch({error, _}, prisma_pplt:load("/nonexistent.pplt")),
+    ?assertEqual({error, invalid_pplt_magic}, prisma_pplt:decode(<<"bad">>)),
+    BadRecordBin = <<?PRISMA_PPLT_MAGIC, (term_to_binary({not_a_pplt}))/binary>>,
+    ?assertEqual({error, invalid_pplt_record}, prisma_pplt:decode(BadRecordBin)).
 
 elixir_module_detection_test() ->
     MixBeam = code:where_is_file("Elixir.Mix.Tasks.Prisma.beam"),
@@ -125,8 +125,8 @@ gradual_spec_and_checker_compatibility_test() ->
     ?assert(is_binary(Formatted)),
 
     {ok, Summary} = prisma_abstract:extract_beam(BeamBin),
-    ?assertEqual([], prisma_checker:check_module(Summary, prisma_plt:new(), #{mode => discrepancy})),
-    ?assertMatch([_], prisma_checker:check_module(Summary, prisma_plt:new())).
+    ?assertEqual([], prisma_checker:check_module(Summary, prisma_pplt:new(), #{mode => discrepancy})),
+    ?assertMatch([_], prisma_checker:check_module(Summary, prisma_pplt:new())).
 
 warning_formats_human_oneline_json_and_color_test() ->
     W1 = #prisma_warning{
@@ -177,31 +177,31 @@ warning_formats_human_oneline_json_and_color_test() ->
     ?assert(binary:match(JsonBin, <<"\"actual\": \"integer()\"">>) =/= nomatch),
 
     %% CLI check options parsing
-    ParsedOpts = prisma:parse_check_opts(["--format", "json", "--no-color", "--plt", "test.pplt", "my_ebin"]),
+    ParsedOpts = prisma:parse_check_opts(["--format", "json", "--no-color", "--pplt", "test.pplt", "my_ebin"]),
     ?assertEqual(json, maps:get(format, ParsedOpts)),
     ?assertEqual(never, maps:get(color, ParsedOpts)),
-    ?assertEqual(["test.pplt"], maps:get(plts, ParsedOpts)),
+    ?assertEqual(["test.pplt"], maps:get(pplts, ParsedOpts)),
     ?assertEqual(["my_ebin"], maps:get(targets, ParsedOpts)),
 
     %% Mix task parsing
-    MixOpts = 'Elixir.Mix.Tasks.Prisma':parse_args([<<"--format">>, <<"oneline">>, <<"--no-color">>, <<"--mode">>, <<"gradual">>, <<"--plt">>, <<"extra.pplt">>]),
+    MixOpts = 'Elixir.Mix.Tasks.Prisma':parse_args([<<"--format">>, <<"oneline">>, <<"--no-color">>, <<"--mode">>, <<"gradual">>, <<"--pplt">>, <<"extra.pplt">>]),
     ?assertEqual(oneline, maps:get(format, MixOpts)),
     ?assertEqual(never, maps:get(color, MixOpts)),
     ?assertEqual(gradual, maps:get(mode, MixOpts)),
-    ?assertEqual(["extra.pplt"], maps:get(plts, MixOpts)),
+    ?assertEqual(["extra.pplt"], maps:get(pplts, MixOpts)),
 
     MixConfig = 'Elixir.Mix.Tasks.Prisma':parse_mix_config([
         {mode, gradual},
         {format, json},
         {oxbow, false},
         {color, never},
-        {plts, [<<"mix.pplt">>]}
+        {pplts, [<<"mix.pplt">>]}
     ]),
     ?assertEqual(gradual, maps:get(mode, MixConfig)),
     ?assertEqual(json, maps:get(format, MixConfig)),
     ?assertEqual(false, maps:get(oxbow, MixConfig)),
     ?assertEqual(never, maps:get(color, MixConfig)),
-    ?assertEqual(["mix.pplt"], maps:get(plts, MixConfig)),
+    ?assertEqual(["mix.pplt"], maps:get(pplts, MixConfig)),
 
     Attrs = 'Elixir.Mix.Tasks.Prisma':'__info__'(attributes),
     ?assert(lists:member({behaviour, ['Elixir.Mix.Task']}, Attrs)),
@@ -222,14 +222,14 @@ warning_formats_human_oneline_json_and_color_test() ->
         {oxbow, true},
         no_oxbow,
         oxbow,
-        {plt, "rebar.pplt"},
-        {plt, <<"rebar2.pplt">>}
+        {pplt, "rebar.pplt"},
+        {pplt, <<"rebar2.pplt">>}
     ]),
     ?assertEqual(json, maps:get(format, RebarCli)),
     ?assertEqual(gradual, maps:get(mode, RebarCli)),
     ?assertEqual(always, maps:get(color, RebarCli)),
     ?assertEqual(true, maps:get(oxbow, RebarCli)),
-    ?assertEqual(["rebar.pplt", "rebar2.pplt"], maps:get(plts, RebarCli)),
+    ?assertEqual(["rebar.pplt", "rebar2.pplt"], maps:get(pplts, RebarCli)),
 
     RebarConfig = prisma_prv:parse_config_opts([
         {format, json},
@@ -238,14 +238,14 @@ warning_formats_human_oneline_json_and_color_test() ->
         {mode, "hybrid"},
         {color, always},
         {oxbow, true},
-        {plts, ["cfg.pplt"]},
-        {plt, "extra_cfg.pplt"}
+        {pplts, ["cfg.pplt"]},
+        {pplt, "extra_cfg.pplt"}
     ]),
     ?assertEqual(human, maps:get(format, RebarConfig)),
     ?assertEqual(hybrid, maps:get(mode, RebarConfig)),
     ?assertEqual(always, maps:get(color, RebarConfig)),
     ?assertEqual(true, maps:get(oxbow, RebarConfig)),
-    ?assertEqual(["cfg.pplt", "extra_cfg.pplt"], maps:get(plts, RebarConfig)),
+    ?assertEqual(["cfg.pplt", "extra_cfg.pplt"], maps:get(pplts, RebarConfig)),
 
     ?assert(is_list(prisma_prv:format_error({warnings_found, 4}))),
     ?assert(is_list(prisma_prv:format_error(some_failure))),

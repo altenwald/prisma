@@ -22,7 +22,7 @@ Prisma introduces the portable, binary **`.pplt`** format:
 - **Modular & Granular:** Every dependency in `rebar.lock` or `mix.lock`, as well as base Erlang/OTP modules, is compiled into its own isolated `.pplt` cache.
 - **Zero Redundant Rebuilds:** If a dependency's package name and version have not changed, its `.pplt` is loaded directly from the local cache.
 - **Sub-Second Merging:** At analysis time, Prisma dynamically merges dependency `.pplt` files in-memory in milliseconds, focusing analysis purely on your project's application code.
-- **Prisma Hub Ready:** Built-in client support for fetching pre-compiled `.pplt` files on-demand for Hex.pm packages and target OTP versions, eliminating the need to compile dependency PLTs locally.
+- **Prisma Hub Ready:** Built-in client support for fetching pre-compiled `.pplt` files on-demand for Hex.pm packages and target OTP versions, eliminating the need to compile dependency PPLTs locally.
 
 ---
 
@@ -103,7 +103,7 @@ You can set project-wide defaults under the `{prisma, [...]}` key in `rebar.conf
     {format, human},        %% human | oneline | json
     {oxbow, true},          %% true | false (detect dead functions and ignored parameters)
     {color, auto},          %% auto | always | never
-    {plts, ["custom.pplt"]} %% optional extra .pplt files to include
+    {pplts, ["custom.pplt"]} %% optional extra .pplt files to include
 ]}.
 ```
 
@@ -176,7 +176,7 @@ def project do
       format: :human,       # :human | :oneline | :json
       oxbow: true,          # true | false
       color: :auto,         # :auto | :always | :never
-      plts: []              # optional extra .pplt paths
+      pplts: []              # optional extra .pplt paths
     ],
     deps: deps()
   ]
