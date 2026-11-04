@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (OTP ${{ matrix.otp }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # The release Prisma is developed and tested with. Add the others once they have been tried.
+        otp: ['29']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          rebar3-version: '3'
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/rebar3
+            _build
+          key: rebar3-${{ runner.os }}-otp${{ matrix.otp }}-${{ hashFiles('rebar.config', 'rebar.lock') }}
+          restore-keys: rebar3-${{ runner.os }}-otp${{ matrix.otp }}-
+
+      - name: Compile (warnings are errors)
+        run: rebar3 compile
+
+      # Includes the test that analyzes Prisma's own beams and requires that it lists nothing.
+      - name: EUnit
+        run: rebar3 eunit
+
+      - name: PropEr (the type algebra, and the inference against execution)
+        run: rebar3 proper
+
+      - name: Escript
+        run: |
+          rebar3 escriptize
+          _build/default/bin/prisma version
+
+  package:
+    name: Hex package and Mix archive
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '29'
+          elixir-version: '1.20'
+          version-type: loose
+
+      - name: Hex
+        run: mix local.hex --force
+
+      # Both are built from the files that go into the package, as `mix archive.install hex prisma` will do.
+      - name: The package builds
+        run: mix hex.build
+
+      - name: The Mix archive builds and carries the tasks
+        run: |
+          MIX_ENV=prod mix archive.build -o prisma.ez
+          unzip -l prisma.ez | grep -q 'Elixir.Mix.Tasks.Prisma.beam'
+          unzip -l prisma.ez | grep -q 'Elixir.Mix.Tasks.Prisma.Build.beam'
+
+  web:
+    name: Web assets are in sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/check_web_assets.sh
