@@ -18,7 +18,8 @@
     {files, [
         "src",
         "include",
-        "assets",
+        "assets/prisma.png",
+        "assets/prisma.svg",
         "rebar.config",
         "rebar.lock",
         "mix.exs",

@@ -11,6 +11,7 @@ defmodule Prisma.MixProject do
       language: :erlang,
       erlc_options: [:debug_info],
       description: "Hybrid Success & Gradual Type Analyzer with Modular PPLTs for Erlang and Elixir",
+      escript: [main_module: :prisma, name: "prisma", embed_elixir: false],
       package: package(),
       docs: docs(),
       deps: deps()
@@ -34,7 +35,7 @@ defmodule Prisma.MixProject do
       name: "prisma",
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url},
-      files: ~w(src include assets mix.exs rebar.config rebar.lock README* DISCREPANCIES* GRADUAL* LICENSE*)
+      files: ~w(src include assets/prisma.png assets/prisma.svg mix.exs rebar.config rebar.lock README* DISCREPANCIES* GRADUAL* LICENSE*)
     ]
   end
 
