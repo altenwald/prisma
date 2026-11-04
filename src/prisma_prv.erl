@@ -83,7 +83,7 @@ analyze(EbinDirs, Opts, State) ->
                 N -> io:format(standard_error, "prisma: ~B branches that depend on the system were not checked~n", [N])
             end,
             case maps:get(failed, Report) of
-                true -> {error, format_error({warnings_found, maps:get(errors, Report) + maps:get(warnings, Report)})};
+                true -> {error, format_error({problems_found, maps:get(errors, Report), maps:get(warnings, Report)})};
                 false -> {ok, State}
             end;
         {error, Reason} ->
@@ -92,6 +92,8 @@ analyze(EbinDirs, Opts, State) ->
 
 %% @doc Formats provider errors for Rebar3 output.
 -spec format_error(term()) -> iolist().
+format_error({problems_found, Errors, Warnings}) ->
+    io_lib:format("Prisma found ~B error(s) and ~B warning(s)", [Errors, Warnings]);
 format_error({warnings_found, Count}) ->
     io_lib:format("Prisma found ~B type warning(s)", [Count]);
 format_error(Reason) ->

@@ -396,3 +396,6 @@ building_notice_is_one_plain_line_test() ->
     ?assertEqual("prisma: building otp_29.pplt (599 modules)...\n", Line),
     %% no escape sequences: nothing for NO_COLOR to switch off
     ?assertEqual(nomatch, string:find(Line, "\e")).
+
+rebar3_message_counts_errors_and_warnings_test() ->
+    ?assertEqual("Prisma found 3 error(s) and 2 warning(s)", lists:flatten(prisma_prv:format_error({problems_found, 3, 2}))).
