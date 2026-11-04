@@ -50,7 +50,7 @@ reports the first plus some dead code, so the full counts of the two are not com
 | `rabbit` (234 modules) | **5**: 5 dead code | **0** (40 "callback info not available" notes) | 0 |
 | 7 applications (440 modules) | **45**: 10 discrepancy, 35 dead code | **0** (4 notes) | 7 |
 
-At the start (same corpus, same mode) the numbers were **51** and **101**.
+At the start (same corpus, same mode) the numbers were **51** and **101**. Dead code is a *warning* in Prisma's levels (certain, but it does not fail when the code runs), so in discrepancy mode these are 0 errors and 5 and 45 warnings; the errors are the discrepancies and the missing functions.
 
 ### 3.2 The false positives, how each was found, and the fix
 

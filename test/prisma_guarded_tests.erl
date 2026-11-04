@@ -143,6 +143,12 @@ a_branch_that_is_not_taken_is_counted_not_reported_test() ->
     ?assertEqual([], notes(Taken)).
 
 %% What a command prints and whether it fails: errors fail, warnings do not unless asked, notes are only counted.
+%% Errors are what is proven to fail; dead code and unused parameters are certain but do not fail when the code runs: warnings.
+severity_of_each_kind_test() ->
+    [?assertEqual(error, prisma_checker:severity(K)) || K <- [discrepancy, unknown_function, gradual_mismatch, opacity_violation]],
+    [?assertEqual(warning, prisma_checker:severity(K)) || K <- [dead_code, oxbow_code, handled_undef]],
+    ?assertEqual(note, prisma_checker:severity(system_branch)).
+
 report_levels_test() ->
     Mk = fun(Kind) -> #prisma_warning{kind = Kind, mfa = {m, f, 0}, line = 1, message = <<"x">>} end,
     All = [Mk(discrepancy), Mk(handled_undef), Mk(system_branch), Mk(system_branch)],

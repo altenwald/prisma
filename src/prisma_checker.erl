@@ -25,10 +25,12 @@ kind_label(Kind) ->
         _ -> atom_to_list(Kind)
     end.
 
-%% @doc How sure Prisma is of a warning: `error` (it fails when it runs), `warning` (the code handles it, or it may fail on another system)
-%% or `note` (something that was not checked: it is counted and not listed).
+%% @doc How serious a finding is: `error` (it fails when the code runs), `warning` (certain or handled, but it does not fail: dead code, an unused
+%% parameter, a failure that a `try` swallows) or `note` (something that was not checked: it is counted and not listed).
 -spec severity(atom()) -> error | warning | note.
 severity(handled_undef) -> warning;
+severity(dead_code) -> warning;
+severity(oxbow_code) -> warning;
 severity(system_branch) -> note;
 severity(_) -> error.
 
