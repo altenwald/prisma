@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Prisma — Fast, Modular Type & Spec Analyzer for Erlang & Elixir</title>
-  <meta name="description" content="Next-generation static type analyzer with modular .pplt tables for Erlang and Elixir. Up to 6.3x faster than Dialyzer, 20.8x less CPU. Zero false positives.">
+  <meta name="description" content="Next-generation static type analyzer with modular .pplt tables for Erlang and Elixir. Up to 6.3x faster than Dialyzer, 20.8x less CPU. Every seeded fault caught, no known false positives in the discrepancy mode.">
   <link rel="icon" type="image/png" href="assets/prisma.png">
 
   <!-- Tailwind CSS & DaisyUI via CDN -->
@@ -152,7 +152,7 @@
 
       <!-- Subtitle -->
       <p class="text-lg sm:text-xl text-slate-600 max-w-2xl mx-auto leading-relaxed font-normal mb-8">
-        <strong>Prisma</strong> brings together the sound pragmatism of <strong>Success Typing</strong>, the contract guarantees of <strong>Gradual Typing</strong>, and isolated <strong>.pplt</strong> tables for sub-second static verification with <span class="text-amber-600 font-semibold">zero false positives</span>.
+        <strong>Prisma</strong> brings together the sound pragmatism of <strong>Success Typing</strong>, the contract guarantees of <strong>Gradual Typing</strong>, and isolated <strong>.pplt</strong> tables for sub-second static verification, with <span class="text-amber-600 font-semibold">errors it can prove</span>.
       </p>
 
       <!-- Action Buttons -->
@@ -193,7 +193,7 @@
           <div class="mt-4 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-slate-600 font-medium py-1">
             <span class="flex items-center gap-1.5">
               <svg class="w-4 h-4 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-              <span><strong>1s modular .pplt cache</strong> (631 KB vs. huge PLTs)</span>
+              <span><strong>Modular .pplt cache</strong> (1 MB for RabbitMQ's dependencies, loaded in 70 ms)</span>
             </span>
             <span class="flex items-center gap-1.5">
               <svg class="w-4 h-4 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
@@ -201,7 +201,7 @@
             </span>
             <span class="flex items-center gap-1.5">
               <svg class="w-4 h-4 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-              <span>Contracts &amp; oxbow code with <strong>zero false positives</strong></span>
+              <span>Errors are <strong>proven</strong>; what the code handles is a separate <strong>warning</strong></span>
             </span>
           </div>
 
@@ -263,7 +263,7 @@
           </div>
           <h3 class="text-lg font-bold text-slate-900 mb-2">Modular .pplt Tables</h3>
           <p class="text-sm text-slate-600 leading-relaxed">
-            Eliminates monolithic rebuilds. <code>rebar3 prisma build</code> compiles applications and dependencies into isolated, portable binary <code>.pplt</code> files (just 631 KB for RabbitMQ), loaded and merged in ~15 ms.
+            Eliminates monolithic rebuilds. <code>rebar3 prisma build</code> compiles applications and dependencies into isolated, portable binary <code>.pplt</code> files (RabbitMQ's 27 dependencies, 644 modules: 1 MB, built once in 2.4 s and loaded in 70 ms; all of OTP: 3 MB, 7.6 s once, 0.2 s to load). A library can ship its own <code>.pplt</code> in its Hex package.
           </p>
         </div>
 
@@ -283,9 +283,9 @@
           <div class="w-10 h-10 rounded-2xl bg-white text-amber-600 flex items-center justify-center mb-6 shadow-sm border border-amber-100">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
           </div>
-          <h3 class="text-lg font-bold text-slate-900 mb-2">Zero False Positives</h3>
+          <h3 class="text-lg font-bold text-slate-900 mb-2">Errors You Can Trust</h3>
           <p class="text-sm text-slate-600 leading-relaxed">
-            Direct, clean error reports for contract mismatches (<code>[gradual_mismatch]</code>) and dead parameters (<code>[oxbow_code]</code>). If Prisma flags an issue, you can fix or delete it with total certainty.
+            An <strong>error</strong> is what Prisma proves: it fails when it runs, and in discrepancy mode no false positive is known on RabbitMQ (440 modules, every warning read). A <strong>warning</strong> is something the code handles itself (a missing function inside a <code>try</code> that catches everything). Contract mismatches (<code>[gradual_mismatch]</code>) are strict by design and say so.
           </p>
         </div>
 
@@ -374,7 +374,7 @@
               </li>
               <li class="flex items-start gap-2.5">
                 <span class="text-blue-600 font-bold">✔</span>
-                <span><strong>Dynamic In-Memory Merge:</strong> Contracts are merged in ~15 ms, focusing CPU purely on your app.</span>
+                <span><strong>Dynamic In-Memory Merge:</strong> Contracts are loaded and merged in memory (70 ms for RabbitMQ's dependencies), focusing CPU purely on your app.</span>
               </li>
             </ul>
           </div>
@@ -543,7 +543,7 @@
 
         <div class="px-6 py-3 bg-slate-50/70 border-t border-slate-100 text-[11px] text-slate-500 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <span>* Measured with <code>hyperfine 2.0.0 --metrics all</code> on Apple M1 (8 cores), macOS 27, Erlang/OTP 29.</span>
-          <span>Gradual mode vs Gradualizer: <strong>5.3× faster</strong> on 440 modules (6.78s vs 35.89s, 100% vs 54% faults caught).</span>
+          <span>Gradual mode vs Gradualizer: <strong>5.3× faster</strong> on 440 modules (6.78s vs 35.89s, 100% vs 54% faults caught). Details: <a class="text-blue-600 underline" href="https://github.com/altenwald/prisma/blob/main/DISCREPANCIES.md">DISCREPANCIES.md</a>, <a class="text-blue-600 underline" href="https://github.com/altenwald/prisma/blob/main/GRADUAL.md">GRADUAL.md</a>.</span>
         </div>
       </div>
 
