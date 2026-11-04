@@ -30,7 +30,7 @@ jobs:
 
       # The page carries its own copy of the logo and the demo (it is published as it is): they must be the ones in assets/
       - name: Web assets are in sync
-        run: scripts/check_web_assets.sh
+        run: tools/check_web_assets.sh
 
       - uses: actions/configure-pages@v5
 

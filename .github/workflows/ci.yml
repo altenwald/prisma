@@ -85,4 +85,4 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - run: scripts/check_web_assets.sh
+      - run: tools/check_web_assets.sh
