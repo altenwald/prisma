@@ -447,7 +447,12 @@ detect_project_app_name(Root) ->
                 nomatch -> undefined
             end;
         _ ->
-            undefined
+            case filelib:wildcard(filename:join([Root, "src", "*.app.src"])) of
+                [AppSrc | _] ->
+                    {ok, filename:basename(AppSrc, ".app.src")};
+                [] ->
+                    undefined
+            end
     end.
 
 candidate_build_ebins(Root, Opts) ->

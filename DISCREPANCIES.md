@@ -12,7 +12,7 @@ change the cost of the discrepancy analysis (section 6) or explain a number.
 | :--- | :--- | :--- |
 | Warnings on `rabbit` (234 modules) | **5**, all true (wrong `-spec`s) | **0** (40 notes) |
 | Warnings on 7 applications (440 modules) | **45**, all true or defensive | **0** (4 notes) |
-| Seeded faults detected (125 mutants) | **125** | 123 |
+| Seeded faults detected (125 mutants) | **125** (121 by default, see 3.5) | 123 |
 | New warnings outside the mutated function | **0** | 201 |
 | `rabbit`, wall / CPU / peak memory | 1.08 s / 1.25 s / 296 MiB | 6.7 s / 26.0 s / 405 MiB |
 | 440 modules, wall / CPU / peak memory | 3.0 s / 3.2 s / 536 MiB | 17.3 s / 67.5 s / 1,457 MiB |
@@ -76,6 +76,7 @@ Every false positive has a minimal reproduction in [`bench/repro/`](bench/repro/
 | a tuple pattern bound its variables from every tuple of the union, not only the matching tag | contract triage | 1 | each alternative is bound on its own and the results are joined |
 | `meet(binary(), bitstring())` kept the weaker unit, so `byte_size(Bin)` turned a binary into a bitstring | found after the previous one | 1 | the meet of `<<_:B, _:_*U>>` is the sizes both allow |
 | a map pattern against an unknown type claimed the map had only the pattern's keys | contract triage | 41 | it binds a plain `map()` |
+| a call that the code protects itself: inside `case erlang:function_exported(M, F, A) of true -> ...` (or `system_info`, `code:ensure_loaded`...), or in a `try` that catches `error:undef` | RabbitMQ with the PPLT of OTP (`os:list_env_vars/0`, OTP < 24 code) | 1 | the call is not checked there; a branch that depends on the running system is not dead code; a `try` that catches every error is shown as `handled_undef`, only with `--show-handled` |
 
 One false positive remains known: `rabbit_ff_controller:run_callback/5`, whose `-spec` is overloaded by the value of `Command`. Its code is right, but the return fits neither
 overload alone; telling it needs the correlation between the parameter and the spec's clause, which Prisma does not follow.
@@ -139,6 +140,8 @@ Sample: seed 1, up to 25 mutants per operator over `ra`, `khepri`, `cuttlefish`,
 | **all** | **125** | **52 (42%)** | **125 (100%)** | **123 (98%)** | **23 (18%)** |
 
 Prisma alone sees two that Dialyzer does not (a call in the generated `conf_parse`, a `byte_size` in `cow_qpack`); Dialyzer alone sees none.
+
+**By default 121 of the 125.** Four `r4` mutants (a call to a function that does not exist, in `ra_log`, `ra_server`, `ra_file` and `ra_server_proc`) are inside the log macros of `ra`, which expand to a `try ... catch _:_`: the code handles the failure, so Prisma does not report it as an error. It is shown as `handled_undef`, a warning of its own that only appears with `--show-handled` (it would hide a misspelled function for good): with it the result is the 125 / 125 of the table.
 
 At the start Prisma missed most of what Dialyzer found, and the misses followed one thing: where the fault is. Four gaps, closed one at a time (reproductions in
 [`bench/repro/false_negatives/`](bench/repro/false_negatives/README.md)); the same 125 mutants after each:

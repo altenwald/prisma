@@ -528,7 +528,18 @@ infer_expr(Mod, MFA, {op, Anno, Op, Arg}, Env0, Contracts, Warns0, Sites0) ->
     infer_unop(MFA, Anno, Op, Arg, ArgType, Env1, Warns1, Sites1);
 infer_expr(Mod, MFA, {'case', Anno, Scrutinee, Clauses}, Env0, Contracts, Warns0, Sites0) ->
     {ScrutType, Env1, Warns1, Sites1} = infer_expr(Mod, MFA, Scrutinee, Env0, Contracts, Warns0, Sites0),
-    infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env1, Contracts, Warns1, Sites1);
+    case depends_on_the_system(Scrutinee) of
+        false ->
+            infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env1, Contracts, Warns1, Sites1);
+        true ->
+            %% The branches depend on what the running system has: a call that is only made when `function_exported` says it can be made
+            %% is not an error, and a branch that another Erlang would take is not dead code.
+            {Type, EnvOut, Warns2, Sites2} =
+                infer_case(Mod, MFA, Anno, ScrutType, Clauses, tag_env(Env1, environment), Contracts, Warns1, Sites1),
+            New = lists:sublist(Warns2, length(Warns2) - length(Warns1)),
+            Kept = [W || W <- New, W#prisma_warning.kind =/= dead_code],
+            {Type, restore_tag(EnvOut, Env1), Kept ++ Warns1, Sites2}
+    end;
 infer_expr(Mod, MFA, {'if', Anno, Clauses}, Env0, Contracts, Warns0, Sites0) ->
     infer_case(Mod, MFA, Anno, any, Clauses, Env0, Contracts, Warns0, Sites0);
 infer_expr(Mod, MFA, {'block', _Anno, Body}, Env0, Contracts, Warns0, Sites0) ->
@@ -550,13 +561,17 @@ infer_expr(Mod, MFA, {named_fun, _, _Name, Clauses}, Env, Contracts, Warns0, Sit
 infer_expr(_Mod, _MFA, {'fun', _, _}, Env, _Contracts, Warns, Sites) ->
     {any, Env, Warns, Sites};
 infer_expr(Mod, MFA, {'try', _, Body, OfClauses, CatchClauses, After}, Env, Contracts, Warns0, Sites0) ->
-    {_, _, Warns1, Sites1} = infer_body(Mod, MFA, Body, Env, Contracts, Warns0, Sites0),
+    BodyEnv = case catches(CatchClauses) of
+        none -> Env;
+        Handled -> tag_env(Env, Handled)
+    end,
+    {_, _, Warns1, Sites1} = infer_body(Mod, MFA, Body, BodyEnv, Contracts, Warns0, Sites0),
     {Warns2, Sites2} = infer_nested_clauses(Mod, MFA, OfClauses, Env, Contracts, Warns1, Sites1),
     {Warns3, Sites3} = infer_nested_clauses(Mod, MFA, CatchClauses, Env, Contracts, Warns2, Sites2),
     {_, _, Warns4, Sites4} = infer_body(Mod, MFA, After, Env, Contracts, Warns3, Sites3),
     {any, Env, Warns4, Sites4};
 infer_expr(Mod, MFA, {'catch', _, Expr}, Env, Contracts, Warns0, Sites0) ->
-    {_, _, Warns, Sites} = infer_expr(Mod, MFA, Expr, Env, Contracts, Warns0, Sites0),
+    {_, _, Warns, Sites} = infer_expr(Mod, MFA, Expr, tag_env(Env, any_handled), Contracts, Warns0, Sites0),
     {any, Env, Warns, Sites};
 infer_expr(Mod, MFA, {'receive', _, Clauses}, Env, Contracts, Warns0, Sites0) ->
     {Warns, Sites} = infer_nested_clauses(Mod, MFA, Clauses, Env, Contracts, Warns0, Sites0),
@@ -583,6 +598,68 @@ infer_expr(Mod, MFA, {record_field, _, Expr, _Name, _Field}, Env, Contracts, War
     {any, Env, Warns, Sites};
 infer_expr(_Mod, _MFA, _Other, Env, _Contracts, Warns, Sites) ->
     {any, Env, Warns, Sites}.
+
+%% How the code protects a call, kept in the environment under a key that no variable has. `environment` wins over the `try` ones.
+tag_env(Env, Tag) ->
+    case maps:get('$call_tag', Env, undefined) of
+        environment -> Env;
+        _ -> Env#{'$call_tag' => Tag}
+    end.
+
+restore_tag(EnvOut, EnvBefore) ->
+    case maps:find('$call_tag', EnvBefore) of
+        {ok, Tag} -> EnvOut#{'$call_tag' => Tag};
+        error -> maps:remove('$call_tag', EnvOut)
+    end.
+
+site(Env, Line, MFA, ArgTypes) ->
+    case maps:get('$call_tag', Env, undefined) of
+        undefined -> {Line, MFA, ArgTypes};
+        Tag -> {Line, MFA, ArgTypes, Tag}
+    end.
+
+%% Whether an expression looks at what the running system has, so what it decides is not decided by the code: the calls below
+%% (and comparisons or `andalso`/`orelse` of them).
+depends_on_the_system({call, _, {remote, _, {atom, _, M}, {atom, _, F}}, Args}) ->
+    lists:member({M, F}, [{erlang, function_exported}, {erlang, is_builtin}, {erlang, system_info}, {erlang, module_loaded},
+                          {os, type}, {os, version}, {code, ensure_loaded}, {code, is_loaded}, {code, which}])
+        orelse lists:any(fun depends_on_the_system/1, Args);
+depends_on_the_system(T) when is_tuple(T) ->
+    lists:any(fun depends_on_the_system/1, tuple_to_list(T));
+depends_on_the_system(L) when is_list(L) ->
+    lists:any(fun depends_on_the_system/1, L);
+depends_on_the_system(_) ->
+    false.
+
+%% What a `try` catches that matters for a call to a missing function (`error:undef`): `undef_handled` if a clause says so, `any_handled`
+%% if a clause takes any error (`error:_`, `_:_`, `C:R`), `none` otherwise. A clause with a guard is not counted.
+catches(CatchClauses) ->
+    Kinds = [catch_kind(C) || C <- CatchClauses],
+    case lists:member(undef_handled, Kinds) of
+        true -> undef_handled;
+        false ->
+            case lists:member(any_handled, Kinds) of
+                true -> any_handled;
+                false -> none
+            end
+    end.
+
+catch_kind({clause, _, [{tuple, _, [Class, Reason, _Stack]}], [], _Body}) ->
+    case class_may_be_error(Class) of
+        false -> none;
+        true ->
+            case Reason of
+                {atom, _, undef} -> undef_handled;
+                {var, _, _} -> any_handled;
+                _ -> none
+            end
+    end;
+catch_kind(_) ->
+    none.
+
+class_may_be_error({atom, _, error}) -> true;
+class_may_be_error({var, _, _}) -> true;
+class_may_be_error(_) -> false.
 
 %% What is computed to find out which function is called: the module and the function of `M:F(...)` when they are not literals
 %% (the log macros expand to `(logger_mod()):log(...)`), or the expression that is called, `(f())(X)`.
@@ -992,7 +1069,7 @@ infer_call(Mod, CallerMFA, Anno, Target, ArgAsts, ArgTypes, Env0, Contracts, War
           when ExitFn =:= error; ExitFn =:= exit; ExitFn =:= throw ->
             {none, Env0, Warns0, [{Line, CalleeMFA, ArgTypes} | Sites0]};
         {ok, {erlang, Bif, Arity} = CalleeMFA} ->
-            Sites1 = [{Line, CalleeMFA, ArgTypes} | Sites0],
+            Sites1 = [site(Env0, Line, CalleeMFA, ArgTypes) | Sites0],
             case bif_signature(Bif, Arity) of
                 {ok, ExpectedArgs, RetType0} ->
                     RetType = bif_return_type(Bif, ArgTypes, RetType0),
@@ -1001,7 +1078,7 @@ infer_call(Mod, CallerMFA, Anno, Target, ArgAsts, ArgTypes, Env0, Contracts, War
                     {any, Env0, Warns0, Sites1}
             end;
         {ok, CalleeMFA} ->
-            Sites1 = [{Line, CalleeMFA, ArgTypes} | Sites0],
+            Sites1 = [site(Env0, Line, CalleeMFA, ArgTypes) | Sites0],
             case maps:find(CalleeMFA, Contracts) of
                 {ok, #func_contract{inferred_type = {fun_type, ExpectedArgs, Inferred}, declared_specs = Specs}} ->
                     %% what the callee declares, not what its body happens to give: if the body contradicts the spec the

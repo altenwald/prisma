@@ -251,9 +251,17 @@ prisma check --format json
 prisma check --no-color
 NO_COLOR=1 prisma check
 
+# Analysis mode
+prisma check --mode discrepancy      # hybrid (default) | gradual | discrepancy
+
 # Analyze specific BEAM directories against a custom PPLT
 prisma check --pplt /path/to/project.pplt _build/default/lib/*/ebin
+
+# Also show the calls to missing functions that a `try ... catch _:_` handles (hidden by default)
+prisma check --show-handled
 ```
+
+A call that the code protects itself is not reported as an error: inside `case erlang:function_exported(M, F, A) of true -> ...` (or a branch that depends on `erlang:system_info`, `code:ensure_loaded`...), or in a `try` that catches `error:undef`. A `try` that catches every error also handles it, but it would hide a misspelled function for good, so Prisma lists it apart as `handled_undef` when asked.
 
 ---
 

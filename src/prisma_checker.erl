@@ -25,12 +25,16 @@ check_pplt(TargetPplt, DepsPplt) ->
 -spec check_pplt(#prisma_pplt{}, #prisma_pplt{}, map()) -> [#prisma_warning{}].
 check_pplt(#prisma_pplt{modules = TargetMods} = TargetPplt, DepsPplt, Opts) ->
     CombinedPplt = prisma_pplt:merge(DepsPplt, TargetPplt),
-    lists:flatmap(
+    Warnings = lists:flatmap(
         fun({_Mod, Summary}) ->
             check_module(Summary, CombinedPplt, Opts)
         end,
         lists:sort(maps:to_list(TargetMods))
-    ).
+    ),
+    case maps:get(show_handled, Opts, false) of
+        true -> Warnings;
+        false -> [W || W <- Warnings, W#prisma_warning.kind =/= handled_undef]
+    end.
 
 %% @doc Analyzes a `#module_summary{}` in hybrid mode.
 -spec check_module(#module_summary{}, #prisma_pplt{}) -> [#prisma_warning{}].
@@ -87,19 +91,24 @@ check_contract(Contract, Pplt, Mode) ->
 
 collect_discrepancies(#func_contract{mfa = {CallerMod, _, _} = CallerMFA, local_warnings = LocalWarns, call_sites = Sites}, Pplt) ->
     InterModWarns = lists:flatmap(
-        fun({Line, {CalleeMod, _, _} = CalleeMFA, ActualArgs}) ->
-            case CalleeMod =:= CallerMod of
+        fun(Site) ->
+            {Line, {CalleeMod, _, _} = CalleeMFA, ActualArgs, Tag} = site_parts(Site),
+            case CalleeMod =:= CallerMod orelse Tag =:= environment of
                 true ->
                     [];
                 false ->
-                    check_remote_discrepancy_call(CallerMFA, Line, CalleeMFA, ActualArgs, Pplt)
+                    check_remote_discrepancy_call(CallerMFA, Line, CalleeMFA, ActualArgs, Pplt, Tag)
             end
         end,
         Sites
     ),
     LocalWarns ++ InterModWarns.
 
-check_remote_discrepancy_call({CallerMod, _, _} = CallerMFA, Line, {CalleeMod, _, _} = CalleeMFA, ActualArgs, Pplt) ->
+%% A site is `{Line, MFA, Args}` or has a fourth element that says how the code protects the call (see prisma.hrl).
+site_parts({Line, MFA, Args}) -> {Line, MFA, Args, none};
+site_parts({Line, MFA, Args, Tag}) -> {Line, MFA, Args, Tag}.
+
+check_remote_discrepancy_call({CallerMod, _, _} = CallerMFA, Line, {CalleeMod, _, _} = CalleeMFA, ActualArgs, Pplt, Tag) ->
     case prisma_pplt:lookup_mfa(CalleeMFA, Pplt) of
         {ok, #func_contract{declared_specs = Specs, inferred_type = Inferred}} ->
             case resolve_expected_arg_vectors(CallerMod, CalleeMod, Specs, Inferred, Pplt) of
@@ -110,8 +119,16 @@ check_remote_discrepancy_call({CallerMod, _, _} = CallerMFA, Line, {CalleeMod, _
                     []
             end;
         error ->
-            unknown_function_warnings(CallerMFA, Line, CalleeMFA, Pplt)
+            handled(Tag, unknown_function_warnings(CallerMFA, Line, CalleeMFA, Pplt))
     end.
+
+%% A missing function that the code protects with a `try`: `error:undef` is the author saying so; a catch of every error also handles it, but would
+%% hide a misspelled name for good, so it is a warning of its own (`handled_undef`) that is only shown when asked for.
+handled(undef_handled, _Warnings) -> [];
+handled(any_handled, Warnings) ->
+    [W#prisma_warning{kind = handled_undef,
+                      message = <<(W#prisma_warning.message)/binary, " (it is handled by a try that catches every error)">>} || W <- Warnings];
+handled(_, Warnings) -> Warnings.
 
 %% A call to a function that does not exist in a module the PPLT knows. A module that is not in the PPLT proves nothing (it may just
 %% not have been analyzed), a module that is not Erlang (Elixir's generated functions) is left alone, `erlang` is the BIFs, and
@@ -145,8 +162,11 @@ provided_by_the_compiler(_, _, _) -> false.
 
 verify_gradual_calls(#func_contract{mfa = {CallerMod, _, _} = CallerMFA, call_sites = Sites}, Pplt) ->
     lists:flatmap(
-        fun({Line, {CalleeMod, _, _} = CalleeMFA, ActualArgs}) ->
-            case prisma_pplt:lookup_mfa(CalleeMFA, Pplt) of
+        fun(Site) ->
+            {Line, {CalleeMod, _, _} = CalleeMFA, ActualArgs, Tag} = site_parts(Site),
+            case Tag =:= environment orelse prisma_pplt:lookup_mfa(CalleeMFA, Pplt) of
+                true ->
+                    [];
                 {ok, #func_contract{declared_specs = [ _ | _ ] = Specs, inferred_type = Inferred}} ->
                     case resolve_expected_arg_vectors(CallerMod, CalleeMod, Specs, Inferred, Pplt) of
                         {ok, Vectors} ->
@@ -405,6 +425,7 @@ format_human(#prisma_warning{
         oxbow_code -> "\e[1;33m";        %% bold yellow
         gradual_mismatch -> "\e[1;35m";  %% bold magenta
         opacity_violation -> "\e[1;31m"; %% bold red
+        handled_undef -> "\e[2m";        %% dim: the code handles it
         _ -> "\e[1;31m"
     end,
     Tag = colorize("[" ++ KindStr ++ "]", KindColor, Color),

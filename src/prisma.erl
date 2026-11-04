@@ -248,7 +248,7 @@ main(_) ->
         "  prisma version~n"
         "  prisma build~n"
         "  prisma build --output <file.pplt> <ebin_or_beam...>~n"
-        "  prisma check [--mode <hybrid|gradual|discrepancy>] [--format <human|pretty|oneline|json>] [--no-color] [--color] [--pplt <file.pplt>...] [<ebin_or_beam...>]~n"
+        "  prisma check [--mode <hybrid|gradual|discrepancy>] [--format <human|pretty|oneline|json>] [--no-color] [--color] [--show-handled] [--pplt <file.pplt>...] [<ebin_or_beam...>]~n"
     ),
     erlang:halt(1).
 
@@ -271,6 +271,8 @@ parse_check_opts_loop(["--format", Fmt | Rest], Acc) ->
     parse_check_opts_loop(Rest, Acc#{format => parse_format(Fmt)});
 parse_check_opts_loop(["--no-oxbow" | Rest], Acc) ->
     parse_check_opts_loop(Rest, Acc#{oxbow => false});
+parse_check_opts_loop(["--show-handled" | Rest], Acc) ->
+    parse_check_opts_loop(Rest, Acc#{show_handled => true});
 parse_check_opts_loop(["--oxbow" | Rest], Acc) ->
     parse_check_opts_loop(Rest, Acc#{oxbow => true});
 parse_check_opts_loop(["--no-color" | Rest], Acc) ->

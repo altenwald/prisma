@@ -18,7 +18,7 @@
 }).
 
 -record(prisma_warning, {
-    kind :: gradual_mismatch | discrepancy | unknown_function | dead_code | oxbow_code | opacity_violation,
+    kind :: gradual_mismatch | discrepancy | unknown_function | handled_undef | dead_code | oxbow_code | opacity_violation,
     mfa :: mfa_key(),
     line = 0 :: non_neg_integer(),
     message :: binary(),
@@ -30,7 +30,12 @@
     file = undefined :: undefined | string()
 }).
 
--type call_site() :: {non_neg_integer(), mfa_key(), [prisma_type:stype()]}.
+%% A call site: line, callee and the types of the arguments; a fourth element says how the code protects the call:
+%%   environment   it is in a branch that depends on what the running system has (function_exported, system_info...)
+%%   undef_handled it is in a `try` that catches `error:undef`
+%%   any_handled   it is in a `try` (or `catch`) that catches every error
+-type call_site() :: {non_neg_integer(), mfa_key(), [prisma_type:stype()]}
+                   | {non_neg_integer(), mfa_key(), [prisma_type:stype()], environment | undef_handled | any_handled}.
 
 -record(func_contract, {
     mfa :: mfa_key(),

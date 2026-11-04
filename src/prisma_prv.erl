@@ -115,12 +115,6 @@ parse_opts(State) ->
     catch
         _:_ -> #{}
     end,
-    RawArgs = try rebar_state:command_args(State) of
-        ArgsList when is_list(ArgsList) -> ArgsList;
-        _ -> []
-    catch
-        _:_ -> []
-    end,
     {CliOpts, Targets} = try rebar_state:command_parsed_args(State) of
         {ParsedArgs, OtherArgs} when is_list(ParsedArgs) ->
             TaskTarget = case proplists:get_value(task, ParsedArgs) of
@@ -128,22 +122,8 @@ parse_opts(State) ->
                 TaskStr when is_list(TaskStr) -> [TaskStr];
                 _ -> []
             end,
-            NonOpt = case OtherArgs of
-                [] -> RawArgs;
-                _ -> OtherArgs
-            end,
-            CombinedTargets = lists:usort(TaskTarget ++ NonOpt),
+            CombinedTargets = TaskTarget ++ [A || A <- OtherArgs, not lists:prefix("-", A)],
             {parse_cli_args(ParsedArgs), CombinedTargets};
-        ParsedList when is_list(ParsedList) ->
-            {parse_cli_args(ParsedList), RawArgs};
-        _ ->
-            {#{}, RawArgs}
-    catch
-        _:_ ->
-            {#{}, RawArgs}
-    end,
-        {ParsedArgs, OtherArgs} when is_list(ParsedArgs) ->
-            {parse_cli_args(ParsedArgs), OtherArgs};
         ParsedList when is_list(ParsedList) ->
             {parse_cli_args(ParsedList), []};
         _ ->
