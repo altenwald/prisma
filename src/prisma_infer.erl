@@ -532,13 +532,28 @@ infer_expr(Mod, MFA, {'case', Anno, Scrutinee, Clauses}, Env0, Contracts, Warns0
         false ->
             infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env1, Contracts, Warns1, Sites1);
         true ->
-            %% The branches depend on what the running system has: a call that is only made when `function_exported` says it can be made
-            %% is not an error, and a branch that another Erlang would take is not dead code.
+            %% The branches depend on what the running system has. Where the condition can be decided on the system that runs the
+            %% analysis, the branch that it takes is checked like any other (it runs here) and the ones it does not take are not an error
+            %% of this system; where it cannot, nothing that depends on the system is said in any of them. A branch that another Erlang
+            %% would take is not dead code either.
+            Mode = case env_value(Scrutinee) of
+                {ok, Value} -> {known, Value};
+                unknown -> unknown
+            end,
+            Marked = mark_clauses(Clauses, Mode),
             {Type, EnvOut, Warns2, Sites2} =
-                infer_case(Mod, MFA, Anno, ScrutType, Clauses, tag_env(Env1, environment), Contracts, Warns1, Sites1),
+                infer_case(Mod, MFA, Anno, ScrutType, Marked, Env1, Contracts, Warns1, Sites1),
             New = lists:sublist(Warns2, length(Warns2) - length(Warns1)),
             Kept = [W || W <- New, W#prisma_warning.kind =/= dead_code],
-            {Type, restore_tag(EnvOut, Env1), Kept ++ Warns1, Sites2}
+            {Type, EnvOut, Kept ++ Warns1, Sites2}
+    end;
+%% The body of a branch of a case on the system, marked by `mark_clauses/2`.
+infer_expr(Mod, MFA, {'$env_branch', _, Body, Status}, Env, Contracts, Warns0, Sites0) ->
+    {Type, EnvOut, Warns, Sites} = infer_body(Mod, MFA, Body, tag_env(Env, environment), Contracts, Warns0, Sites0),
+    Out = restore_tag(EnvOut, Env),
+    case Status of
+        not_taken -> {none, Out, Warns, Sites};
+        uncertain -> {Type, Out, Warns, Sites}
     end;
 infer_expr(Mod, MFA, {'if', Anno, Clauses}, Env0, Contracts, Warns0, Sites0) ->
     infer_case(Mod, MFA, Anno, any, Clauses, Env0, Contracts, Warns0, Sites0);
@@ -599,6 +614,90 @@ infer_expr(Mod, MFA, {record_field, _, Expr, _Name, _Field}, Env, Contracts, War
 infer_expr(_Mod, _MFA, _Other, Env, _Contracts, Warns, Sites) ->
     {any, Env, Warns, Sites}.
 
+%% The value of an expression that only looks at the system that runs the analysis, or `unknown`: the OTP release, the comparisons and
+%% boolean operators over it, and `function_exported/3` of a module that can be loaded here.
+env_value({atom, _, A}) -> {ok, A};
+env_value({integer, _, I}) -> {ok, I};
+env_value({string, _, S}) -> {ok, S};
+env_value({call, _, {remote, _, {atom, _, erlang}, {atom, _, system_info}}, [{atom, _, otp_release}]}) ->
+    {ok, erlang:system_info(otp_release)};
+env_value({call, A, {atom, _, list_to_integer}, Args}) ->
+    env_value({call, A, {remote, A, {atom, A, erlang}, {atom, A, list_to_integer}}, Args});
+env_value({call, A, {atom, _, function_exported}, Args}) ->
+    env_value({call, A, {remote, A, {atom, A, erlang}, {atom, A, function_exported}}, Args});
+env_value({call, _, {remote, _, {atom, _, erlang}, {atom, _, list_to_integer}}, [Arg]}) ->
+    case env_value(Arg) of
+        {ok, S} when is_list(S) ->
+            try {ok, list_to_integer(S)} catch _:_ -> unknown end;
+        _ ->
+            unknown
+    end;
+env_value({call, _, {remote, _, {atom, _, erlang}, {atom, _, function_exported}}, [{atom, _, M}, {atom, _, F}, {integer, _, A}]}) ->
+    case code:ensure_loaded(M) of
+        {module, M} -> {ok, erlang:function_exported(M, F, A)};
+        _ -> unknown
+    end;
+env_value({op, _, Op, L, R}) when Op =:= '=='; Op =:= '=:='; Op =:= '/='; Op =:= '=/=';
+                                  Op =:= '<'; Op =:= '>'; Op =:= '=<'; Op =:= '>=' ->
+    case {env_value(L), env_value(R)} of
+        {{ok, A}, {ok, B}} -> {ok, erlang:Op(A, B)};
+        _ -> unknown
+    end;
+env_value({op, _, 'andalso', L, R}) ->
+    case env_value(L) of
+        {ok, false} -> {ok, false};
+        {ok, true} -> env_value(R);
+        _ -> unknown
+    end;
+env_value({op, _, 'orelse', L, R}) ->
+    case env_value(L) of
+        {ok, true} -> {ok, true};
+        {ok, false} -> env_value(R);
+        _ -> unknown
+    end;
+env_value({op, _, 'not', X}) ->
+    case env_value(X) of
+        {ok, B} when is_boolean(B) -> {ok, not B};
+        _ -> unknown
+    end;
+env_value(_) ->
+    unknown.
+
+%% Wraps the body of each clause of a case on the system: a clause that the known value takes stays as it is (it is checked like any
+%% other); one that it does not take, or that comes after a clause that takes it, is `not_taken`; and every clause is `uncertain` when the value
+%% is not known, or the pattern or the guard cannot be decided.
+mark_clauses(Clauses, Mode) ->
+    mark_clauses(Clauses, Mode, false, []).
+
+mark_clauses([], _Mode, _Shadowed, Acc) ->
+    lists:reverse(Acc);
+mark_clauses([{clause, A, Pats, Guards, Body} | Rest], Mode, Shadowed, Acc) ->
+    {Status, NowShadowed} = case Mode of
+        unknown ->
+            {uncertain, Shadowed};
+        {known, Value} ->
+            case Shadowed of
+                true -> {not_taken, true};
+                false ->
+                    case {pattern_match(Pats, Value), Guards} of
+                        {false, _} -> {not_taken, false};
+                        {true, []} -> {taken, true};
+                        _ -> {uncertain, false}
+                    end
+            end
+    end,
+    NewBody = case Status of
+        taken -> Body;
+        _ -> [{'$env_branch', A, Body, Status}]
+    end,
+    mark_clauses(Rest, Mode, NowShadowed, [{clause, A, Pats, Guards, NewBody} | Acc]).
+
+pattern_match([{atom, _, A}], V) -> V =:= A;
+pattern_match([{integer, _, I}], V) -> V =:= I;
+pattern_match([{string, _, S}], V) -> V =:= S;
+pattern_match([{var, _, _}], _) -> true;
+pattern_match(_, _) -> uncertain.
+
 %% How the code protects a call, kept in the environment under a key that no variable has. `environment` wins over the `try` ones.
 tag_env(Env, Tag) ->
     case maps:get('$call_tag', Env, undefined) of
@@ -624,6 +723,8 @@ depends_on_the_system({call, _, {remote, _, {atom, _, M}, {atom, _, F}}, Args}) 
     lists:member({M, F}, [{erlang, function_exported}, {erlang, is_builtin}, {erlang, system_info}, {erlang, module_loaded},
                           {os, type}, {os, version}, {code, ensure_loaded}, {code, is_loaded}, {code, which}])
         orelse lists:any(fun depends_on_the_system/1, Args);
+depends_on_the_system({call, _, {atom, _, F}, _}) when F =:= function_exported; F =:= is_builtin ->
+    true;
 depends_on_the_system(T) when is_tuple(T) ->
     lists:any(fun depends_on_the_system/1, tuple_to_list(T));
 depends_on_the_system(L) when is_list(L) ->

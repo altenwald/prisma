@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Prisma — Fast, Modular Type & Spec Analyzer for Erlang & Elixir</title>
-  <meta name="description" content="Next-generation static type analyzer with modular .pplt tables for Erlang and Elixir. 10.3x faster than Dialyzer. Zero false positives.">
+  <meta name="description" content="Next-generation static type analyzer with modular .pplt tables for Erlang and Elixir. Up to 6.3x faster than Dialyzer, 20.8x less CPU. Zero false positives.">
   <link rel="icon" type="image/png" href="assets/prisma.png">
 
   <!-- Tailwind CSS & DaisyUI via CDN -->
@@ -141,7 +141,7 @@
       <!-- Eyebrow Tag -->
       <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50 border border-blue-200/80 text-blue-700 text-xs font-semibold mb-6 shadow-sm">
         <span class="w-2 h-2 rounded-full bg-blue-600"></span>
-        10.3× Faster than Dialyzer • Erlang &amp; Elixir 1st Class
+        Up to 6.3× Faster than Dialyzer • 20.8× Less CPU • Erlang &amp; Elixir 1st Class
       </div>
 
       <!-- Main Headline -->
@@ -215,20 +215,20 @@
       <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="grid grid-cols-2 md:grid-cols-4 gap-8 text-center divide-y md:divide-y-0 md:divide-x divide-slate-100">
           <div class="pt-4 md:pt-0">
-            <div class="text-4xl font-extrabold text-blue-600 font-mono tracking-tight">10.3×</div>
+            <div class="text-4xl font-extrabold text-blue-600 font-mono tracking-tight">6.3×</div>
             <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mt-1">Faster Wall-Clock</div>
           </div>
           <div class="pt-4 md:pt-0">
-            <div class="text-4xl font-extrabold text-teal-600 font-mono tracking-tight">28.1×</div>
+            <div class="text-4xl font-extrabold text-teal-600 font-mono tracking-tight">20.8×</div>
             <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mt-1">Less CPU Time</div>
           </div>
           <div class="pt-4 md:pt-0">
-            <div class="text-4xl font-extrabold text-indigo-600 font-mono tracking-tight">2.9×</div>
+            <div class="text-4xl font-extrabold text-indigo-600 font-mono tracking-tight">2.7×</div>
             <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mt-1">Less Peak RAM</div>
           </div>
           <div class="pt-4 md:pt-0">
-            <div class="text-4xl font-extrabold text-amber-600 font-mono tracking-tight">0.00%</div>
-            <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mt-1">False Positive Target</div>
+            <div class="text-4xl font-extrabold text-amber-600 font-mono tracking-tight">100%</div>
+            <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mt-1">Faults Caught (125/125)</div>
           </div>
         </div>
       </div>
@@ -252,7 +252,7 @@
           </div>
           <h3 class="text-lg font-bold text-slate-900 mb-2">Sub-Second Speed</h3>
           <p class="text-sm text-slate-600 leading-relaxed">
-            As seen in the live recording on RabbitMQ (234 modules), Prisma builds its index and finishes static verification in seconds. Full CI runs complete up to <strong>10.3× faster</strong> than Dialyzer.
+            As seen in the live recording on RabbitMQ (234 modules), Prisma builds its index and finishes static verification in seconds. Full CI runs complete up to <strong>6.3× faster</strong> with <strong>20.8× less CPU</strong> than Dialyzer.
           </p>
         </div>
 
@@ -348,7 +348,7 @@
               </li>
               <li class="flex items-start gap-2.5">
                 <span class="text-rose-500 font-bold">✕</span>
-                <span><strong>Heavy Memory Footprint:</strong> 1.28 GB RAM and 75.6s CPU cycles on RabbitMQ core apps.</span>
+                <span><strong>Heavy Resource Footprint:</strong> 1.46 GB RAM and 67.5s CPU time on 440 RabbitMQ modules.</span>
               </li>
             </ul>
           </div>
@@ -430,7 +430,7 @@
         </div>
         <h2 class="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">Performance on Real Code</h2>
         <p class="text-base text-slate-600">
-          Audited against the official RabbitMQ server monorepo (1,310 Erlang modules, 438,156 LoC) on Apple M1 macOS 27 (Erlang/OTP 29, 64-bit, JIT).
+          Audited against RabbitMQ (commit <code>5dacb85</code>, 234 and 440 BEAM modules) on Apple M1 macOS 27 (Erlang/OTP 29, 64-bit, JIT).
         </p>
       </div>
 
@@ -443,7 +443,7 @@
           <!-- Dataset Pill Switcher -->
           <div class="inline-flex p-1 bg-slate-100 rounded-full">
             <button id="btn-ds-broker" class="rounded-full px-4 py-1.5 text-xs font-semibold bg-white text-slate-900 shadow-sm" onclick="switchDataset('broker')">
-              RabbitMQ Broker (245 modules)
+              RabbitMQ Broker (234 modules)
             </button>
             <button id="btn-ds-core" class="rounded-full px-4 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900" onclick="switchDataset('core')">
               Monorepo Apps (440 modules)
@@ -489,8 +489,8 @@
             <thead>
               <tr class="text-slate-400 uppercase border-b border-slate-100 font-sans">
                 <th class="py-3">Metric</th>
-                <th>Prisma (245 mod)</th>
-                <th>Dialyzer (245 mod)</th>
+                <th>Prisma (234 mod)</th>
+                <th>Dialyzer (234 mod)</th>
                 <th>Prisma (440 mod)</th>
                 <th>Dialyzer (440 mod)</th>
                 <th>Advantage</th>
@@ -499,38 +499,51 @@
             <tbody class="divide-y divide-slate-100">
               <tr>
                 <td class="font-sans font-semibold text-slate-900">Wall-Clock Time</td>
-                <td class="text-teal-600 font-bold">856.2 ms</td>
-                <td class="text-slate-400">8,781.6 ms</td>
-                <td class="text-teal-600 font-bold">3.922 s</td>
-                <td class="text-slate-400">20.722 s</td>
-                <td class="text-blue-600 font-bold">5.3× — 10.3× faster</td>
+                <td class="text-teal-600 font-bold">1.08 s</td>
+                <td class="text-slate-400">6.75 s</td>
+                <td class="text-teal-600 font-bold">3.02 s</td>
+                <td class="text-slate-400">17.27 s</td>
+                <td class="text-blue-600 font-bold">5.7× — 6.3× faster</td>
               </tr>
               <tr>
                 <td class="font-sans font-semibold text-slate-900">Total CPU Time</td>
-                <td class="text-teal-600 font-bold">1.011 s</td>
-                <td class="text-slate-400">28.420 s</td>
-                <td class="text-teal-600 font-bold">4.046 s</td>
-                <td class="text-slate-400">75.648 s</td>
-                <td class="text-blue-600 font-bold">18.7× — 28.1× less CPU</td>
+                <td class="text-teal-600 font-bold">1.25 s</td>
+                <td class="text-slate-400">26.0 s</td>
+                <td class="text-teal-600 font-bold">3.25 s</td>
+                <td class="text-slate-400">67.55 s</td>
+                <td class="text-blue-600 font-bold">20.8× less CPU</td>
               </tr>
               <tr>
                 <td class="font-sans font-semibold text-slate-900">Peak RAM (RSS)</td>
-                <td class="text-teal-600 font-bold">319.4 MiB</td>
-                <td class="text-slate-400">372.5 MiB</td>
-                <td class="text-teal-600 font-bold">441.0 MiB</td>
-                <td class="text-slate-400">1,286.8 MiB</td>
-                <td class="text-blue-600 font-bold">Up to 2.9× less RAM</td>
+                <td class="text-teal-600 font-bold">295.5 MiB</td>
+                <td class="text-slate-400">405.1 MiB</td>
+                <td class="text-teal-600 font-bold">536.0 MiB</td>
+                <td class="text-slate-400">1,456.7 MiB</td>
+                <td class="text-blue-600 font-bold">1.4× — 2.7× less RAM</td>
               </tr>
               <tr>
-                <td class="font-sans font-semibold text-slate-900">CPU Cycles</td>
-                <td class="text-teal-600 font-bold">2.96 B</td>
-                <td class="text-slate-400">74.5 B</td>
-                <td class="text-teal-600 font-bold">12.1 B</td>
-                <td class="text-slate-400">196.4 B</td>
-                <td class="text-blue-600 font-bold">16× — 25× fewer cycles</td>
+                <td class="font-sans font-semibold text-slate-900">Instructions Retired</td>
+                <td class="text-teal-600 font-bold">11.4 B</td>
+                <td class="text-slate-400">176.1 B</td>
+                <td class="text-teal-600 font-bold">33.7 B</td>
+                <td class="text-slate-400">467.2 B</td>
+                <td class="text-blue-600 font-bold">13.9× — 15.4× fewer</td>
+              </tr>
+              <tr>
+                <td class="font-sans font-semibold text-slate-900">Seeded Faults (125 mutants)</td>
+                <td class="text-teal-600 font-bold">125 / 125 (100%)</td>
+                <td class="text-slate-400">123 / 125 (98.4%)</td>
+                <td class="text-teal-600 font-bold">125 / 125 (100%)</td>
+                <td class="text-slate-400">123 / 125 (98.4%)</td>
+                <td class="text-blue-600 font-bold">100% caught, 0 spurious</td>
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <div class="px-6 py-3 bg-slate-50/70 border-t border-slate-100 text-[11px] text-slate-500 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <span>* Measured with <code>hyperfine 2.0.0 --metrics all</code> on Apple M1 (8 cores), macOS 27, Erlang/OTP 29.</span>
+          <span>Gradual mode vs Gradualizer: <strong>5.3× faster</strong> on 440 modules (6.78s vs 35.89s, 100% vs 54% faults caught).</span>
         </div>
       </div>
 
@@ -702,51 +715,51 @@ cp _build/default/bin/prisma /usr/local/bin/</code></pre>
   <script>
     const benchmarkData = {
       broker: {
-        name: "RabbitMQ Core Broker (245 BEAM modules)",
+        name: "RabbitMQ Core Broker (234 BEAM modules)",
         time: {
           title: "Wall-Clock Time (Lower is Better)",
           unit: "s",
-          prisma: 0.856,
-          dialyzer: 8.782,
-          multiplier: "10.3× faster"
+          prisma: 1.08,
+          dialyzer: 6.75,
+          multiplier: "6.3× faster"
         },
         cpu: {
           title: "Total CPU Time (Lower is Better)",
           unit: "s",
-          prisma: 1.011,
-          dialyzer: 28.420,
-          multiplier: "28.1× less CPU"
+          prisma: 1.25,
+          dialyzer: 26.0,
+          multiplier: "20.8× less CPU"
         },
         ram: {
           title: "Peak Memory RSS (Lower is Better)",
           unit: "MiB",
-          prisma: 319.4,
-          dialyzer: 372.5,
-          multiplier: "16.6% less RAM"
+          prisma: 295.5,
+          dialyzer: 405.1,
+          multiplier: "1.4× less RAM"
         }
       },
       core: {
-        name: "RabbitMQ Core Apps (440 BEAM modules)",
+        name: "RabbitMQ Monorepo (7 apps, 440 BEAM modules)",
         time: {
           title: "Wall-Clock Time (Lower is Better)",
           unit: "s",
-          prisma: 3.922,
-          dialyzer: 20.722,
-          multiplier: "5.3× faster"
+          prisma: 3.02,
+          dialyzer: 17.27,
+          multiplier: "5.7× faster"
         },
         cpu: {
           title: "Total CPU Time (Lower is Better)",
           unit: "s",
-          prisma: 4.046,
-          dialyzer: 75.648,
-          multiplier: "18.7× less CPU"
+          prisma: 3.25,
+          dialyzer: 67.55,
+          multiplier: "20.8× less CPU"
         },
         ram: {
           title: "Peak Memory RSS (Lower is Better)",
           unit: "MiB",
-          prisma: 441.0,
-          dialyzer: 1286.8,
-          multiplier: "2.9× less RAM"
+          prisma: 536.0,
+          dialyzer: 1456.7,
+          multiplier: "2.7× less RAM"
         }
       }
     };

@@ -73,3 +73,46 @@ try_that_does_not_catch_an_error_does_not_protect_the_call_test() ->
     ?assertEqual([unknown_function], kinds("    try guard_callee:missing(1) catch throw:_ -> ok end")),
     %% the call is in the `catch` clause, not in the protected body
     ?assertEqual([unknown_function], kinds("    try ok catch error:undef -> guard_callee:missing(1) end")).
+
+%% A condition on what the running system has is decided against the system that runs the analysis: a branch that it takes is checked as any
+%% other (it runs here, so a call to a function that does not exist fails here), one that it does not take is not an error of this system.
+
+release() -> erlang:system_info(otp_release).
+
+env_case(Cond, Then, Else) ->
+    "    case " ++ Cond ++ " of\n        true -> " ++ Then ++ ";\n        false -> " ++ Else ++ "\n    end".
+
+a_branch_that_this_system_takes_is_checked_test() ->
+    Body = "    case erlang:system_info(otp_release) of\n"
+           "        \"" ++ release() ++ "\" -> guard_callee:missing(1);\n"
+           "        _ -> ok\n"
+           "    end",
+    ?assertEqual([unknown_function], kinds(Body)).
+
+a_branch_that_this_system_does_not_take_is_not_an_error_test() ->
+    Body = "    case erlang:system_info(otp_release) of\n"
+           "        \"1\" -> guard_callee:missing(1);\n"
+           "        _ -> ok\n"
+           "    end",
+    ?assertEqual([], kinds(Body)),
+    %% and the other one is the one that runs
+    Other = "    case erlang:system_info(otp_release) of\n"
+            "        \"1\" -> ok;\n"
+            "        _ -> guard_callee:missing(1)\n"
+            "    end",
+    ?assertEqual([unknown_function], kinds(Other)).
+
+comparisons_with_the_release_are_decided_test() ->
+    Cmp = fun(Op, N) -> "list_to_integer(erlang:system_info(otp_release)) " ++ Op ++ " " ++ integer_to_list(N) end,
+    ?assertEqual([unknown_function], kinds(env_case(Cmp(">=", 1), "guard_callee:missing(1)", "ok"))),
+    ?assertEqual([], kinds(env_case(Cmp(">=", 9999), "guard_callee:missing(1)", "ok"))),
+    ?assertEqual([unknown_function], kinds(env_case(Cmp(">=", 9999), "ok", "guard_callee:missing(1)"))).
+
+function_exported_is_decided_when_the_module_is_known_test() ->
+    %% lists:seq/2 exists: the call runs here and the missing function fails
+    ?assertEqual([unknown_function],
+                 kinds(env_case("erlang:function_exported(lists, seq, 2)", "guard_callee:missing(1)", "ok"))),
+    %% lists:nope/0 does not exist: the true branch is not taken here
+    ?assertEqual([], kinds(env_case("erlang:function_exported(lists, nope, 0)", "guard_callee:missing(1)", "ok"))),
+    ?assertEqual([unknown_function],
+                 kinds(env_case("erlang:function_exported(lists, nope, 0)", "ok", "guard_callee:missing(1)"))).

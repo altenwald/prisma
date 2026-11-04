@@ -261,7 +261,7 @@ prisma check --pplt /path/to/project.pplt _build/default/lib/*/ebin
 prisma check --show-handled
 ```
 
-A call that the code protects itself is not reported as an error: inside `case erlang:function_exported(M, F, A) of true -> ...` (or a branch that depends on `erlang:system_info`, `code:ensure_loaded`...), or in a `try` that catches `error:undef`. A `try` that catches every error also handles it, but it would hide a misspelled function for good, so Prisma lists it apart as `handled_undef` when asked.
+A call that the code protects itself is not reported as an error. A `case` on what the system has (`erlang:function_exported/3`, `erlang:system_info(otp_release)` and comparisons over it) is decided on the system that runs the analysis: the branch it takes is checked like any other code, because it runs here; the ones it does not take are not an error of this system (and are not dead code, another Erlang would take them). If the condition cannot be decided (`code:ensure_loaded`, `os:type()`...), nothing that depends on the system is said in any branch. A call in a `try` that catches `error:undef` is not reported either. A `try` that catches every error also handles it, but it would hide a misspelled function for good, so Prisma lists it apart as `handled_undef` when asked.
 
 ---
 
