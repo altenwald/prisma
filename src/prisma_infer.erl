@@ -26,36 +26,64 @@
     #{mfa_key() => #func_contract{}}
 ) -> #{mfa_key() => #func_contract{}}.
 infer_module_functions(Mod, ClausesMap, InitialContracts) ->
-    fixpoint_loop(Mod, ClausesMap, InitialContracts, 1).
+    Own = [MFA || MFA <- maps:keys(InitialContracts), maps:is_key(MFA, ClausesMap)],
+    fixpoint_loop(Mod, ClausesMap, InitialContracts, 1, Own, callers_of(Mod, ClausesMap, Own)).
 
-fixpoint_loop(Mod, ClausesMap, Contracts, Pass) ->
-    NextContracts = maps:map(
-        fun(MFA, Contract) ->
-            case maps:find(MFA, ClausesMap) of
-                {ok, {_Line, Clauses}} ->
-                    infer_function(Mod, MFA, Clauses, Contract, Contracts);
-                error ->
-                    Contract
-            end
+%% Each pass infers again only the functions that may give another answer: the first one all of them, then those that call (or are) a
+%% function whose type changed in the last pass. The others would give the same type, warnings and call sites as they have: the inference of a
+%% function depends on its own clauses and on the contracts of what it calls, and only the contracts of the functions of the module
+%% change between passes (those of other modules are what their `-spec`s declare). `Callers` maps each function of the module to the
+%% functions that call it.
+fixpoint_loop(Mod, ClausesMap, Contracts, Pass, Dirty, Callers) ->
+    NextContracts = lists:foldl(
+        fun(MFA, Acc) ->
+            {_Line, Clauses} = maps:get(MFA, ClausesMap),
+            Acc#{MFA := infer_function(Mod, MFA, Clauses, maps:get(MFA, Acc), Contracts)}
         end,
-        Contracts
+        Contracts,
+        Dirty
     ),
-    case Pass >= ?MAX_FIXPOINT_PASSES orelse same_inferred_types(Contracts, NextContracts) of
-        true -> NextContracts;
-        false -> fixpoint_loop(Mod, ClausesMap, NextContracts, Pass + 1)
+    Changed = [MFA || MFA <- Dirty, (maps:get(MFA, Contracts))#func_contract.inferred_type =/=
+                                    (maps:get(MFA, NextContracts))#func_contract.inferred_type],
+    case Pass >= ?MAX_FIXPOINT_PASSES orelse Changed =:= [] of
+        true ->
+            NextContracts;
+        false ->
+            NextDirty = lists:usort(lists:append([maps:get(MFA, Callers, []) || MFA <- Changed])),
+            fixpoint_loop(Mod, ClausesMap, NextContracts, Pass + 1, NextDirty, Callers)
     end.
 
-same_inferred_types(C1, C2) ->
-    maps:fold(
-        fun(K, #func_contract{inferred_type = T1}, Acc) ->
-            Acc andalso case maps:find(K, C2) of
-                {ok, #func_contract{inferred_type = T2}} -> T1 =:= T2;
-                error -> false
-            end
+%% For each function of the module, the functions of the module that call it. Every call that looks like one counts, wherever it is
+%% (a fun, a try, a comprehension...): a call that is not made does no harm, and one that is missed would leave a type out of date.
+callers_of(Mod, ClausesMap, Own) ->
+    OwnSet = maps:from_list([{MFA, true} || MFA <- Own]),
+    lists:foldl(
+        fun(Caller, Acc) ->
+            {_Line, Clauses} = maps:get(Caller, ClausesMap),
+            Callees = lists:usort([C || C <- called(Mod, Clauses), maps:is_key(C, OwnSet)]),
+            lists:foldl(fun(Callee, A) -> A#{Callee => [Caller | maps:get(Callee, A, [])]} end, Acc, Callees)
         end,
-        true,
-        C1
+        #{},
+        Own
     ).
+
+called(Mod, {call, _, Target, Args}) ->
+    Direct = case Target of
+        {atom, _, F} -> [{Mod, F, length(Args)}];
+        {remote, _, {atom, _, M}, {atom, _, F}} -> [{M, F, length(Args)}];
+        _ -> []
+    end,
+    Direct ++ called(Mod, Target) ++ called(Mod, Args);
+called(Mod, {'fun', _, {function, F, A}}) when is_atom(F), is_integer(A) ->
+    [{Mod, F, A}];
+called(_Mod, {'fun', _, {function, {atom, _, M}, {atom, _, F}, {integer, _, A}}}) ->
+    [{M, F, A}];
+called(Mod, T) when is_tuple(T) ->
+    called(Mod, tuple_to_list(T));
+called(Mod, L) when is_list(L) ->
+    lists:append([called(Mod, X) || X <- L]);
+called(_Mod, _) ->
+    [].
 
 infer_function(Mod, {_M, _F, Arity} = MFA, Clauses, Contract, AllContracts) ->
     {ArgVectors, RetTypes, Warnings, CallSites} = lists:foldl(

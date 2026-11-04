@@ -264,7 +264,7 @@ Optimizations tried since, with measurements:
 | caching `declared_return` per callee | no gain (1.479 s to 1.475 s, noise) and it was reverted: eprof counted 1M cheap calls |
 | taking the abstract forms from the `debug_info` chunk already read instead of decoding the module again as `abstract_code` (twice per module) | **-8.2%** wall time, identical warnings (`erl_parse:anno_from_term` was 19% of own time in fprof) |
 | bounding `meet` (a chain whose tail is a big union of improper lists, and unions of structured types with more than 256 pairs of members, answer the smaller operand: a safe superset) | `kernel` + `stdlib` PPLT from over 5 minutes to **2.4 s**; same warnings on `rabbit` and the 440 modules, 125 / 125 mutants, collateral 0; `rabbit` 1.116 s to 1.085 s |
-| not re-inferring functions whose callees did not change between passes | not done, task #21 |
+| not re-inferring functions whose callees did not change between passes (a function is inferred again only if it calls, or is, a function of its module whose type changed in the last pass; the first pass infers all) | **-13% wall time and -13% CPU on `rabbit`, -19% and -17% on the 440 modules**, 17% and 24% fewer instructions; memory 301 to 287 MiB and 542 to 524 MiB, which is within the noise (so it did not grow); identical warnings in the four combinations tried (`rabbit` and the 440 modules, discrepancy and hybrid), 125 / 125 mutants |
 
 The profile (fprof on `rabbit_common`, own time): `prisma_infer` 26%, `erl_parse` 19% before the change above, `lists` 17%, `prisma_type` 13%, `maps` 9.5%.
 
@@ -275,4 +275,4 @@ The profile (fprof on `rabbit_common`, own time): `prisma_infer` 26%, `erl_parse
 - **Oxbow** (80 on `rabbit`) against xref's unused locals: xref reports 0 because the compiler already warns on them, so most of the 80 are "ignored parameter" findings with no counterpart.
 - **Dialyzer with a full PLT of the dependencies**: this run lacks it, so Dialyzer sees fewer calls.
 - **A second corpus**, to know whether the 5 / 45 warnings and 125 / 125 mutants generalize.
-- **Speed**: the 55% slowdown (task #21).
+- **Speed**: the correctness work made the analysis 55% slower; the dependency tracking of the passes took back part of it (`rabbit` 1.10 s to 0.95 s; the start was 0.71 s).
