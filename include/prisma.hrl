@@ -18,7 +18,7 @@
 }).
 
 -record(prisma_warning, {
-    kind :: gradual_mismatch | discrepancy | unknown_function | handled_undef | dead_code | oxbow_code | opacity_violation,
+    kind :: gradual_mismatch | discrepancy | unknown_function | handled_undef | system_branch | dead_code | oxbow_code | opacity_violation,
     mfa :: mfa_key(),
     line = 0 :: non_neg_integer(),
     message :: binary(),

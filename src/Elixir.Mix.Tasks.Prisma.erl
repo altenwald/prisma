@@ -13,6 +13,8 @@ Runs Prisma hybrid type and discrepancy analysis on compiled BEAM files.
   * `--format` - Output format: `human` (default), `oneline`, or `json`
   * `--no-color` - Disables ANSI color sequences in output
   * `--color` - Forces ANSI color output
+  * `--no-warnings` - Shows only errors (a warning is something the code handles, or that may fail on another system)
+  * `--warnings-as-errors` - Fails on warnings too (by default only errors fail)
   * `--no-oxbow` - Disables oxbow (dead/unreachable code and unused clauses) analysis
   * `--oxbow` - Enables oxbow analysis (default: enabled)
   * `--pplt <path>` - Path to extra `.pplt` files (can be repeated)
@@ -92,21 +94,18 @@ run(RawArgs) ->
     Opts = Merged#{pplts => CombinedPplts},
     Root = maps:get(root, Opts, "."),
     Dirs = resolve_ebin_dirs(maps:get(targets, Opts, []), Opts),
-    Format = maps:get(format, Opts, human),
     case prisma:analyze_dirs(Dirs, Opts#{project_root => Root}) of
-        {ok, []} ->
-            case Format of
-                json -> io:format("[]~n");
-                _ ->
-                    UseColor = prisma_checker:should_color(Opts),
-                    Msg = prisma_checker:colorize("Prisma: 0 warnings found.", "\e[1;32m", UseColor),
-                    io:format("~ts~n", [Msg])
-            end,
-            ok;
         {ok, Warnings} ->
-            Formatted = prisma_checker:format_warnings(Warnings, Opts),
-            io:format("~ts~n", [Formatted]),
-            erlang:halt(1);
+            Report = prisma_checker:report(Warnings, Opts),
+            io:put_chars(maps:get(output, Report)),
+            case maps:get(unchecked, Report) of
+                0 -> ok;
+                N -> io:format(standard_error, "prisma: ~B branches that depend on the system were not checked~n", [N])
+            end,
+            case maps:get(failed, Report) of
+                true -> erlang:halt(1);
+                false -> ok
+            end;
         {error, Reason} ->
             io:format(standard_error, "Prisma error: ~p~n", [Reason]),
             erlang:halt(1)
@@ -168,6 +167,10 @@ parse_args_loop(["--env", EnvStr | Rest], Acc) ->
     parse_args_loop(Rest, Acc#{env => EnvStr});
 parse_args_loop(["--format", Fmt | Rest], Acc) ->
     parse_args_loop(Rest, Acc#{format => parse_format(Fmt)});
+parse_args_loop(["--no-warnings" | Rest], Acc) ->
+    parse_args_loop(Rest, Acc#{no_warnings => true});
+parse_args_loop(["--warnings-as-errors" | Rest], Acc) ->
+    parse_args_loop(Rest, Acc#{warnings_as_errors => true});
 parse_args_loop(["--no-oxbow" | Rest], Acc) ->
     parse_args_loop(Rest, Acc#{oxbow => false});
 parse_args_loop(["--oxbow" | Rest], Acc) ->

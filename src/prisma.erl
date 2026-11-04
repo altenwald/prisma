@@ -219,25 +219,19 @@ main(["check" | Rest]) ->
             ok
     end,
     Targets = maps:get(targets, Opts, []),
-    Format = maps:get(format, Opts, human),
     Result = case Targets of
         [] -> analyze_project(".", Opts);
         _ -> analyze_dirs(Targets, Opts#{project_root => "."})
     end,
     case Result of
-        {ok, []} ->
-            case Format of
-                json -> io:format("[]~n");
-                _ ->
-                    UseColor = prisma_checker:should_color(Opts),
-                    Msg = prisma_checker:colorize("Prisma: 0 warnings found.", "\e[1;32m", UseColor),
-                    io:format("~ts~n", [Msg])
-            end,
-            erlang:halt(0);
         {ok, Warnings} ->
-            Formatted = prisma_checker:format_warnings(Warnings, Opts),
-            io:format("~ts~n", [Formatted]),
-            erlang:halt(1);
+            Report = prisma_checker:report(Warnings, Opts),
+            io:put_chars(maps:get(output, Report)),
+            case maps:get(unchecked, Report) of
+                0 -> ok;
+                N -> io:format(standard_error, "prisma: ~B branches that depend on the system were not checked~n", [N])
+            end,
+            erlang:halt(case maps:get(failed, Report) of true -> 1; false -> 0 end);
         {error, Reason} ->
             io:format(standard_error, "Prisma check failed: ~p~n", [Reason]),
             erlang:halt(1)
@@ -248,7 +242,7 @@ main(_) ->
         "  prisma version~n"
         "  prisma build~n"
         "  prisma build --output <file.pplt> <ebin_or_beam...>~n"
-        "  prisma check [--mode <hybrid|gradual|discrepancy>] [--format <human|pretty|oneline|json>] [--no-color] [--color] [--show-handled] [--pplt <file.pplt>...] [<ebin_or_beam...>]~n"
+        "  prisma check [--mode <hybrid|gradual|discrepancy>] [--format <human|pretty|oneline|json>] [--no-color] [--color] [--no-warnings] [--warnings-as-errors] [--pplt <file.pplt>...] [<ebin_or_beam...>]~n"
     ),
     erlang:halt(1).
 
@@ -271,8 +265,10 @@ parse_check_opts_loop(["--format", Fmt | Rest], Acc) ->
     parse_check_opts_loop(Rest, Acc#{format => parse_format(Fmt)});
 parse_check_opts_loop(["--no-oxbow" | Rest], Acc) ->
     parse_check_opts_loop(Rest, Acc#{oxbow => false});
-parse_check_opts_loop(["--show-handled" | Rest], Acc) ->
-    parse_check_opts_loop(Rest, Acc#{show_handled => true});
+parse_check_opts_loop(["--no-warnings" | Rest], Acc) ->
+    parse_check_opts_loop(Rest, Acc#{no_warnings => true});
+parse_check_opts_loop(["--warnings-as-errors" | Rest], Acc) ->
+    parse_check_opts_loop(Rest, Acc#{warnings_as_errors => true});
 parse_check_opts_loop(["--oxbow" | Rest], Acc) ->
     parse_check_opts_loop(Rest, Acc#{oxbow => true});
 parse_check_opts_loop(["--no-color" | Rest], Acc) ->

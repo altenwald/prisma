@@ -19,9 +19,7 @@ COMPILER_FAILS = re.compile(r"failed|eval_failure|nomatch|never|no_clause|bad_")
 
 
 def prisma(directory):
-    # MUT_SHOW_HANDLED=1 also counts the calls that a `try` catching every error protects (`handled_undef`): off by default, as for a user
-    extra = ["--show-handled"] if os.environ.get("MUT_SHOW_HANDLED") else []
-    out = subprocess.run([adapters.PRISMA, "check", "--format", "json", "--no-color", "--no-oxbow", *extra, directory],
+    out = subprocess.run([adapters.PRISMA, "check", "--format", "json", "--no-color", "--no-oxbow", directory],
                          capture_output=True, text=True)
     try:
         # the type found is part of the key: a mutation that changes what an already warned line returns is a new finding

@@ -545,7 +545,12 @@ infer_expr(Mod, MFA, {'case', Anno, Scrutinee, Clauses}, Env0, Contracts, Warns0
                 infer_case(Mod, MFA, Anno, ScrutType, Marked, Env1, Contracts, Warns1, Sites1),
             New = lists:sublist(Warns2, length(Warns2) - length(Warns1)),
             Kept = [W || W <- New, W#prisma_warning.kind =/= dead_code],
-            {Type, EnvOut, Kept ++ Warns1, Sites2}
+            %% What is not checked is counted (one note per case), not reported: it would be judged with the API of this OTP
+            Note = case [C || {clause, _, _, _, [{'$env_branch', _, Body, _}]} = C <- Marked, contains_remote_call(Body)] of
+                [] -> [];
+                _ -> [make_warning(system_branch, MFA, Anno, <<"Branches that depend on the system were not checked">>)]
+            end,
+            {Type, EnvOut, Note ++ Kept ++ Warns1, Sites2}
     end;
 %% The body of a branch of a case on the system, marked by `mark_clauses/2`.
 infer_expr(Mod, MFA, {'$env_branch', _, Body, Status}, Env, Contracts, Warns0, Sites0) ->
@@ -613,6 +618,11 @@ infer_expr(Mod, MFA, {record_field, _, Expr, _Name, _Field}, Env, Contracts, War
     {any, Env, Warns, Sites};
 infer_expr(_Mod, _MFA, _Other, Env, _Contracts, Warns, Sites) ->
     {any, Env, Warns, Sites}.
+
+contains_remote_call({call, _, {remote, _, _, _}, _}) -> true;
+contains_remote_call(T) when is_tuple(T) -> lists:any(fun contains_remote_call/1, tuple_to_list(T));
+contains_remote_call(L) when is_list(L) -> lists:any(fun contains_remote_call/1, L);
+contains_remote_call(_) -> false.
 
 %% The value of an expression that only looks at the system that runs the analysis, or `unknown`: the OTP release, the comparisons and
 %% boolean operators over it, and `function_exported/3` of a module that can be loaded here.

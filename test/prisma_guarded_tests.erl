@@ -26,7 +26,13 @@ kinds(Body, Opts) ->
     Callee = compile_forms("guard_callee", "-export([present/0]).\npresent() -> ok.\n"),
     Caller = compile_forms("guard_caller", "-export([f/0]).\nf() ->\n" ++ Body ++ ".\n"),
     {ok, Ws} = prisma:analyze_beams([Callee, Caller], Opts#{mode => discrepancy, oxbow => false}),
-    lists:sort([K || #prisma_warning{kind = K} <- Ws]).
+    lists:sort([K || #prisma_warning{kind = K} <- Ws, K =/= system_branch]).
+
+notes(Body) ->
+    Callee = compile_forms("guard_callee", "-export([present/0]).\npresent() -> ok.\n"),
+    Caller = compile_forms("guard_caller", "-export([f/0]).\nf() ->\n" ++ Body ++ ".\n"),
+    {ok, Ws} = prisma:analyze_beams([Callee, Caller], #{mode => discrepancy, oxbow => false}),
+    [K || #prisma_warning{kind = K} <- Ws, K =:= system_branch].
 
 a_call_to_a_missing_function_is_reported_test() ->
     ?assertEqual([unknown_function], kinds("    guard_callee:missing(1)")).
@@ -61,13 +67,14 @@ try_that_catches_undef_protects_the_call_test() ->
     ?assertEqual([], kinds("    try guard_callee:missing(1) catch error:undef -> ok end")),
     ?assertEqual([], kinds("    try guard_callee:missing(1) catch _:undef -> ok end")).
 
-try_that_catches_everything_is_not_an_error_but_can_be_asked_for_test() ->
+try_that_catches_everything_is_a_warning_not_an_error_test() ->
     Body = "    try guard_callee:missing(1) catch error:_ -> ok end",
-    ?assertEqual([], kinds(Body)),
-    ?assertEqual([handled_undef], kinds(Body, #{show_handled => true})),
-    ?assertEqual([handled_undef], kinds("    try guard_callee:missing(1) catch _:_ -> ok end", #{show_handled => true})),
+    ?assertEqual([handled_undef], kinds(Body)),
+    ?assertEqual([handled_undef], kinds("    try guard_callee:missing(1) catch _:_ -> ok end")),
+    ?assertEqual(warning, prisma_checker:severity(handled_undef)),
+    ?assertEqual(error, prisma_checker:severity(unknown_function)),
     %% an explicit `error:undef` is the author saying so: nothing to show
-    ?assertEqual([], kinds("    try guard_callee:missing(1) catch error:undef -> ok end", #{show_handled => true})).
+    ?assertEqual([], kinds("    try guard_callee:missing(1) catch error:undef -> ok end")).
 
 try_that_does_not_catch_an_error_does_not_protect_the_call_test() ->
     ?assertEqual([unknown_function], kinds("    try guard_callee:missing(1) catch throw:_ -> ok end")),
@@ -116,3 +123,41 @@ function_exported_is_decided_when_the_module_is_known_test() ->
     ?assertEqual([], kinds(env_case("erlang:function_exported(lists, nope, 0)", "guard_callee:missing(1)", "ok"))),
     ?assertEqual([unknown_function],
                  kinds(env_case("erlang:function_exported(lists, nope, 0)", "ok", "guard_callee:missing(1)"))).
+
+
+%% What depends on the system and is not taken here is not checked (it would be judged with the API of this OTP, not the one it is for):
+%% it is counted, not reported.
+a_branch_that_is_not_taken_is_counted_not_reported_test() ->
+    Body = "    case erlang:system_info(otp_release) of\n"
+           "        \"1\" -> guard_callee:missing(1);\n"
+           "        _ -> ok\n"
+           "    end",
+    ?assertEqual([], kinds(Body)),
+    ?assertEqual([system_branch], notes(Body)),
+    ?assertEqual(note, prisma_checker:severity(system_branch)),
+    %% nothing to check in it: nothing to count
+    NoCall = "    case erlang:system_info(otp_release) of\n        \"1\" -> ok;\n        _ -> ok\n    end",
+    ?assertEqual([], notes(NoCall)),
+    %% a branch that is taken here is checked, so it is not counted
+    Taken = "    case erlang:system_info(otp_release) of\n        \"" ++ release() ++ "\" -> guard_callee:missing(1);\n        _ -> ok\n    end",
+    ?assertEqual([], notes(Taken)).
+
+%% What a command prints and whether it fails: errors fail, warnings do not unless asked, notes are only counted.
+report_levels_test() ->
+    Mk = fun(Kind) -> #prisma_warning{kind = Kind, mfa = {m, f, 0}, line = 1, message = <<"x">>} end,
+    All = [Mk(discrepancy), Mk(handled_undef), Mk(system_branch), Mk(system_branch)],
+    R1 = prisma_checker:report(All, #{}),
+    ?assertMatch(#{failed := true, errors := 1, warnings := 1, unchecked := 2}, R1),
+    R2 = prisma_checker:report([Mk(handled_undef)], #{}),
+    ?assertMatch(#{failed := false, errors := 0, warnings := 1}, R2),
+    R3 = prisma_checker:report([Mk(handled_undef)], #{warnings_as_errors => true}),
+    ?assertMatch(#{failed := true}, R3),
+    R4 = prisma_checker:report([Mk(discrepancy), Mk(handled_undef)], #{no_warnings => true}),
+    ?assertMatch(#{failed := true, errors := 1, warnings := 0}, R4),
+    ?assertEqual(nomatch, string:find(iolist_to_binary(maps:get(output, R4)), "handled_undef")),
+    ?assertMatch(#{failed := false, errors := 0, warnings := 0}, prisma_checker:report([], #{})).
+
+cli_options_for_warnings_test() ->
+    ?assertMatch(#{no_warnings := true}, prisma:parse_check_opts(["--no-warnings"])),
+    ?assertMatch(#{warnings_as_errors := true}, prisma:parse_check_opts(["--warnings-as-errors"])),
+    ?assertNot(maps:is_key(show_handled, prisma:parse_check_opts(["--show-handled"]))).

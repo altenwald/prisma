@@ -10,11 +10,51 @@
     check_pplt/3,
     format_warning/1,
     format_warning/2,
+    severity/1,
+    report/2,
     format_warnings/1,
     format_warnings/2,
     should_color/1,
     colorize/3
 ]).
+
+%% The kind as it is written in the text formats: a warning says so, an error is just its kind.
+kind_label(Kind) ->
+    case severity(Kind) of
+        warning -> "warning: " ++ atom_to_list(Kind);
+        _ -> atom_to_list(Kind)
+    end.
+
+%% @doc How sure Prisma is of a warning: `error` (it fails when it runs), `warning` (the code handles it, or it may fail on another system)
+%% or `note` (something that was not checked: it is counted and not listed).
+-spec severity(atom()) -> error | warning | note.
+severity(handled_undef) -> warning;
+severity(system_branch) -> note;
+severity(_) -> error.
+
+%% @doc What a command prints and whether it fails. Errors fail; warnings do not unless `warnings_as_errors`, and `no_warnings` leaves
+%% them out; notes are only counted (`unchecked`). `output` is what goes to stdout and `unchecked` what the caller says on stderr.
+-spec report([#prisma_warning{}], map()) ->
+    #{output := iodata(), failed := boolean(), errors := non_neg_integer(), warnings := non_neg_integer(), unchecked := non_neg_integer()}.
+report(All, Opts) ->
+    Unchecked = length([W || W <- All, severity(W#prisma_warning.kind) =:= note]),
+    Errors = [W || W <- All, severity(W#prisma_warning.kind) =:= error],
+    Warnings = case maps:get(no_warnings, Opts, false) of
+        true -> [];
+        false -> [W || W <- All, severity(W#prisma_warning.kind) =:= warning]
+    end,
+    Shown = [W || W <- All, lists:member(W, Errors) orelse lists:member(W, Warnings)],
+    Output = case Shown of
+        [] ->
+            case maps:get(format, Opts, human) of
+                json -> <<"[]\n">>;
+                _ -> [colorize("Prisma: 0 warnings found.", "\e[1;32m", should_color(Opts)), $\n]
+            end;
+        _ ->
+            [format_warnings(Shown, Opts), $\n]
+    end,
+    Failed = Errors =/= [] orelse (maps:get(warnings_as_errors, Opts, false) andalso Warnings =/= []),
+    #{output => Output, failed => Failed, errors => length(Errors), warnings => length(Warnings), unchecked => Unchecked}.
 
 %% @doc Analyzes all modules in `TargetPplt` against `DepsPplt` in hybrid mode.
 -spec check_pplt(#prisma_pplt{}, #prisma_pplt{}) -> [#prisma_warning{}].
@@ -25,16 +65,12 @@ check_pplt(TargetPplt, DepsPplt) ->
 -spec check_pplt(#prisma_pplt{}, #prisma_pplt{}, map()) -> [#prisma_warning{}].
 check_pplt(#prisma_pplt{modules = TargetMods} = TargetPplt, DepsPplt, Opts) ->
     CombinedPplt = prisma_pplt:merge(DepsPplt, TargetPplt),
-    Warnings = lists:flatmap(
+    lists:flatmap(
         fun({_Mod, Summary}) ->
             check_module(Summary, CombinedPplt, Opts)
         end,
         lists:sort(maps:to_list(TargetMods))
-    ),
-    case maps:get(show_handled, Opts, false) of
-        true -> Warnings;
-        false -> [W || W <- Warnings, W#prisma_warning.kind =/= handled_undef]
-    end.
+    ).
 
 %% @doc Analyzes a `#module_summary{}` in hybrid mode.
 -spec check_module(#module_summary{}, #prisma_pplt{}) -> [#prisma_warning{}].
@@ -123,7 +159,7 @@ check_remote_discrepancy_call({CallerMod, _, _} = CallerMFA, Line, {CalleeMod, _
     end.
 
 %% A missing function that the code protects with a `try`: `error:undef` is the author saying so; a catch of every error also handles it, but would
-%% hide a misspelled name for good, so it is a warning of its own (`handled_undef`) that is only shown when asked for.
+%% hide a misspelled name for good, so it is a warning of its own (`handled_undef`), not an error for.
 handled(undef_handled, _Warnings) -> [];
 handled(any_handled, Warnings) ->
     [W#prisma_warning{kind = handled_undef,
@@ -418,7 +454,7 @@ format_human(#prisma_warning{
         <<"Elixir.", _/binary>> -> elixir;
         _ -> erlang
     end,
-    KindStr = atom_to_list(Kind),
+    KindStr = kind_label(Kind),
     KindColor = case Kind of
         discrepancy -> "\e[1;31m";       %% bold red
         dead_code -> "\e[1;33m";         %% bold yellow
@@ -487,7 +523,7 @@ format_oneline(#prisma_warning{
         <<"Elixir.", _/binary>> -> elixir;
         _ -> erlang
     end,
-    Tag = colorize("[" ++ atom_to_list(Kind) ++ "]", "\e[1m", Color),
+    Tag = colorize("[" ++ kind_label(Kind) ++ "]", "\e[1m", Color),
     SourcePrefix = case File of
         undefined -> CleanMod;
         _ -> File
@@ -532,6 +568,7 @@ encode_warning_json(#prisma_warning{
     Base = [
         <<"  {\n">>,
         <<"    \"kind\": \"">>, atom_to_binary(Kind, utf8), <<"\",\n">>,
+        <<"    \"severity\": \"">>, atom_to_binary(severity(Kind), utf8), <<"\",\n">>,
         <<"    \"module\": \"">>, json_escape(CleanMod), <<"\",\n">>,
         <<"    \"function\": \"">>, json_escape(atom_to_list(Fun)), <<"\",\n">>,
         <<"    \"arity\": ">>, integer_to_binary(Arity), <<",\n">>,

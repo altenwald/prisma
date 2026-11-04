@@ -28,8 +28,8 @@ extract_and_portable_pplt_test() ->
     TmpPltFile = "/tmp/prisma_dev/test_out.pplt",
     {ok, BuiltPplt} = prisma:build([EbinDir], TmpPltFile),
     ?assert(lists:member(prisma, prisma_pplt:modules(BuiltPplt))),
-    ?assertMatch({ok, []}, prisma:analyze_dirs([EbinDir], #{pplts => [TmpPltFile]})),
-    ?assertMatch({ok, []}, prisma:analyze_dirs([BeamFile])),
+    ?assertEqual([], listed(prisma:analyze_dirs([EbinDir], #{pplts => [TmpPltFile]}))),
+    ?assertEqual([], listed(prisma:analyze_dirs([BeamFile]))),
     file:delete(TmpPltFile),
 
     ?assertMatch({error, _}, prisma_pplt:load("/nonexistent.pplt")),
@@ -273,3 +273,6 @@ cli_mode_option_test() ->
     ?assertNot(maps:is_key(mode, prisma:parse_check_opts(["ebin"]))),
     %% a value that is not a mode is an error, not a path and not hybrid
     ?assertMatch(#{error := {bad_mode, "fast"}}, prisma:parse_check_opts(["--mode", "fast"])).
+
+%% What Prisma lists of its own code: the notes (branches that depend on the system, which it has in the Mix task) are counted, not warnings.
+listed({ok, Ws}) -> [W || W <- Ws, prisma_checker:severity(W#prisma_warning.kind) =/= note].

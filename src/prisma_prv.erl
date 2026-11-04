@@ -18,6 +18,8 @@
     {color, undefined, "color", boolean, "Force ANSI colors"},
     {no_oxbow, undefined, "no-oxbow", boolean, "Disable oxbow code detection"},
     {oxbow, undefined, "oxbow", boolean, "Enable oxbow code detection"},
+    {no_warnings, undefined, "no-warnings", boolean, "Show only errors"},
+    {warnings_as_errors, undefined, "warnings-as-errors", boolean, "Fail on warnings too"},
     {pplt, undefined, "pplt", string, "Path to .pplt file (can be specified multiple times)"}
 ]).
 
@@ -73,20 +75,17 @@ build(Root, State) ->
 
 analyze(EbinDirs, Opts, State) ->
     case prisma:analyze_dirs(EbinDirs, Opts) of
-        {ok, []} ->
-            case maps:get(format, Opts, human) of
-                json ->
-                    io:format("[]~n");
-                _ ->
-                    UseColor = prisma_checker:should_color(Opts),
-                    Msg = prisma_checker:colorize("Prisma: 0 warnings found.", "\e[1;32m", UseColor),
-                    io:format("~ts~n", [Msg])
-            end,
-            {ok, State};
         {ok, Warnings} ->
-            Formatted = prisma_checker:format_warnings(Warnings, Opts),
-            io:format("~ts~n", [Formatted]),
-            {error, format_error({warnings_found, length(Warnings)})};
+            Report = prisma_checker:report(Warnings, Opts),
+            io:put_chars(maps:get(output, Report)),
+            case maps:get(unchecked, Report) of
+                0 -> ok;
+                N -> io:format(standard_error, "prisma: ~B branches that depend on the system were not checked~n", [N])
+            end,
+            case maps:get(failed, Report) of
+                true -> {error, format_error({warnings_found, maps:get(errors, Report) + maps:get(warnings, Report)})};
+                false -> {ok, State}
+            end;
         {error, Reason} ->
             {error, format_error(Reason)}
     end.
@@ -148,6 +147,8 @@ parse_cli_args(Args) ->
             (no_color, Acc) -> Acc#{color => never};
             ({color, true}, Acc) -> Acc#{color => always};
             (color, Acc) -> Acc#{color => always};
+            ({no_warnings, true}, Acc) -> Acc#{no_warnings => true};
+            ({warnings_as_errors, true}, Acc) -> Acc#{warnings_as_errors => true};
             ({no_oxbow, true}, Acc) -> Acc#{oxbow => false};
             (no_oxbow, Acc) -> Acc#{oxbow => false};
             ({oxbow, true}, Acc) -> Acc#{oxbow => true};
