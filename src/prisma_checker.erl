@@ -230,6 +230,8 @@ unproven_gap({union, Members}, Expected) ->
     lists:all(fun(M) -> accepts(M, Expected) end, Members);
 unproven_gap(Actual, {union, Members}) ->
     lists:any(fun(M) -> unproven_gap(Actual, M) end, Members);
+unproven_gap({tuple, As}, {tuple, Es}) when length(As) =:= length(Es) ->
+    lists:all(fun({A, E}) -> accepts(A, E) end, lists:zip(As, Es));
 unproven_gap(integer, Expected) ->
     narrower_integer(Expected);
 unproven_gap(number, Expected) ->

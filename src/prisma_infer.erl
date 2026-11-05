@@ -10,7 +10,8 @@
 -export([
     infer_module_functions/3,
     check_call_site/4,
-    declared_return/2
+    declared_return/2,
+    extract_leex_token_map/2
 ]).
 
 -ifdef(TEST).
@@ -26,8 +27,31 @@
     #{mfa_key() => #func_contract{}}
 ) -> #{mfa_key() => #func_contract{}}.
 infer_module_functions(Mod, ClausesMap, InitialContracts) ->
-    Own = [MFA || MFA <- maps:keys(InitialContracts), maps:is_key(MFA, ClausesMap)],
-    fixpoint_loop(Mod, ClausesMap, InitialContracts, 1, Own, callers_of(Mod, ClausesMap, Own)).
+    IsLeex = maps:is_key({Mod, yyaction, 5}, ClausesMap) andalso maps:is_key({Mod, yystate, 7}, ClausesMap),
+    IsYecc = maps:is_key({Mod, yeccpars0, 5}, ClausesMap) andalso maps:is_key({Mod, yeccpars1, 7}, ClausesMap),
+    Own = [MFA || MFA <- maps:keys(InitialContracts),
+                  maps:is_key(MFA, ClausesMap),
+                  not is_skipped_table_func(Mod, MFA, IsLeex, IsYecc)],
+    Contracts1 = fixpoint_loop(Mod, ClausesMap, InitialContracts, 1, Own, callers_of(Mod, ClausesMap, InitialContracts, Own)),
+    Contracts2 = case IsLeex of
+        true -> refine_leex_contracts(Mod, Contracts1);
+        false -> Contracts1
+    end,
+    case IsYecc of
+        true -> refine_yecc_contracts(Mod, ClausesMap, Contracts2);
+        false -> Contracts2
+    end.
+
+is_skipped_table_func(Mod, {Mod, yystate, 7}, true, _IsYecc) ->
+    true;
+is_skipped_table_func(Mod, {Mod, F, 7}, _IsLeex, true) ->
+    case atom_to_binary(F, utf8) of
+        <<"yeccpars2", _/binary>> -> true;
+        <<"yeccgoto_", _/binary>> -> true;
+        _ -> false
+    end;
+is_skipped_table_func(_Mod, _MFA, _IsLeex, _IsYecc) ->
+    false.
 
 %% Each pass infers again only the functions that may give another answer: the first one all of them, then those that call (or are) a
 %% function whose type changed in the last pass. The others would give the same type, warnings and call sites as they have: the inference of a
@@ -55,12 +79,18 @@ fixpoint_loop(Mod, ClausesMap, Contracts, Pass, Dirty, Callers) ->
 
 %% For each function of the module, the functions of the module that call it. Every call that looks like one counts, wherever it is
 %% (a fun, a try, a comprehension...): a call that is not made does no harm, and one that is missed would leave a type out of date.
-callers_of(Mod, ClausesMap, Own) ->
+callers_of(Mod, ClausesMap, Contracts, Own) ->
     OwnSet = maps:from_list([{MFA, true} || MFA <- Own]),
     lists:foldl(
         fun(Caller, Acc) ->
-            {_Line, Clauses} = maps:get(Caller, ClausesMap),
-            Callees = lists:usort([C || C <- called(Mod, Clauses), maps:is_key(C, OwnSet)]),
+            RawCalls = case maps:find(Caller, Contracts) of
+                {ok, #func_contract{calls = [_ | _] = PreCalls}} ->
+                    PreCalls;
+                _ ->
+                    {_Line, Clauses} = maps:get(Caller, ClausesMap),
+                    called(Mod, Clauses)
+            end,
+            Callees = lists:usort([C || C <- RawCalls, maps:is_key(C, OwnSet)]),
             lists:foldl(fun(Callee, A) -> A#{Callee => [Caller | maps:get(Callee, A, [])]} end, Acc, Callees)
         end,
         #{},
@@ -457,12 +487,8 @@ apply_guard_bif(_, _, Env, _Contracts) ->
     {ok, Env}.
 
 refine_record_with_size(V, Tag, Size, Env) when is_integer(Size), Size >= 1 ->
-    RecordType = {record, Tag, []},
     TupleType = {tuple, [{atom_lit, Tag} | lists:duplicate(Size - 1, any)]},
-    case refine_var(V, RecordType, Env) of
-        unreachable -> unreachable;
-        {ok, Env1} -> refine_var(V, TupleType, Env1)
-    end;
+    refine_var(V, TupleType, Env);
 refine_record_with_size(V, Tag, _Size, Env) ->
     refine_var(V, {record, Tag, []}, Env).
 
@@ -1001,12 +1027,6 @@ infer_binop(_MFA, _Anno, Op, _LAst, LType, _RAst, RType, Env, Warns, Sites)
 infer_binop(_MFA, _Anno, _Op, _LAst, _LType, _RAst, _RType, Env, Warns, Sites) ->
     {boolean, Env, Warns, Sites}.
 
-eval_relop(Op, {union, Members}, RType) ->
-    ResList = [eval_relop(Op, M, RType) || M <- Members],
-    combine_relop_results(ResList);
-eval_relop(Op, LType, {union, Members}) ->
-    ResList = [eval_relop(Op, LType, M) || M <- Members],
-    combine_relop_results(ResList);
 eval_relop(Op, {int_lit, LVal}, {int_lit, RVal}) ->
     bool_to_lit(eval_raw_op(Op, LVal, RVal));
 eval_relop(Op, {atom_lit, LVal}, {atom_lit, RVal}) ->
@@ -1036,14 +1056,6 @@ eval_relop(Op, LType, RType)
     end;
 eval_relop(_Op, _LType, _RType) ->
     boolean.
-
-combine_relop_results([]) -> boolean;
-combine_relop_results(ResList) ->
-    case lists:usort(ResList) of
-        [{atom_lit, true}] -> {atom_lit, true};
-        [{atom_lit, false}] -> {atom_lit, false};
-        _ -> boolean
-    end.
 
 bool_to_lit(true) -> {atom_lit, true};
 bool_to_lit(false) -> {atom_lit, false}.
@@ -1425,21 +1437,59 @@ infer_call(Mod, CallerMFA, Anno, Target, ArgAsts, ArgTypes, Env0, Contracts, War
             end;
         {ok, CalleeMFA} ->
             Sites1 = [site(Env0, Line, CalleeMFA, ArgTypes) | Sites0],
-            case maps:find(CalleeMFA, Contracts) of
-                {ok, #func_contract{inferred_type = {fun_type, ExpectedArgs, Inferred}, declared_specs = Specs}} ->
-                    %% what the callee declares, not what its body happens to give: if the body contradicts the spec the
-                    %% warning belongs to the callee, and its callers are not named for it
-                    RetType = case declared_return(Specs, length(ExpectedArgs)) of
-                        any -> Inferred;
-                        Declared -> Declared
-                    end,
-                    apply_callee_signature(CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, ExpectedArgs, RetType, Env0, Warns0, Sites1,
-                                           Specs =/= []);
+            case maps:find('$yecc_local_clauses', Contracts) of
+                {ok, LocalClauses} when is_map_key(CalleeMFA, LocalClauses) ->
+                    case infer_yecc_helper_call(Mod, CalleeMFA, ArgTypes, LocalClauses, Contracts) of
+                        {ok, HelperRet} ->
+                            {HelperRet, Env0, Warns0, Sites1};
+                        error ->
+                            infer_contract_call(CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites1)
+                    end;
                 _ ->
-                    {any, Env0, Warns0, Sites1}
+                    infer_contract_call(CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites1)
             end;
         dynamic ->
             {any, Env0, Warns0, Sites0}
+    end.
+
+infer_contract_call(CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites1) ->
+    case maps:find(CalleeMFA, Contracts) of
+        {ok, #func_contract{inferred_type = {fun_type, ExpectedArgs, Inferred}, declared_specs = Specs}} ->
+            %% what the callee declares, not what its body happens to give: if the body contradicts the spec the
+            %% warning belongs to the callee, and its callers are not named for it
+            RetType = case declared_return(Specs, length(ExpectedArgs)) of
+                any -> Inferred;
+                Declared -> Declared
+            end,
+            apply_callee_signature(CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, ExpectedArgs, RetType, Env0, Warns0, Sites1,
+                                   Specs =/= []);
+        _ ->
+            {any, Env0, Warns0, Sites1}
+    end.
+
+infer_yecc_helper_call(Mod, CalleeMFA, ArgTypes, LocalClauses, Contracts) ->
+    {_Line, Clauses} = maps:get(CalleeMFA, LocalClauses),
+    SubContracts = Contracts#{'$yecc_local_clauses' => maps:remove(CalleeMFA, LocalClauses)},
+    Rets = lists:filtermap(
+        fun({clause, _, PatArgs, Guards, Body}) ->
+            case bind_patterns(PatArgs, ArgTypes, #{}) of
+                unreachable ->
+                    false;
+                {ok, _PatTypes, CEnv0} ->
+                    case apply_guard_disjunction(Guards, CEnv0, SubContracts) of
+                        unreachable ->
+                            false;
+                        {ok, CEnv1} ->
+                            {Ret, _, _, _} = infer_body(Mod, CalleeMFA, Body, CEnv1, SubContracts, [], []),
+                            {true, Ret}
+                    end
+            end
+        end,
+        Clauses
+    ),
+    case Rets of
+        [] -> error;
+        _ -> {ok, prisma_type:normalize_union(Rets)}
     end.
 
 %% The return type that the specs of a function declare (`any` if there is none or it says nothing). Names that cannot be resolved
@@ -1601,8 +1651,19 @@ bif_return_type(is_function, [TermType, {int_lit, Arity}], _Static, _Contracts) 
                 false -> boolean
             end
     end;
+bif_return_type(element, [{int_lit, N}, TupleType], _Static, _Contracts) when N >= 1 ->
+    tuple_elem_type(N, TupleType);
 bif_return_type(_Bif, _ArgTypes, Static, _Contracts) ->
     Static.
+
+tuple_elem_type(N, {tuple, Elems}) when N >= 1, N =< length(Elems) ->
+    lists:nth(N, Elems);
+tuple_elem_type(1, {record, Tag, _}) ->
+    {atom_lit, Tag};
+tuple_elem_type(N, {union, Members}) ->
+    prisma_type:normalize_union([tuple_elem_type(N, M) || M <- Members]);
+tuple_elem_type(_N, _Other) ->
+    any.
 
 bif_signature(length, 1) -> {ok, [{list, any}], non_neg_integer};
 %% BIFs that always return integers. Arguments are left as `any`: their types are checked against the spec of the BIF elsewhere.
@@ -1629,6 +1690,12 @@ bif_signature(integer_to_binary, 1) -> {ok, [integer], {binary, 0, 8}};
 bif_signature(integer_to_list, 1) -> {ok, [integer], {nonempty_list, {int_range, 0, 255}}};
 bif_signature(binary_to_list, 1) -> {ok, [{binary, 0, 8}], {list, {int_range, 0, 255}}};
 bif_signature(list_to_binary, 1) -> {ok, [{list, any}], {binary, 0, 8}};
+bif_signature(list_to_integer, 1) -> {ok, [{list, any}], integer};
+bif_signature(list_to_integer, 2) -> {ok, [{list, any}, pos_integer], integer};
+bif_signature(list_to_float, 1) -> {ok, [{list, any}], float};
+bif_signature(binary_to_integer, 1) -> {ok, [{binary, 0, 8}], integer};
+bif_signature(binary_to_integer, 2) -> {ok, [{binary, 0, 8}, pos_integer], integer};
+bif_signature(binary_to_float, 1) -> {ok, [{binary, 0, 8}], float};
 bif_signature(element, 2) -> {ok, [pos_integer, any_tuple], any};
 bif_signature(is_integer, 1) -> {ok, [any], boolean};
 bif_signature(is_float, 1) -> {ok, [any], boolean};
@@ -1712,3 +1779,334 @@ update_map_type({union, Members}, NewFields) ->
     prisma_type:normalize_union([update_map_type(M, NewFields) || M <- Members]);
 update_map_type(_, NewFields) ->
     {map, lists:usort(NewFields)}.
+
+%% @doc Extracts `{CategoryAtom => TokenType}` from a leex lexer module's `yyaction/5` contract.
+-spec extract_leex_token_map(module(), #{mfa_key() => #func_contract{}}) -> #{atom() => prisma_type:stype()}.
+extract_leex_token_map(Mod, Contracts) ->
+    case maps:find({Mod, yyaction, 5}, Contracts) of
+        {ok, #func_contract{inferred_type = {fun_type, _, ActionRet}}} ->
+            Tokens = extract_leex_tokens(ActionRet),
+            lists:foldl(
+                fun({tuple, [{atom_lit, Cat} | _]} = Tok, Acc) ->
+                        Prev = maps:get(Cat, Acc, none),
+                        Acc#{Cat => prisma_type:join(Prev, Tok)};
+                   (_, Acc) ->
+                        Acc
+                end,
+                #{},
+                Tokens
+            );
+        _ ->
+            #{}
+    end.
+
+refine_leex_contracts(Mod, Contracts) ->
+    case maps:find({Mod, yyaction, 5}, Contracts) of
+        {ok, #func_contract{inferred_type = {fun_type, _, ActionRet}}} ->
+            case extract_leex_tokens(ActionRet) of
+                [] ->
+                    Contracts;
+                Tokens ->
+                    TokenUnion = prisma_type:widen(prisma_type:normalize_union(Tokens)),
+                    Contracts1 = refine_leex_string_fn({Mod, string, 1}, TokenUnion, Contracts),
+                    refine_leex_string_fn({Mod, string, 2}, TokenUnion, Contracts1)
+            end;
+        _ ->
+            Contracts
+    end.
+
+extract_leex_tokens({union, Members}) ->
+    lists:append([extract_leex_tokens(M) || M <- Members]);
+extract_leex_tokens({tuple, [{atom_lit, Tag}, Token]})
+  when Tag =:= token; Tag =:= end_token ->
+    [Token];
+extract_leex_tokens({tuple, [{atom_lit, Tag}, Token, _Push]})
+  when Tag =:= token; Tag =:= end_token ->
+    [Token];
+extract_leex_tokens(_) ->
+    [].
+
+refine_leex_string_fn(MFA, TokenUnion, Contracts) ->
+    case maps:find(MFA, Contracts) of
+        {ok, #func_contract{inferred_type = {fun_type, Args, Ret0}} = C} ->
+            Ret1 = replace_leex_ok_tokens(Ret0, {list, TokenUnion}),
+            Contracts#{MFA => C#func_contract{inferred_type = {fun_type, Args, Ret1}}};
+        _ ->
+            Contracts
+    end.
+
+replace_leex_ok_tokens({union, Members}, TokenListType) ->
+    prisma_type:normalize_union([replace_leex_ok_tokens(M, TokenListType) || M <- Members]);
+replace_leex_ok_tokens({tuple, [{atom_lit, ok}, _, LocType]}, TokenListType) ->
+    {tuple, [{atom_lit, ok}, TokenListType, LocType]};
+replace_leex_ok_tokens(Other, _TokenListType) ->
+    Other.
+
+refine_yecc_contracts(Mod, ClausesMap, Contracts) ->
+    LeexTokens = maps:get('$leex_tokens', Contracts, #{}),
+    {StateFuncs, GotoFuncs} = collect_yecc_table_funcs(Mod, ClausesMap),
+    AliasMap = build_yecc_alias_map(Mod, ClausesMap, StateFuncs),
+    {ShiftSyms, ShiftPreds, AcceptSet, Reductions} = analyze_yecc_states(StateFuncs, AliasMap),
+    {IncomingSym, Preds, RootGotos} = analyze_yecc_gotos(GotoFuncs, AcceptSet, ShiftSyms, ShiftPreds),
+    case RootGotos of
+        [] ->
+            Contracts;
+        _ ->
+            ActionContracts = Contracts#{'$yecc_local_clauses' => ClausesMap},
+            NtTypes = run_yecc_fixpoint(Mod, ClausesMap, ActionContracts, Reductions, IncomingSym, Preds, LeexTokens, #{}, 1),
+            RootTypes = [maps:get(G, NtTypes, none) || G <- RootGotos],
+            case prisma_type:normalize_union(RootTypes) of
+                RootAstType when RootAstType =/= none, RootAstType =/= any ->
+                    WidenedAst = prisma_type:widen(RootAstType),
+                    Contracts1 = update_yecc_entry({Mod, parse, 1}, WidenedAst, Contracts),
+                    update_yecc_entry({Mod, parse_and_scan, 1}, WidenedAst, Contracts1);
+                _ ->
+                    Contracts
+            end
+    end.
+
+collect_yecc_table_funcs(Mod, ClausesMap) ->
+    maps:fold(
+        fun({M, F, 7}, {_Line, Clauses}, {SAcc, GAcc}) when M =:= Mod ->
+                case atom_to_binary(F, utf8) of
+                    <<"yeccpars2_", Rest/binary>> ->
+                        case string:to_integer(binary_to_list(Rest)) of
+                            {StateNum, ""} when is_integer(StateNum) ->
+                                {[{F, StateNum, Clauses} | SAcc], GAcc};
+                            _ ->
+                                {SAcc, GAcc}
+                        end;
+                    <<"yeccgoto_", _/binary>> ->
+                        {SAcc, [{F, Clauses} | GAcc]};
+                    _ ->
+                        {SAcc, GAcc}
+                end;
+           (_, _, Acc) ->
+                Acc
+        end,
+        {[], []},
+        ClausesMap
+    ).
+
+build_yecc_alias_map(Mod, ClausesMap, StateFuncs) ->
+    Base = maps:from_list([{F, [S]} || {F, S, _} <- StateFuncs]),
+    FromDispatch = case maps:find({Mod, yeccpars2, 7}, ClausesMap) of
+        {ok, {_, DispatchClauses}} ->
+            lists:foldl(
+                fun({clause, _, [Arg1 | _], _, [{call, _, {atom, _, TargetFn}, _}]}, Acc) ->
+                        case extract_yecc_state_int(Arg1) of
+                            {ok, StateInt} ->
+                                Cur = maps:get(TargetFn, Acc, []),
+                                Acc#{TargetFn => lists:usort([StateInt | Cur])};
+                            error ->
+                                Acc
+                        end;
+                   (_, Acc) ->
+                        Acc
+                end,
+                Base,
+                DispatchClauses
+            );
+        error ->
+            Base
+    end,
+    lists:foldl(
+        fun({F, _S, Clauses}, Acc) ->
+            case lists:last(Clauses) of
+                {clause, _, [{var, _, _}, {var, _, _} | _], _, [{call, _, {atom, _, DelegatedFn}, _}]} ->
+                    case atom_to_binary(DelegatedFn, utf8) of
+                        <<"yeccpars2_", _/binary>> ->
+                            FStates = maps:get(F, Acc, []),
+                            DStates = maps:get(DelegatedFn, Acc, []),
+                            Acc#{DelegatedFn => lists:usort(FStates ++ DStates)};
+                        _ ->
+                            Acc
+                    end;
+                _ ->
+                    Acc
+            end
+        end,
+        FromDispatch,
+        StateFuncs
+    ).
+
+extract_yecc_state_int({integer, _, N}) -> {ok, N};
+extract_yecc_state_int({match, _, {integer, _, N}, _}) -> {ok, N};
+extract_yecc_state_int({match, _, _, {integer, _, N}}) -> {ok, N};
+extract_yecc_state_int(_) -> error.
+
+analyze_yecc_states(StateFuncs, AliasMap) ->
+    lists:foldl(
+        fun({F, StateNum, Clauses}, {SymAcc0, PredAcc0, AccSet0, RedAcc0}) ->
+            CallerStates = maps:get(F, AliasMap, [StateNum]),
+            lists:foldl(
+                fun({clause, _, [_, {atom, _, '$end'} | _], _, [{tuple, _, [{atom, _, ok}, _]}]},
+                    {SymAcc, PredAcc, AccSet, RedAcc}) ->
+                        {SymAcc, PredAcc, AccSet#{F => true}, RedAcc};
+                   ({clause, _, [_, {atom, _, Terminal} | _], _, [{call, _, {atom, _, yeccpars1}, [_, {integer, _, ToState} | _]}]},
+                    {SymAcc, PredAcc, AccSet, RedAcc}) ->
+                        PrevPreds = maps:get(ToState, PredAcc, []),
+                        {SymAcc#{ToState => {terminal, Terminal}},
+                         PredAcc#{ToState => lists:usort(CallerStates ++ PrevPreds)},
+                         AccSet,
+                         RedAcc};
+                   ({clause, _, _, _, Body}, {SymAcc, PredAcc, AccSet, RedAcc}) ->
+                        case extract_yecc_reduction(Body) of
+                            {ok, ActionFn, GotoFn} ->
+                                {SymAcc, PredAcc, AccSet, [{StateNum, ActionFn, GotoFn} | RedAcc]};
+                            error ->
+                                {SymAcc, PredAcc, AccSet, RedAcc}
+                        end
+                end,
+                {SymAcc0, PredAcc0, AccSet0, RedAcc0},
+                Clauses
+            )
+        end,
+        {#{}, #{}, #{}, []},
+        StateFuncs
+    ).
+
+extract_yecc_reduction(Body) ->
+    Actions = [ActionFn || {match, _, _, {call, _, {atom, _, ActionFn}, _}} <- Body],
+    case {Actions, lists:last(Body)} of
+        {[ActionFn | _], {call, _, {atom, _, GotoFn}, _}} ->
+            case atom_to_binary(GotoFn, utf8) of
+                <<"yeccgoto_", _/binary>> -> {ok, ActionFn, GotoFn};
+                _ -> error
+            end;
+        _ ->
+            error
+    end.
+
+analyze_yecc_gotos(GotoFuncs, AcceptSet, ShiftSyms, ShiftPreds) ->
+    lists:foldl(
+        fun({GotoFn, Clauses}, {SymAcc0, PredAcc0, RootAcc0}) ->
+            lists:foldl(
+                fun({clause, _, [Arg1 | _], _, [{call, _, {atom, _, TargetFn}, _}]}, {SymAcc, PredAcc, RootAcc}) ->
+                        RootAcc1 = case maps:is_key(TargetFn, AcceptSet) of
+                            true -> lists:usort([GotoFn | RootAcc]);
+                            false -> RootAcc
+                        end,
+                        case {extract_yecc_state_int(Arg1), parse_yeccpars2_state(TargetFn)} of
+                            {{ok, FromState}, {ok, ToState}} ->
+                                PrevPreds = maps:get(ToState, PredAcc, []),
+                                {SymAcc#{ToState => {nonterminal, GotoFn}},
+                                 PredAcc#{ToState => lists:usort([FromState | PrevPreds])},
+                                 RootAcc1};
+                            _ ->
+                                {SymAcc, PredAcc, RootAcc1}
+                        end;
+                   (_, Acc) ->
+                        Acc
+                end,
+                {SymAcc0, PredAcc0, RootAcc0},
+                Clauses
+            )
+        end,
+        {ShiftSyms, ShiftPreds, []},
+        GotoFuncs
+    ).
+
+parse_yeccpars2_state(Fn) ->
+    case atom_to_binary(Fn, utf8) of
+        <<"yeccpars2_", Rest/binary>> ->
+            case string:to_integer(binary_to_list(Rest)) of
+                {N, ""} when is_integer(N) -> {ok, N};
+                _ -> error
+            end;
+        _ ->
+            error
+    end.
+
+run_yecc_fixpoint(_Mod, _ClausesMap, _Contracts, _Reductions, _IncomingSym, _Preds, _LeexTokens, NtTypes, Pass)
+  when Pass > 6 ->
+    NtTypes;
+run_yecc_fixpoint(Mod, ClausesMap, Contracts, Reductions, IncomingSym, Preds, LeexTokens, NtTypes0, Pass) ->
+    NtTypes1 = lists:foldl(
+        fun({StateNum, ActionFn, GotoFn}, Acc) ->
+            case maps:find({Mod, ActionFn, 1}, ClausesMap) of
+                {ok, {_, [{clause, _, [{var, _, StackVar}], [],
+                           [{match, _, ConsPat, {var, _, StackVar}}, {cons, _, ResultExpr, _}]}]}} ->
+                    PopVars = extract_cons_vars(ConsPat),
+                    case build_yecc_stack_env([StateNum], PopVars, IncomingSym, Preds, Acc, LeexTokens, #{}) of
+                        {ok, StackEnv} ->
+                            {RuleType, _, _, _} = infer_expr(Mod, {Mod, ActionFn, 1}, ResultExpr, StackEnv, Contracts, [], []),
+                            case RuleType of
+                                none ->
+                                    Acc;
+                                _ ->
+                                    Prev = maps:get(GotoFn, Acc, none),
+                                    Acc#{GotoFn => prisma_type:widen(prisma_type:join(Prev, RuleType))}
+                            end;
+                        error ->
+                            Acc
+                    end;
+                _ ->
+                    Acc
+            end
+        end,
+        NtTypes0,
+        Reductions
+    ),
+    case NtTypes1 =:= NtTypes0 of
+        true -> NtTypes1;
+        false -> run_yecc_fixpoint(Mod, ClausesMap, Contracts, Reductions, IncomingSym, Preds, LeexTokens, NtTypes1, Pass + 1)
+    end.
+
+extract_cons_vars({cons, _, {var, _, V}, Tail}) -> [V | extract_cons_vars(Tail)];
+extract_cons_vars({cons, _, _, Tail}) -> ['_' | extract_cons_vars(Tail)];
+extract_cons_vars(_) -> [].
+
+build_yecc_stack_env(_CurStates, [], _IncomingSym, _Preds, _NtTypes, _LeexTokens, Env) ->
+    {ok, Env};
+build_yecc_stack_env(CurStates, [Var | RestVars], IncomingSym, Preds, NtTypes, LeexTokens, Env) ->
+    Syms = lists:usort([maps:get(S, IncomingSym) || S <- CurStates, maps:is_key(S, IncomingSym)]),
+    Types = [yecc_sym_type(Sym, NtTypes, LeexTokens) || Sym <- Syms],
+    ElemType = prisma_type:normalize_union([T || T <- Types, T =/= none]),
+    case ElemType of
+        none ->
+            error;
+        _ ->
+            Env1 = case Var of
+                '_' -> Env;
+                _ -> Env#{Var => ElemType}
+            end,
+            NextStates = lists:usort(lists:append([maps:get(S, Preds, []) || S <- CurStates])),
+            build_yecc_stack_env(NextStates, RestVars, IncomingSym, Preds, NtTypes, LeexTokens, Env1)
+    end.
+
+yecc_sym_type({nonterminal, GotoFn}, NtTypes, _LeexTokens) ->
+    maps:get(GotoFn, NtTypes, none);
+yecc_sym_type({terminal, Cat}, _NtTypes, LeexTokens) ->
+    case maps:find(Cat, LeexTokens) of
+        {ok, TokType} ->
+            TokType;
+        error ->
+            {union, [{tuple, [{atom_lit, Cat}, any]}, {tuple, [{atom_lit, Cat}, any, any]}]}
+    end.
+
+update_yecc_entry(MFA, AstType, Contracts) ->
+    case maps:find(MFA, Contracts) of
+        {ok, #func_contract{inferred_type = {fun_type, Args, Ret0}, declared_specs = Specs0} = C} ->
+            Ret1 = replace_yecc_ok_ast(Ret0, AstType),
+            Specs1 = [replace_yecc_spec_ast(S, AstType) || S <- Specs0],
+            Contracts#{MFA => C#func_contract{inferred_type = {fun_type, Args, Ret1}, declared_specs = Specs1}};
+        _ ->
+            Contracts
+    end.
+
+replace_yecc_spec_ast({fun_type, Args, Ret}, AstType) ->
+    {fun_type, Args, replace_yecc_ok_ast(Ret, AstType)};
+replace_yecc_spec_ast(Other, _AstType) ->
+    Other.
+
+replace_yecc_ok_ast(any, AstType) ->
+    {union, [{tuple, [{atom_lit, error}, any]}, {tuple, [{atom_lit, ok}, AstType]}]};
+replace_yecc_ok_ast({union, Members}, AstType) ->
+    prisma_type:normalize_union([replace_yecc_ok_ast(M, AstType) || M <- Members]);
+replace_yecc_ok_ast({tuple, [{atom_lit, ok}, _]}, AstType) ->
+    {tuple, [{atom_lit, ok}, AstType]};
+replace_yecc_ok_ast({local_type, yecc_ret, _}, AstType) ->
+    {union, [{tuple, [{atom_lit, error}, any]}, {tuple, [{atom_lit, ok}, AstType]}]};
+replace_yecc_ok_ast(Other, _AstType) ->
+    Other.

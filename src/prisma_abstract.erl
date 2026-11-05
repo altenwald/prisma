@@ -140,6 +140,10 @@ specs_in(Mod, Forms) ->
                 Acc#{{Mod, F, A} => [prisma_type:from_abstract(C) || C <- Clauses]};
            ({attribute, _, spec, {{M, F, A}, Clauses}}, Acc) ->
                 Acc#{{M, F, A} => [prisma_type:from_abstract(C) || C <- Clauses]};
+           ({function, _, yystate, 7, _}, Acc) ->
+                Acc#{{'$beam_kind', Mod} => leex};
+           ({function, _, yeccpars1, 7, _}, Acc) ->
+                Acc#{{'$beam_kind', Mod} => yecc};
            (_, Acc) ->
                 Acc
         end, #{}, Forms).
@@ -147,26 +151,31 @@ specs_in(Mod, Forms) ->
 %% What the inference of a module may assume about the functions of the others: the return type their `-spec` declares
 %% (the contract is the interface, not whatever their body happens to give). The arguments are left alone: they are checked
 %% against the spec by the checker. A function without a spec, or whose spec returns anything, adds nothing.
-external_contracts(Mod, ExternalSpecs) ->
-    maps:fold(
-        fun({M, _F, A} = Key, #func_contract{inferred_type = {fun_type, _, Inferred}, declared_specs = Specs} = C, Acc) when M =/= Mod ->
-                Ret = case prisma_infer:declared_return(Specs, A) of
-                    any -> Inferred;
-                    Declared -> Declared
-                end,
-                case Ret of
-                    any -> Acc;
-                    _ -> Acc#{Key => C#func_contract{inferred_type = {fun_type, lists:duplicate(A, any), Ret}}}
-                end;
-           ({M, _F, A} = Key, Specs, Acc) when M =/= Mod, is_list(Specs) ->
-                case prisma_infer:declared_return(Specs, A) of
-                    any -> Acc;
-                    Ret -> Acc#{Key => #func_contract{mfa = Key, declared_specs = Specs,
-                                                      inferred_type = {fun_type, lists:duplicate(A, any), Ret}}}
-                end;
-           (_, _, Acc) ->
-                Acc
-        end, #{}, ExternalSpecs).
+external_contracts(Mod, InitialFuncs, ExternalSpecs) ->
+    RemoteCalls = lists:usort([Call || #func_contract{calls = Calls} <- maps:values(InitialFuncs),
+                                       {M, _, _} = Call <- Calls, M =/= Mod]),
+    Base = case maps:find('$leex_tokens', ExternalSpecs) of
+        {ok, Tokens} -> #{'$leex_tokens' => Tokens};
+        error -> #{}
+    end,
+    lists:foldl(
+        fun({M, _F, A} = Key, Acc) when M =/= Mod ->
+                case maps:find(Key, ExternalSpecs) of
+                    {ok, #func_contract{} = C} ->
+                        Acc#{Key => C};
+                    {ok, Specs} when is_list(Specs) ->
+                        case prisma_infer:declared_return(Specs, A) of
+                            any -> Acc;
+                            Ret -> Acc#{Key => #func_contract{mfa = Key, declared_specs = Specs,
+                                                              inferred_type = {fun_type, lists:duplicate(A, any), Ret}}}
+                        end;
+                    _ ->
+                        Acc
+                end
+        end,
+        Base,
+        RemoteCalls
+    ).
 
 %% @doc Populates a `#module_summary{}` from Erlang Abstract Format forms.
 -spec parse_abstract_forms([term()], [{atom(), arity()}], #module_summary{}) ->
@@ -184,6 +193,9 @@ parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types 
             case Form of
                 {attribute, _Anno, compiler_generated, {F, A}} ->
                     {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc#{{Mod, F, A} => true}, RAcc};
+                {attribute, _Anno, AttrName, AttrVal}
+                  when AttrName =:= compile; AttrName =:= dialyzer ->
+                    {TAcc, ETAcc, SAcc, FAcc, CAcc, add_suppressed_funcs(Mod, AttrVal, GAcc), RAcc};
                 {attribute, _Anno, export_type, ExpList} when is_list(ExpList) ->
                     {TAcc, ExpList ++ ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc};
                 {attribute, _Anno, Kind, {_TypeName, _TypeDef, _TypeArgs} = TypeAttr}
@@ -207,7 +219,9 @@ parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types 
                     Line = erl_anno:line(Anno),
                     Calls = extract_calls_from_clauses(Mod, Clauses),
                     InitType = {fun_type, lists:duplicate(A, any), any},
-                    IsGen = maps:is_key(Key, GAcc) orelse F =:= module_info orelse F =:= behaviour_info,
+                    IsGen = maps:is_key(Key, GAcc) orelse F =:= module_info orelse F =:= behaviour_info
+                            orelse (F =:= yyaction andalso A =:= 5)
+                            orelse (F =:= yystate andalso (A =:= 0 orelse A =:= 7)),
                     Contract = #func_contract{
                         mfa = Key,
                         exported = maps:is_key({F, A}, ExportSet),
@@ -234,7 +248,7 @@ parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types 
         RawTypes
     ),
     WithSpecs = merge_specs_into_funcs(Mod, ExportSet, Specs, InitialFuncs),
-    External = external_contracts(Mod, maps:get(external_specs, Opts, #{})),
+    External = external_contracts(Mod, InitialFuncs, maps:get(external_specs, Opts, #{})),
     RecordContracts = maps:from_list([{{record_def, RName}, RSize} || {RName, RSize} <- maps:to_list(RecDefs)]),
     Inferred = prisma_infer:infer_module_functions(Mod, ClausesByMFA, maps:merge(RecordContracts, maps:merge(External, WithSpecs))),
     InferredFuncs = maps:filter(fun({M, _, _}, _) -> M =:= Mod; (_, _) -> false end, Inferred),
@@ -299,3 +313,18 @@ collect_calls(_Mod, _Other, Acc) ->
 
 collect_calls_list(Mod, Items, Acc) ->
     lists:foldl(fun(Item, A) -> collect_calls(Mod, Item, A) end, Acc, Items).
+
+add_suppressed_funcs(Mod, {Tag, Target}, Acc)
+  when Tag =:= nowarn_unused_function; Tag =:= nowarn_function ->
+    add_fa_targets(Mod, Target, Acc);
+add_suppressed_funcs(Mod, List, Acc) when is_list(List) ->
+    lists:foldl(fun(Item, A) -> add_suppressed_funcs(Mod, Item, A) end, Acc, List);
+add_suppressed_funcs(_Mod, _Other, Acc) ->
+    Acc.
+
+add_fa_targets(Mod, {F, A}, Acc) when is_atom(F), is_integer(A) ->
+    Acc#{{Mod, F, A} => true};
+add_fa_targets(Mod, List, Acc) when is_list(List) ->
+    lists:foldl(fun(Item, A) -> add_fa_targets(Mod, Item, A) end, Acc, List);
+add_fa_targets(_Mod, _Other, Acc) ->
+    Acc.

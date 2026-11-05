@@ -65,18 +65,31 @@ from_beams(Beams, Opts0) ->
     PkgVsn = maps:get(package_vsn, Opts0, undefined),
     BasePplt = (new(Pkg, PkgVsn))#prisma_pplt{source_hash = maps:get(source_hash, Opts0, undefined)},
     %% first the -specs of every module, so that each one is inferred knowing what the others declare
-    Specs = lists:foldl(fun(Beam, Acc) -> maps:merge(Acc, prisma_abstract:specs_of_beam(Beam)) end,
-                        maps:get(external_specs, Opts0, #{}), Beams),
+    {Specs, LeexRev, YeccRev, OtherRev} = lists:foldl(
+        fun(Beam, {SAcc, LAcc, YAcc, OAcc}) ->
+            BeamSpecs = prisma_abstract:specs_of_beam(Beam),
+            SAcc1 = maps:merge(SAcc, BeamSpecs),
+            case [Kind || {{'$beam_kind', _}, Kind} <- maps:to_list(BeamSpecs)] of
+                [leex | _] -> {SAcc1, [Beam | LAcc], YAcc, OAcc};
+                [yecc | _] -> {SAcc1, LAcc, [Beam | YAcc], OAcc};
+                _ -> {SAcc1, LAcc, YAcc, [Beam | OAcc]}
+            end
+        end,
+        {maps:get(external_specs, Opts0, #{}), [], [], []},
+        Beams
+    ),
+    OrderedBeams = case LeexRev =:= [] andalso YeccRev =:= [] of
+        true -> Beams;
+        false -> lists:reverse(LeexRev) ++ lists:reverse(YeccRev) ++ lists:reverse(OtherRev)
+    end,
     Opts = Opts0#{external_specs => Specs},
     {Result, _} = lists:foldl(
         fun
             (Beam, {{ok, #prisma_pplt{modules = Mods} = Pplt}, CurOpts}) ->
                 case prisma_abstract:extract_beam(Beam, CurOpts) of
                     {ok, #module_summary{module = Mod, functions = Funcs} = Summary} ->
-                        NewContracts = maps:from_list([{{Mod, F, A}, C} || {{_, F, A}, C} <- maps:to_list(Funcs)]),
-                        CurExt = maps:get(external_specs, CurOpts, #{}),
-                        UpdatedExt = maps:merge(CurExt, NewContracts),
-                        {{ok, Pplt#prisma_pplt{modules = Mods#{Mod => Summary}}}, CurOpts#{external_specs => UpdatedExt}};
+                        NextOpts = update_generator_opts(Mod, Funcs, Specs, CurOpts),
+                        {{ok, Pplt#prisma_pplt{modules = Mods#{Mod => Summary}}}, NextOpts};
                     {error, Reason} ->
                         {{error, {beam_extract_failed, Beam, Reason}}, CurOpts}
                 end;
@@ -84,9 +97,27 @@ from_beams(Beams, Opts0) ->
                 {Err, CurOpts}
         end,
         {{ok, BasePplt}, Opts},
-        Beams
+        OrderedBeams
     ),
     Result.
+
+update_generator_opts(Mod, Funcs, Specs, CurOpts) ->
+    case maps:find({'$beam_kind', Mod}, Specs) of
+        {ok, leex} ->
+            CurExt = maps:get(external_specs, CurOpts, #{}),
+            PrevTokens = maps:get('$leex_tokens', CurExt, #{}),
+            NewTokens = maps:merge(PrevTokens, prisma_infer:extract_leex_token_map(Mod, Funcs)),
+            Exported = [{Key, (maps:get(Key, Funcs))#func_contract{clauses = []}}
+                        || Key <- [{Mod, string, 1}, {Mod, string, 2}], maps:is_key(Key, Funcs)],
+            CurOpts#{external_specs => maps:merge(CurExt#{'$leex_tokens' => NewTokens}, maps:from_list(Exported))};
+        {ok, yecc} ->
+            CurExt = maps:get(external_specs, CurOpts, #{}),
+            Exported = [{Key, (maps:get(Key, Funcs))#func_contract{clauses = []}}
+                        || Key <- [{Mod, parse, 1}, {Mod, parse_and_scan, 1}], maps:is_key(Key, Funcs)],
+            CurOpts#{external_specs => maps:merge(CurExt, maps:from_list(Exported))};
+        error ->
+            CurOpts
+    end.
 
 %% @doc Merges a list of `#prisma_pplt{}` records into one.
 -spec merge([#prisma_pplt{}]) -> #prisma_pplt{}.

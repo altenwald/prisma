@@ -1105,9 +1105,10 @@ relational_op_on_positive_integers_detects_dead_code_test() ->
     DeadBranches = [L || #prisma_warning{kind = dead_code, line = L} <- Ws],
     ?assertEqual([9], DeadBranches).
 
-cross_module_unspecced_return_type_propagates_test() ->
+cross_module_specced_return_type_propagates_test() ->
     ModA = "-module(cm_a).\n"
            "-export([val/0]).\n"
+           "-spec val() -> pos_integer().\n"
            "val() -> 1.\n",
     ModB = "-module(cm_b).\n"
            "-export([chk/0]).\n"
@@ -1126,4 +1127,65 @@ cross_module_unspecced_return_type_propagates_test() ->
     {ok, Ws} = prisma:analyze_beams([BeamA, BeamB], #{oxbow => false}),
     DeadBranches = [L || #prisma_warning{kind = dead_code, line = L} <- Ws],
     ?assertEqual([6], DeadBranches).
+
+leex_and_yecc_ast_type_inference_test() ->
+    LexerSrc =
+        "-module(mini_lexer).\n"
+        "-export([string/1]).\n"
+        "string(S) -> {ok, [], 1} = do_string(S), {ok, [], 1}.\n"
+        "do_string(S) -> yyaction(0, 1, S, 1, 1), yystate(0, S, 1, 1, 0, reject, 0), {ok, [], 1}.\n"
+        "yystate(S, Ics, L, C, Tlen, A, Alen) -> {A, Alen, Tlen, Ics, L, C, S}.\n"
+        "yyaction(0, _, _, L, _) -> {token, {key, L, <<\"k\">>}};\n"
+        "yyaction(1, _, _, L, _) -> {token, {'=', L}};\n"
+        "yyaction(2, _, _, L, _) -> {token, {val, L, 42}}.\n",
+    ParserSrc =
+        "-module(mini_parser).\n"
+        "-export([parse/1]).\n"
+        "-type yecc_ret() :: {error, _} | {ok, _}.\n"
+        "-spec parse(list()) -> yecc_ret().\n"
+        "parse(Toks) -> yeccpars0(Toks, {no_func, no_location}, 0, [], []).\n"
+        "yeccpars0(Toks, Tzr, S, Ss, Vs) -> yeccpars1(Toks, Tzr, S, Ss, Vs).\n"
+        "yeccpars1([T|Ts], Tzr, S, Ss, Vs) -> yeccpars2(S, element(1, T), Ss, Vs, T, Ts, Tzr).\n"
+        "yeccpars1(S1, S, Ss, Vs, T0, [T|Ts], Tzr) -> yeccpars2(S, element(1, T), [S1|Ss], [T0|Vs], T, Ts, Tzr).\n"
+        "-compile({nowarn_unused_function, yeccpars2/7}).\n"
+        "yeccpars2(0=S, Cat, Ss, Stack, T, Ts, Tzr) -> yeccpars2_0(S, Cat, Ss, Stack, T, Ts, Tzr);\n"
+        "yeccpars2(2=S, Cat, Ss, Stack, T, Ts, Tzr) -> yeccpars2_2(S, Cat, Ss, Stack, T, Ts, Tzr);\n"
+        "yeccpars2(3=S, Cat, Ss, Stack, T, Ts, Tzr) -> yeccpars2_3(S, Cat, Ss, Stack, T, Ts, Tzr).\n"
+        "-compile({nowarn_unused_function, yeccpars2_0/7}).\n"
+        "yeccpars2_0(S, key, Ss, Stack, T, Ts, Tzr) -> yeccpars1(S, 2, Ss, Stack, T, Ts, Tzr).\n"
+        "-compile({nowarn_unused_function, yeccpars2_1/7}).\n"
+        "yeccpars2_1(_S, '$end', _Ss, Stack, _T, _Ts, _Tzr) -> {ok, hd(Stack)}.\n"
+        "-compile({nowarn_unused_function, yeccpars2_2/7}).\n"
+        "yeccpars2_2(S, '=', Ss, Stack, T, Ts, Tzr) -> yeccpars1(S, 3, Ss, Stack, T, Ts, Tzr).\n"
+        "-compile({nowarn_unused_function, yeccpars2_3/7}).\n"
+        "yeccpars2_3(S, val, Ss, Stack, T, Ts, Tzr) -> yeccpars1(S, 4, Ss, Stack, T, Ts, Tzr).\n"
+        "-compile({nowarn_unused_function, yeccpars2_4/7}).\n"
+        "yeccpars2_4(_S, Cat, Ss, Stack, T, Ts, Tzr) ->\n"
+        "    [_,_|Nss] = Ss,\n"
+        "    NewStack = yeccpars2_4_(Stack),\n"
+        "    yeccgoto_pair(hd(Nss), Cat, Nss, NewStack, T, Ts, Tzr).\n"
+        "-compile({nowarn_unused_function, yeccgoto_pair/7}).\n"
+        "yeccgoto_pair(0, Cat, Ss, Stack, T, Ts, Tzr) -> yeccpars2_1(1, Cat, Ss, Stack, T, Ts, Tzr).\n"
+        "-compile({nowarn_unused_function, yeccpars2_4_/1}).\n"
+        "yeccpars2_4_(__Stack0) ->\n"
+        "    [___3, ___2, ___1 | __Stack] = __Stack0,\n"
+        "    [begin {val_of(___1), val_of(___3)} end | __Stack].\n"
+        "val_of(Tok) -> element(3, Tok).\n",
+    CallerSrc =
+        "-module(mini_caller).\n"
+        "-export([run/1]).\n"
+        "-spec run(string()) -> {ok, {binary(), atom()}} | {error, term()}.\n"
+        "run(S) ->\n"
+        "    {ok, Toks, _} = mini_lexer:string(S),\n"
+        "    mini_parser:parse(Toks).\n",
+    Compile = fun(Src) ->
+        {ok, Toks, _} = erl_scan:string(Src),
+        {ok, Mod, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+        {Mod, Beam}
+    end,
+    {mini_caller, BCaller} = Compile(CallerSrc),
+    {mini_lexer, BLexer} = Compile(LexerSrc),
+    {mini_parser, BParser} = Compile(ParserSrc),
+    {ok, Ws} = prisma:analyze_beams([BCaller, BLexer, BParser], #{oxbow => true}),
+    ?assertMatch([#prisma_warning{kind = gradual_mismatch, mfa = {mini_caller, run, 1}}], Ws).
 

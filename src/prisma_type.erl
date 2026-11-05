@@ -215,8 +215,6 @@ normalize_union_general(Types) ->
 widen(Type) ->
     widen(Type, ?WIDEN_DEPTH).
 
-widen(_, 0) ->
-    any;
 widen({union, Members}, Depth) ->
     %% a union is not a level of nesting: its members keep the depth
     case normalize_union([widen(M, Depth) || M <- Members]) of
@@ -227,6 +225,17 @@ widen({union, Members}, Depth) ->
             end;
         Other -> Other
     end;
+widen({tuple, _}, 0) -> any;
+widen({list, _}, 0) -> any;
+widen({nonempty_list, _}, 0) -> any;
+widen({improper_list, _, _}, 0) -> any;
+widen({map, _}, 0) -> any;
+widen({record, _, _}, 0) -> any;
+widen({fun_type, _, _}, 0) -> any;
+widen(Atomic, 0) -> Atomic;
+widen({tuple, [{atom_lit, Tag} = T, Payload]}, ?WIDEN_DEPTH)
+  when Tag =:= ok; Tag =:= error ->
+    {tuple, [T, widen(Payload, ?WIDEN_DEPTH)]};
 widen({tuple, Elems}, Depth) -> {tuple, [widen(E, Depth - 1) || E <- Elems]};
 widen({list, Elem}, Depth) -> {list, widen(Elem, Depth - 1)};
 widen({nonempty_list, Elem}, Depth) -> {nonempty_list, widen(Elem, Depth - 1)};
@@ -549,6 +558,8 @@ meet_non_numeric({record, _, _} = Record, {tuple, [_ | _]} = Tuple) ->
     meet_non_numeric(Tuple, Record);
 meet_non_numeric(any_tuple, {record, _, _} = R) -> R;
 meet_non_numeric({record, _, _} = R, any_tuple) -> R;
+meet_non_numeric({record, Name, F1}, {record, Name, F2}) ->
+    meet_record_fields(Name, F1, F2);
 meet_non_numeric({tuple, E1}, {tuple, E2}) when length(E1) =:= length(E2) ->
     Meets = [meet(A, B) || {A, B} <- lists:zip(E1, E2)],
     case lists:member(none, Meets) of
@@ -693,6 +704,29 @@ meet_tuple_with_record(Tag, Name, Record) ->
     case meet(Tag, {atom_lit, Name}) of
         none -> none;
         _ -> Record
+    end.
+
+meet_record_fields(Name, [], F2) -> {record, Name, F2};
+meet_record_fields(Name, F1, []) -> {record, Name, F1};
+meet_record_fields(Name, F1, F2) ->
+    M1 = maps:from_list(F1),
+    M2 = maps:from_list(F2),
+    Common = [K || K <- maps:keys(M1), is_map_key(K, M2)],
+    case lists:any(fun(K) -> meet(maps:get(K, M1), maps:get(K, M2)) =:= none end, Common) of
+        true ->
+            none;
+        false ->
+            Merged = maps:fold(
+                fun(K, V2, Acc) ->
+                    case maps:find(K, Acc) of
+                        {ok, V1} -> Acc#{K => meet(V1, V2)};
+                        error -> Acc#{K => V2}
+                    end
+                end,
+                M1,
+                M2
+            ),
+            {record, Name, lists:sort(maps:to_list(Merged))}
     end.
 
 is_union({union, _}) -> true;
