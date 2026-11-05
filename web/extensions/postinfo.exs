@@ -37,7 +37,32 @@ transform "tags" do
           raw -> raw |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
         end
 
-      Map.put(post, "_tags", tags)
+      raw_desc =
+        (post["summary"] || post["excerpt"] || "")
+        |> to_string()
+        |> String.split()
+        |> Enum.join(" ")
+
+      max_len = 155
+
+      desc =
+        if String.length(raw_desc) <= max_len do
+          raw_desc
+        else
+          words =
+            raw_desc
+            |> String.slice(0, max_len - 1)
+            |> String.split(" ")
+
+          case Enum.slice(words, 0, max(length(words) - 1, 1)) do
+            kept when kept != [] -> Enum.join(kept, " ") <> "…"
+            _ -> String.slice(raw_desc, 0, max_len - 1) <> "…"
+          end
+        end
+
+      post
+      |> Map.put("_tags", tags)
+      |> Map.put("_description", desc)
     end
   )
 end

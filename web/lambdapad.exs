@@ -6,7 +6,31 @@ blog do
   config do
     set(
       transform: fn config ->
+        raw_desc =
+          get_in(config, ["blog", "description"])
+          |> to_string()
+          |> String.split()
+          |> Enum.join(" ")
+
+        max_len = 155
+
+        desc =
+          if String.length(raw_desc) <= max_len do
+            raw_desc
+          else
+            words =
+              raw_desc
+              |> String.slice(0, max_len - 1)
+              |> String.split(" ")
+
+            case Enum.slice(words, 0, max(length(words) - 1, 1)) do
+              kept when kept != [] -> Enum.join(kept, " ") <> "…"
+              _ -> String.slice(raw_desc, 0, max_len - 1) <> "…"
+            end
+          end
+
         config
+        |> put_in(["blog", "description"], desc)
         |> Map.put("site_root", "/")
         |> Map.put("current_year", Date.utc_today().year)
       end

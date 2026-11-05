@@ -8,10 +8,17 @@
   {% if post %}
   <title>{{ post.title }} — Prisma Blog</title>
   <meta name="title" content="{{ post.title }} — Prisma Blog">
-  <meta name="description" content="{% if post.summary %}{{ post.summary }}{% else %}{{ post.excerpt }}{% endif %}">
+  <meta name="description" content="{{ post._description }}">
   <meta name="keywords" content="{{ post.tags }}">
   <meta name="author" content="{{ post.author }}">
   <link rel="canonical" href="https://prisma.altenwald.com/blog/{{ post.id }}/">
+  {% elif posts %}
+  <title>Blog &amp; Benchmarks — Prisma</title>
+  <meta name="title" content="Blog &amp; Benchmarks — Prisma">
+  <meta name="description" content="{{ blog.description }}">
+  <meta name="keywords" content="erlang, elixir, dialyzer, gradualizer, beam, static type analyzer, typespecs, pplt, altenwald, benchmarks">
+  <meta name="author" content="Altenwald">
+  <link rel="canonical" href="https://prisma.altenwald.com/blog/">
   {% else %}
   <title>{{ blog.title }}</title>
   <meta name="title" content="{{ blog.title }}">
@@ -37,16 +44,16 @@
   <link rel="apple-touch-icon" href="/assets/prisma.png">
 
   <!-- Schema.org Microdata -->
-  <meta itemprop="name" content="{% if post %}{{ post.title }} — Prisma{% else %}{{ blog.title }}{% endif %}">
-  <meta itemprop="description" content="{% if post %}{% if post.summary %}{{ post.summary }}{% else %}{{ post.excerpt }}{% endif %}{% else %}{{ blog.description }}{% endif %}">
+  <meta itemprop="name" content="{% if post %}{{ post.title }} — Prisma{% elif posts %}Blog &amp; Benchmarks — Prisma{% else %}{{ blog.title }}{% endif %}">
+  <meta itemprop="description" content="{% if post %}{{ post._description }}{% else %}{{ blog.description }}{% endif %}">
   <meta itemprop="image" content="{% if post %}https://prisma.altenwald.com/assets/og/{{ post.id }}.png{% else %}https://prisma.altenwald.com/assets/prisma_og.png{% endif %}">
 
   <!-- Open Graph / Facebook / LinkedIn / Telegram -->
   <meta property="og:type" content="{% if post %}article{% else %}website{% endif %}">
   <meta property="og:site_name" content="Prisma · Altenwald">
-  <meta property="og:url" content="{% if post %}https://prisma.altenwald.com/blog/{{ post.id }}/{% else %}https://prisma.altenwald.com/{% endif %}">
-  <meta property="og:title" content="{% if post %}{{ post.title }} — Prisma{% else %}{{ blog.title }}{% endif %}">
-  <meta property="og:description" content="{% if post %}{% if post.summary %}{{ post.summary }}{% else %}{{ post.excerpt }}{% endif %}{% else %}{{ blog.description }}{% endif %}">
+  <meta property="og:url" content="{% if post %}https://prisma.altenwald.com/blog/{{ post.id }}/{% elif posts %}https://prisma.altenwald.com/blog/{% else %}https://prisma.altenwald.com/{% endif %}">
+  <meta property="og:title" content="{% if post %}{{ post.title }} — Prisma{% elif posts %}Blog &amp; Benchmarks — Prisma{% else %}{{ blog.title }}{% endif %}">
+  <meta property="og:description" content="{% if post %}{{ post._description }}{% else %}{{ blog.description }}{% endif %}">
   <meta property="og:image" content="{% if post %}https://prisma.altenwald.com/assets/og/{{ post.id }}.png{% else %}https://prisma.altenwald.com/assets/prisma_og.png{% endif %}">
   <meta property="og:image:secure_url" content="{% if post %}https://prisma.altenwald.com/assets/og/{{ post.id }}.png{% else %}https://prisma.altenwald.com/assets/prisma_og.png{% endif %}">
   <meta property="og:image:type" content="image/png">
@@ -59,9 +66,9 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:site" content="@altenwald">
   <meta name="twitter:creator" content="@altenwald">
-  <meta name="twitter:url" content="{% if post %}https://prisma.altenwald.com/blog/{{ post.id }}/{% else %}https://prisma.altenwald.com/{% endif %}">
-  <meta name="twitter:title" content="{% if post %}{{ post.title }} — Prisma{% else %}{{ blog.title }}{% endif %}">
-  <meta name="twitter:description" content="{% if post %}{% if post.summary %}{{ post.summary }}{% else %}{{ post.excerpt }}{% endif %}{% else %}{{ blog.description }}{% endif %}">
+  <meta name="twitter:url" content="{% if post %}https://prisma.altenwald.com/blog/{{ post.id }}/{% elif posts %}https://prisma.altenwald.com/blog/{% else %}https://prisma.altenwald.com/{% endif %}">
+  <meta name="twitter:title" content="{% if post %}{{ post.title }} — Prisma{% elif posts %}Blog &amp; Benchmarks — Prisma{% else %}{{ blog.title }}{% endif %}">
+  <meta name="twitter:description" content="{% if post %}{{ post._description }}{% else %}{{ blog.description }}{% endif %}">
   <meta name="twitter:image" content="{% if post %}https://prisma.altenwald.com/assets/x/{{ post.id }}.png{% else %}https://prisma.altenwald.com/assets/prisma_og.png{% endif %}">
   <meta name="twitter:image:alt" content="{% if post %}{{ post.title }}{% else %}{{ blog.title }}{% endif %}">
 
