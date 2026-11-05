@@ -3,7 +3,7 @@
 # (tools/make_demo.sh generates the GIF and copies it). Exits with 1 if one differs or is missing.
 cd "$(dirname "$0")/.." || exit 1
 status=0
-for f in prisma.png prisma.svg prisma_demo.gif; do
+for f in prisma.png prisma.svg prisma_demo.gif prisma_og.png; do
   if ! cmp -s "assets/$f" "web/assets/$f"; then
     echo "web/assets/$f is not the same as assets/$f (copy it, or generate the demo again with: tools/make_demo.sh)" >&2
     status=1

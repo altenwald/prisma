@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://prisma.altenwald.com/sitemap.xml
