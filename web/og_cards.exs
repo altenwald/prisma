@@ -211,7 +211,7 @@ defmodule Prisma.OgImage do
 
     meta_tag =
       if meta != "" do
-        ~s(<text x="#{cfg.padding}" y="#{cfg.meta_y}" font-family="Arial, Helvetica, sans-serif" font-size="#{cfg.meta_size}" font-weight="bold" fill="#38BDF8">#{escape(meta)}</text>)
+        ~s(<text x="#{cfg.padding}" y="#{cfg.meta_y}" font-family="Arial, Helvetica, Liberation Sans, DejaVu Sans, Ubuntu, sans-serif" font-size="#{cfg.meta_size}" font-weight="bold" fill="#38BDF8">#{escape(meta)}</text>)
       else
         ""
       end
@@ -226,11 +226,11 @@ defmodule Prisma.OgImage do
       </defs>
       <g id="#{grad_id}">
         <rect width="#{cfg.w}" height="#{cfg.h}" fill="url(#grad)"/>
-        <text x="#{cfg.padding}" y="#{cfg.logo_y + div(cfg.logo_h, 2) + 8}" font-family="Arial, Helvetica, sans-serif" font-size="#{cfg.meta_size}" font-weight="bold" fill="#93C5FD" letter-spacing="2">PRISMA STATIC ANALYZER</text>
+        <text x="#{cfg.padding}" y="#{cfg.logo_y + div(cfg.logo_h, 2) + 8}" font-family="Arial, Helvetica, Liberation Sans, DejaVu Sans, Ubuntu, sans-serif" font-size="#{cfg.meta_size}" font-weight="bold" fill="#93C5FD" letter-spacing="2">PRISMA STATIC ANALYZER</text>
         #{logo_tag}
-        <text font-family="Arial, Helvetica, sans-serif" font-size="#{font_size}" font-weight="bold" fill="white">#{render_tspans(lines, cfg.padding, first_y, line_height)}</text>
+        <text font-family="Arial, Helvetica, Liberation Sans, DejaVu Sans, Ubuntu, sans-serif" font-size="#{font_size}" font-weight="bold" fill="white">#{render_tspans(lines, cfg.padding, first_y, line_height)}</text>
         <line x1="#{cfg.padding}" y1="#{cfg.separator_y}" x2="#{cfg.separator_x2}" y2="#{cfg.separator_y}" stroke="white" stroke-opacity="0.45" stroke-width="2"/>
-        <text x="#{cfg.padding}" y="#{cfg.date_y}" font-family="Arial, Helvetica, sans-serif" font-size="#{cfg.date_size}" fill="white" fill-opacity="0.9">#{escape(date)}</text>
+        <text x="#{cfg.padding}" y="#{cfg.date_y}" font-family="Arial, Helvetica, Liberation Sans, DejaVu Sans, Ubuntu, sans-serif" font-size="#{cfg.date_size}" fill="white" fill-opacity="0.9">#{escape(date)}</text>
         #{meta_tag}
         #{featured_tag}
       </g>
@@ -263,17 +263,26 @@ File.mkdir_p!(x_dir)
 
 posts = Path.wildcard(Path.join([web_dir, "posts", "**", "*.md"]))
 
+resvg_opts = [
+  resources_dir: "/tmp",
+  font_family: "DejaVu Sans",
+  sans_serif_family: "DejaVu Sans"
+]
+
+{:ok, fonts} = Resvg.list_fonts(resvg_opts)
+IO.puts("Resvg loaded #{length(fonts)} system font faces")
+
 Enum.each(posts, fn post_file ->
   post = Prisma.OgImage.parse_post_headers(post_file)
   id = post["id"] || Path.basename(post_file, ".md")
 
   og_svg = Prisma.OgImage.generate_og(post, assets_dir)
-  {:ok, og_png} = Resvg.svg_string_to_png_buffer(og_svg, resources_dir: "/tmp")
+  {:ok, og_png} = Resvg.svg_string_to_png_buffer(og_svg, resvg_opts)
   og_png_path = Path.join(og_dir, "#{id}.png")
   File.write!(og_png_path, og_png)
 
   x_svg = Prisma.OgImage.generate_x(post, assets_dir)
-  {:ok, x_png} = Resvg.svg_string_to_png_buffer(x_svg, resources_dir: "/tmp")
+  {:ok, x_png} = Resvg.svg_string_to_png_buffer(x_svg, resvg_opts)
   x_png_path = Path.join(x_dir, "#{id}.png")
   File.write!(x_png_path, x_png)
 
