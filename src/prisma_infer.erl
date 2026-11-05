@@ -128,8 +128,8 @@ infer_clause(Mod, MFA, {clause, Anno, PatArgs, Guards, Body}, AllContracts) ->
             end,
             {unreachable, ClauseWarns};
         {ok, PatTypes, Env0} ->
-            TestWarns = guard_warnings(MFA, Guards, Env0),
-            case apply_guard_disjunction(Guards, Env0) of
+            TestWarns = guard_warnings(MFA, Guards, Env0, AllContracts),
+            case apply_guard_disjunction(Guards, Env0, AllContracts) of
                 unreachable ->
                     GuardWarns = case is_generated_function(MFA) of
                         true -> [];
@@ -325,12 +325,12 @@ extract_tuple_elems(Arity, {union, Members}) ->
 extract_tuple_elems(_, _) ->
     none.
 
-apply_guard_disjunction([], Env) ->
+apply_guard_disjunction([], Env, _Contracts) ->
     {ok, Env};
-apply_guard_disjunction(ConjList, Env0) ->
+apply_guard_disjunction(ConjList, Env0, Contracts) ->
     ValidEnvs = lists:filtermap(
         fun(Conj) ->
-            case apply_guard_conjunction(Conj, Env0) of
+            case apply_guard_conjunction(Conj, Env0, Contracts) of
                 unreachable -> false;
                 {ok, Env1} -> {true, Env1}
             end
@@ -343,64 +343,68 @@ apply_guard_disjunction(ConjList, Env0) ->
         Many -> {ok, join_envs(Many)}
     end.
 
-apply_guard_conjunction([], Env) ->
+apply_guard_conjunction([], Env, _Contracts) ->
     {ok, Env};
-apply_guard_conjunction([Test | Rest], Env0) ->
-    case apply_guard_test(Test, Env0) of
+apply_guard_conjunction([Test | Rest], Env0, Contracts) ->
+    case apply_guard_test(Test, Env0, Contracts) of
         unreachable -> unreachable;
-        {ok, Env1} -> apply_guard_conjunction(Rest, Env1)
+        {ok, Env1} -> apply_guard_conjunction(Rest, Env1, Contracts)
     end.
 
 %% What each test of a guard says when it is typed as an expression: a BIF given arguments of the wrong type fails whenever it is
 %% evaluated, even if another alternative of the guard (`P =:= [] orelse hd(P) ...`) can still hold.
-guard_warnings(MFA, Guards, Env) ->
+guard_warnings(MFA, Guards, Env, Contracts) ->
     case is_generated_function(MFA) of
         true ->
             [];
         false ->
             lists:append([begin
-                              {_, _, Warns, _} = infer_expr(guard, MFA, Test, Env, #{}, [], []),
+                              {_, _, Warns, _} = infer_expr(guard, MFA, Test, Env, Contracts, [], []),
                               Warns
                           end || Conj <- Guards, Test <- Conj])
     end.
 
 %% A guard test that cannot succeed (a BIF given arguments of the wrong type, say) makes the guard fail, so the clause can
 %% never match: the test is typed as an expression first, and `none` means that it fails.
-apply_guard_test(Test, Env) ->
-    case guard_test_type(Test, Env) of
+apply_guard_test(Test, Env, Contracts) ->
+    case guard_test_type(Test, Env, Contracts) of
         none -> unreachable;
-        _ -> apply_guard_test_refining(Test, Env)
+        {atom_lit, false} -> unreachable;
+        _ -> apply_guard_test_refining(Test, Env, Contracts)
     end.
 
-guard_test_type(Test, Env) ->
-    {Type, _, _, _} = infer_expr(guard, {guard, guard, 0}, Test, Env, #{}, [], []),
+guard_test_type(Test, Env, Contracts) ->
+    {Type, _, _, _} = infer_expr(guard, {guard, guard, 0}, Test, Env, Contracts, [], []),
     Type.
 
-apply_guard_test_refining({call, _, {remote, _, {atom, _, erlang}, {atom, _, Fun}}, Args}, Env) ->
-    apply_guard_bif(Fun, Args, Env);
-apply_guard_test_refining({call, _, {atom, _, Fun}, Args}, Env) ->
-    apply_guard_bif(Fun, Args, Env);
-apply_guard_test_refining({op, _, 'andalso', L, R}, Env0) ->
-    case apply_guard_test(L, Env0) of
+apply_guard_test_refining({call, _, {remote, _, {atom, _, erlang}, {atom, _, Fun}}, Args}, Env, Contracts) ->
+    apply_guard_bif(Fun, Args, Env, Contracts);
+apply_guard_test_refining({call, _, {atom, _, Fun}, Args}, Env, Contracts) ->
+    apply_guard_bif(Fun, Args, Env, Contracts);
+apply_guard_test_refining({op, _, 'andalso', L, R}, Env0, Contracts) ->
+    case apply_guard_test(L, Env0, Contracts) of
         unreachable -> unreachable;
-        {ok, Env1} -> apply_guard_test(R, Env1)
+        {ok, Env1} -> apply_guard_test(R, Env1, Contracts)
     end;
-apply_guard_test_refining({op, _, 'and', L, R}, Env0) ->
-    apply_guard_test({op, 0, 'andalso', L, R}, Env0);
-apply_guard_test_refining({op, _, 'orelse', L, R}, Env0) ->
-    apply_guard_disjunction([[L], [R]], Env0);
-apply_guard_test_refining({op, _, Op, {var, _, V}, {integer, _, 0}}, Env)
+apply_guard_test_refining({op, _, 'and', L, R}, Env0, Contracts) ->
+    apply_guard_test({op, 0, 'andalso', L, R}, Env0, Contracts);
+apply_guard_test_refining({op, _, 'orelse', L, R}, Env0, Contracts) ->
+    apply_guard_disjunction([[L], [R]], Env0, Contracts);
+apply_guard_test_refining({op, _, Op, {var, _, V}, {integer, _, 0}}, Env, _Contracts)
   when Op =:= '>'; Op =:= '>='; Op =:= '<' ->
     refine_compare_zero(V, Op, Env);
-apply_guard_test_refining({op, _, '==', {var, _, V}, {integer, _, I}}, Env) ->
+apply_guard_test_refining({op, _, '==', {var, _, V}, {integer, _, I}}, Env, _Contracts) ->
     %% `==` compares numbers by value: X == 0 also holds for 0.0
     refine_var(V, {union, [{int_lit, I}, float]}, Env);
-apply_guard_test_refining({op, _, Op, {var, _, V}, Lit}, Env)
+apply_guard_test_refining({op, _, Op, {var, _, V}, Lit}, Env, _Contracts)
   when Op =:= '=:='; Op =:= '==' ->
     refine_var(V, literal_or_any(Lit), Env);
-apply_guard_test_refining({atom, _, false}, _Env) ->
+apply_guard_test_refining({op, _, Op, Lit, {var, _, V}}, Env, _Contracts)
+  when Op =:= '=:='; Op =:= '==' ->
+    refine_var(V, literal_or_any(Lit), Env);
+apply_guard_test_refining({atom, _, false}, _Env, _Contracts) ->
     unreachable;
-apply_guard_test_refining(_, Env) ->
+apply_guard_test_refining(_, Env, _Contracts) ->
     {ok, Env}.
 
 %% `V > 0`, `V >= 0`, `V < 0`. Floats qualify as well as integers, and, in the term order (numbers < atoms < ... <
@@ -421,13 +425,46 @@ refine_compare_zero(V, Op, Env) ->
     end,
     refine_var(V, Type, Env).
 
-apply_guard_bif(GuardName, [{var, _, V}], Env) ->
+apply_guard_bif(GuardName, [{var, _, V}], Env, _Contracts) ->
     case guard_type(GuardName) of
         undefined -> {ok, Env};
         Type -> refine_var(V, Type, Env)
     end;
-apply_guard_bif(_, _, Env) ->
+apply_guard_bif(is_record, [{var, _, V}, {atom, _, Tag}], Env, Contracts) ->
+    case maps:get({record_def, Tag}, Contracts, undefined) of
+        Size when is_integer(Size), Size >= 1 ->
+            refine_record_with_size(V, Tag, Size, Env);
+        _ ->
+            refine_var(V, {record, Tag, []}, Env)
+    end;
+apply_guard_bif(is_record, [{var, _, V}, {atom, _, Tag}, {integer, _, Size}], Env, _Contracts) ->
+    refine_record_with_size(V, Tag, Size, Env);
+apply_guard_bif(is_record, [{var, _, V}, _Tag], Env, _Contracts) ->
+    refine_var(V, any_tuple, Env);
+apply_guard_bif(is_record, [{var, _, V}, _Tag, {integer, _, Size}], Env, _Contracts) when Size >= 1 ->
+    refine_var(V, {tuple, lists:duplicate(Size, any)}, Env);
+apply_guard_bif(is_record, [{var, _, V}, _Tag, _Size], Env, _Contracts) ->
+    refine_var(V, any_tuple, Env);
+apply_guard_bif(is_map_key, [_Key, {var, _, V}], Env, _Contracts) ->
+    refine_var(V, any_map, Env);
+apply_guard_bif(is_function, [{var, _, V}, {integer, _, Arity}], Env, _Contracts) when Arity >= 0 ->
+    refine_var(V, {fun_type, lists:duplicate(Arity, any), any}, Env);
+apply_guard_bif(is_function, [{var, _, V}, _Arity], Env, _Contracts) ->
+    refine_var(V, any_fun, Env);
+apply_guard_bif(element, [{integer, _, Pos}, {var, _, V}], Env, _Contracts) when Pos >= 1 ->
+    refine_var(V, any_tuple, Env);
+apply_guard_bif(_, _, Env, _Contracts) ->
     {ok, Env}.
+
+refine_record_with_size(V, Tag, Size, Env) when is_integer(Size), Size >= 1 ->
+    RecordType = {record, Tag, []},
+    TupleType = {tuple, [{atom_lit, Tag} | lists:duplicate(Size - 1, any)]},
+    case refine_var(V, RecordType, Env) of
+        unreachable -> unreachable;
+        {ok, Env1} -> refine_var(V, TupleType, Env1)
+    end;
+refine_record_with_size(V, Tag, _Size, Env) ->
+    refine_var(V, {record, Tag, []}, Env).
 
 guard_type(is_integer) -> integer;
 guard_type(is_float) -> float;
@@ -833,7 +870,7 @@ infer_nested_clauses(Mod, MFA, Clauses, Env0, Contracts, Warns0, Sites0) ->
     lists:foldl(
         fun({clause, _, Pats, Guards, Body}, {W, S}) ->
                 Env1 = lists:foldl(fun(Pat, E) -> {_, E1} = bind_pattern(Pat, any, E), E1 end, Env0, Pats),
-                case apply_guard_disjunction(Guards, Env1) of
+                case apply_guard_disjunction(Guards, Env1, Contracts) of
                     unreachable ->
                         {W, S};
                     {ok, Env2} ->
@@ -956,8 +993,175 @@ infer_binop(MFA, Anno, Op, LAst, LType, _RAst, RType, Env0, Warns, Sites)
             Ret = case Op of '++' -> prisma_type:join(LType, RType); '--' -> LType end,
             {Ret, Env1, Warns, Sites}
     end;
+infer_binop(_MFA, _Anno, Op, _LAst, LType, _RAst, RType, Env, Warns, Sites)
+  when Op =:= '>'; Op =:= '>='; Op =:= '<'; Op =:= '=<';
+       Op =:= '=='; Op =:= '/='; Op =:= '=:='; Op =:= '=/=' ->
+    RetType = eval_relop(Op, LType, RType),
+    {RetType, Env, Warns, Sites};
 infer_binop(_MFA, _Anno, _Op, _LAst, _LType, _RAst, _RType, Env, Warns, Sites) ->
     {boolean, Env, Warns, Sites}.
+
+eval_relop(Op, {union, Members}, RType) ->
+    ResList = [eval_relop(Op, M, RType) || M <- Members],
+    combine_relop_results(ResList);
+eval_relop(Op, LType, {union, Members}) ->
+    ResList = [eval_relop(Op, LType, M) || M <- Members],
+    combine_relop_results(ResList);
+eval_relop(Op, {int_lit, LVal}, {int_lit, RVal}) ->
+    bool_to_lit(eval_raw_op(Op, LVal, RVal));
+eval_relop(Op, {atom_lit, LVal}, {atom_lit, RVal}) ->
+    bool_to_lit(eval_raw_op(Op, LVal, RVal));
+eval_relop(Op, LType, {int_lit, 0}) ->
+    eval_relop_zero(Op, LType);
+eval_relop(Op, {int_lit, 0}, RType) ->
+    eval_relop_zero_left(Op, RType);
+eval_relop(Op, LType, RType)
+  when Op =:= '=:='; Op =:= '=/=' ->
+    case prisma_type:meet(LType, RType) of
+        none when LType =/= none, RType =/= none ->
+            bool_to_lit(Op =:= '=/=');
+        _ ->
+            boolean
+    end;
+eval_relop(Op, LType, RType)
+  when Op =:= '=='; Op =:= '/=' ->
+    case prisma_type:meet(LType, RType) of
+        none when LType =/= none, RType =/= none ->
+            case is_numeric_type(LType) andalso is_numeric_type(RType) of
+                true -> boolean;
+                false -> bool_to_lit(Op =:= '/=')
+            end;
+        _ ->
+            boolean
+    end;
+eval_relop(_Op, _LType, _RType) ->
+    boolean.
+
+combine_relop_results([]) -> boolean;
+combine_relop_results(ResList) ->
+    case lists:usort(ResList) of
+        [{atom_lit, true}] -> {atom_lit, true};
+        [{atom_lit, false}] -> {atom_lit, false};
+        _ -> boolean
+    end.
+
+bool_to_lit(true) -> {atom_lit, true};
+bool_to_lit(false) -> {atom_lit, false}.
+
+eval_raw_op('>', L, R) -> L > R;
+eval_raw_op('>=', L, R) -> L >= R;
+eval_raw_op('<', L, R) -> L < R;
+eval_raw_op('=<', L, R) -> L =< R;
+eval_raw_op('==', L, R) -> L == R;
+eval_raw_op('/=', L, R) -> L /= R;
+eval_raw_op('=:=', L, R) -> L =:= R;
+eval_raw_op('=/=', L, R) -> L =/= R.
+
+eval_relop_zero(Op, LType) ->
+    case {is_strictly_positive(LType), is_strictly_negative(LType), is_non_negative(LType)} of
+        {true, _, _} ->
+            case Op of
+                '>' -> {atom_lit, true};
+                '>=' -> {atom_lit, true};
+                '<' -> {atom_lit, false};
+                '=<' -> {atom_lit, false};
+                '==' -> {atom_lit, false};
+                '=:=' -> {atom_lit, false};
+                '/=' -> {atom_lit, true};
+                '=/=' -> {atom_lit, true};
+                _ -> boolean
+            end;
+        {_, true, _} ->
+            case Op of
+                '<' -> {atom_lit, true};
+                '=<' -> {atom_lit, true};
+                '>' -> {atom_lit, false};
+                '>=' -> {atom_lit, false};
+                '==' -> {atom_lit, false};
+                '=:=' -> {atom_lit, false};
+                '/=' -> {atom_lit, true};
+                '=/=' -> {atom_lit, true};
+                _ -> boolean
+            end;
+        {_, _, true} ->
+            case Op of
+                '<' -> {atom_lit, false};
+                '>=' -> {atom_lit, true};
+                _ -> boolean
+            end;
+        _ ->
+            boolean
+    end.
+
+eval_relop_zero_left(Op, RType) ->
+    case {is_strictly_positive(RType), is_strictly_negative(RType), is_non_negative(RType)} of
+        {true, _, _} ->
+            case Op of
+                '<' -> {atom_lit, true};
+                '=<' -> {atom_lit, true};
+                '>' -> {atom_lit, false};
+                '>=' -> {atom_lit, false};
+                '==' -> {atom_lit, false};
+                '=:=' -> {atom_lit, false};
+                '/=' -> {atom_lit, true};
+                '=/=' -> {atom_lit, true};
+                _ -> boolean
+            end;
+        {_, true, _} ->
+            case Op of
+                '>' -> {atom_lit, true};
+                '>=' -> {atom_lit, true};
+                '<' -> {atom_lit, false};
+                '=<' -> {atom_lit, false};
+                '==' -> {atom_lit, false};
+                '=:=' -> {atom_lit, false};
+                '/=' -> {atom_lit, true};
+                '=/=' -> {atom_lit, true};
+                _ -> boolean
+            end;
+        {_, _, true} ->
+            case Op of
+                '>' -> {atom_lit, false};
+                '=<' -> {atom_lit, true};
+                _ -> boolean
+            end;
+        _ ->
+            boolean
+    end.
+
+is_strictly_positive({int_lit, N}) when is_integer(N), N > 0 -> true;
+is_strictly_positive({int_range, Lo, _}) when is_integer(Lo), Lo > 0 -> true;
+is_strictly_positive(pos_integer) -> true;
+is_strictly_positive({union, Members}) ->
+    Members =/= [] andalso lists:all(fun is_strictly_positive/1, Members);
+is_strictly_positive(_) -> false.
+
+is_strictly_negative({int_lit, N}) when is_integer(N), N < 0 -> true;
+is_strictly_negative({int_range, _, Hi}) when is_integer(Hi), Hi < 0 -> true;
+is_strictly_negative(neg_integer) -> true;
+is_strictly_negative({union, Members}) ->
+    Members =/= [] andalso lists:all(fun is_strictly_negative/1, Members);
+is_strictly_negative(_) -> false.
+
+is_non_negative({int_lit, N}) when is_integer(N), N >= 0 -> true;
+is_non_negative({int_range, Lo, _}) when is_integer(Lo), Lo >= 0 -> true;
+is_non_negative(pos_integer) -> true;
+is_non_negative(non_neg_integer) -> true;
+is_non_negative({union, Members}) ->
+    Members =/= [] andalso lists:all(fun is_non_negative/1, Members);
+is_non_negative(_) -> false.
+
+is_numeric_type(integer) -> true;
+is_numeric_type(pos_integer) -> true;
+is_numeric_type(neg_integer) -> true;
+is_numeric_type(non_neg_integer) -> true;
+is_numeric_type(float) -> true;
+is_numeric_type(number) -> true;
+is_numeric_type({int_lit, _}) -> true;
+is_numeric_type({int_range, _, _}) -> true;
+is_numeric_type({union, Members}) ->
+    Members =/= [] andalso lists:all(fun is_numeric_type/1, Members);
+is_numeric_type(_) -> false.
 
 infer_unop(MFA, Anno, 'not', ArgAst, ArgType, Env0, Warns, Sites) ->
     case prisma_type:meet(ArgType, boolean) of
@@ -1093,12 +1297,12 @@ infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0) 
                             %% covered by the clauses before it: nothing is said (a catch-all after exhaustive clauses is common)
                             {RetsAcc, EnvsAcc, WAcc, SAcc, Remaining};
                         {ok, CEnv0} ->
-                            TestWarns = guard_warnings(MFA, CGuards, CEnv0),
+                            TestWarns = guard_warnings(MFA, CGuards, CEnv0, Contracts),
                             Remaining1 = case CGuards of
                                 [] -> subtract_pattern(Remaining, Pats, Env0);
                                 _ -> Remaining
                             end,
-                            case apply_guard_disjunction(CGuards, CEnv0) of
+                            case apply_guard_disjunction(CGuards, CEnv0, Contracts) of
                                 unreachable ->
                                     GWarns = case is_generated_function(MFA) of
                                         true -> [];
@@ -1204,14 +1408,17 @@ has_unknown(_) -> false.
 infer_call(Mod, CallerMFA, Anno, Target, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites0) ->
     Line = erl_anno:line(Anno),
     case resolve_call_target(Mod, Target, length(ArgTypes)) of
-        {ok, {erlang, ExitFn, 1} = CalleeMFA}
-          when ExitFn =:= error; ExitFn =:= exit; ExitFn =:= throw ->
+        {ok, {erlang, ExitFn, Arity} = CalleeMFA}
+          when (ExitFn =:= error andalso (Arity =:= 1 orelse Arity =:= 2 orelse Arity =:= 3));
+               (ExitFn =:= exit andalso Arity =:= 1);
+               (ExitFn =:= throw andalso Arity =:= 1);
+               (ExitFn =:= halt andalso (Arity =:= 0 orelse Arity =:= 1 orelse Arity =:= 2)) ->
             {none, Env0, Warns0, [{Line, CalleeMFA, ArgTypes} | Sites0]};
         {ok, {erlang, Bif, Arity} = CalleeMFA} ->
             Sites1 = [site(Env0, Line, CalleeMFA, ArgTypes) | Sites0],
             case bif_signature(Bif, Arity) of
                 {ok, ExpectedArgs, RetType0} ->
-                    RetType = bif_return_type(Bif, ArgTypes, RetType0),
+                    RetType = bif_return_type(Bif, ArgTypes, RetType0, Contracts),
                     apply_callee_signature(CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, ExpectedArgs, RetType, Env0, Warns0, Sites1);
                 error ->
                     {any, Env0, Warns0, Sites1}
@@ -1354,12 +1561,47 @@ short_circuit_type(Op, LType, RType) ->
     prisma_type:normalize_union([T || {true, T} <- [{Decides, Deciding}, {RightRuns, RType}]]).
 
 %% Return types that depend on the argument: tl([1 | 2]) is 2, not a list.
-bif_return_type(tl, [ArgType], _Static) ->
+bif_return_type(tl, [ArgType], _Static, _Contracts) ->
     case list_tail_type(ArgType) of
         none -> {list, any};
         Tail -> Tail
     end;
-bif_return_type(_Bif, _ArgTypes, Static) ->
+bif_return_type(is_record, [TermType, {atom_lit, Tag}], _Static, Contracts) ->
+    TupleType = case maps:get({record_def, Tag}, Contracts, undefined) of
+        Size when is_integer(Size), Size >= 1 ->
+            {tuple, [{atom_lit, Tag} | lists:duplicate(Size - 1, any)]};
+        _ ->
+            {record, Tag, []}
+    end,
+    case prisma_type:meet(TermType, TupleType) of
+        none when TermType =/= none -> {atom_lit, false};
+        _ ->
+            case prisma_type:consistent_subtype(TermType, TupleType) of
+                true -> {atom_lit, true};
+                false -> boolean
+            end
+    end;
+bif_return_type(is_record, [TermType, {atom_lit, Tag}, {int_lit, Size}], _Static, _Contracts) when Size >= 1 ->
+    TupleType = {tuple, [{atom_lit, Tag} | lists:duplicate(Size - 1, any)]},
+    case prisma_type:meet(TermType, TupleType) of
+        none when TermType =/= none -> {atom_lit, false};
+        _ ->
+            case prisma_type:consistent_subtype(TermType, TupleType) of
+                true -> {atom_lit, true};
+                false -> boolean
+            end
+    end;
+bif_return_type(is_function, [TermType, {int_lit, Arity}], _Static, _Contracts) when Arity >= 0 ->
+    FunType = {fun_type, lists:duplicate(Arity, any), any},
+    case prisma_type:meet(TermType, any_fun) of
+        none when TermType =/= none -> {atom_lit, false};
+        _ ->
+            case prisma_type:consistent_subtype(TermType, FunType) of
+                true -> {atom_lit, true};
+                false -> boolean
+            end
+    end;
+bif_return_type(_Bif, _ArgTypes, Static, _Contracts) ->
     Static.
 
 bif_signature(length, 1) -> {ok, [{list, any}], non_neg_integer};
@@ -1398,6 +1640,14 @@ bif_signature(is_bitstring, 1) -> {ok, [any], boolean};
 bif_signature(is_list, 1) -> {ok, [any], boolean};
 bif_signature(is_tuple, 1) -> {ok, [any], boolean};
 bif_signature(is_map, 1) -> {ok, [any], boolean};
+bif_signature(is_pid, 1) -> {ok, [any], boolean};
+bif_signature(is_port, 1) -> {ok, [any], boolean};
+bif_signature(is_reference, 1) -> {ok, [any], boolean};
+bif_signature(is_function, 1) -> {ok, [any], boolean};
+bif_signature(is_function, 2) -> {ok, [any, non_neg_integer], boolean};
+bif_signature(is_record, 2) -> {ok, [any, atom], boolean};
+bif_signature(is_record, 3) -> {ok, [any, atom, integer], boolean};
+bif_signature(is_map_key, 2) -> {ok, [any, any_map], boolean};
 bif_signature(_, _) -> error.
 
 make_warning(Kind, MFA, Anno, Msg) ->

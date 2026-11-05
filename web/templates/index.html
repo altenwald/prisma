@@ -1,207 +1,7 @@
-<!DOCTYPE html>
-<html lang="en" data-theme="light">
-<head>
-  <meta charset="utf-8">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Prisma — Fast, Modular Type &amp; Spec Analyzer for Erlang &amp; Elixir</title>
-  <meta name="title" content="Prisma — Fast, Modular Type &amp; Spec Analyzer for Erlang &amp; Elixir">
-  <meta name="description" content="Next-generation static type analyzer with modular .pplt tables for Erlang and Elixir. Up to 6.3x faster than Dialyzer, 20.8x less CPU. Every seeded fault caught, no known false positives in discrepancy mode.">
-  <meta name="keywords" content="erlang, elixir, dialyzer, gradualizer, beam, static type analyzer, typespecs, pplt, altenwald, static analysis">
-  <meta name="author" content="Altenwald">
-  <meta name="robots" content="index, follow">
-  <meta name="distribution" content="global">
-  <link rel="canonical" href="https://prisma.altenwald.com/">
-  <link rel="sitemap" type="application/xml" title="Sitemap" href="https://prisma.altenwald.com/sitemap.xml">
-
-  <!-- Mobile & PWA Theme -->
-  <meta name="theme-color" content="#0f172a">
-  <meta name="msapplication-TileColor" content="#0f172a">
-  <meta name="apple-mobile-web-app-title" content="Prisma">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-
-  <!-- Favicons -->
-  <link rel="icon" type="image/svg+xml" href="assets/prisma.svg">
-  <link rel="icon" type="image/png" sizes="32x32" href="assets/prisma.png">
-  <link rel="apple-touch-icon" href="assets/prisma.png">
-
-  <!-- Schema.org Microdata -->
-  <meta itemprop="name" content="Prisma — Fast, Modular Type &amp; Spec Analyzer for Erlang &amp; Elixir">
-  <meta itemprop="description" content="Next-generation static type analyzer with modular .pplt tables for Erlang and Elixir. Up to 6.3x faster than Dialyzer, 20.8x less CPU. Zero runtime dependencies.">
-  <meta itemprop="image" content="https://prisma.altenwald.com/assets/prisma_og.png">
-
-  <!-- Open Graph / Facebook / LinkedIn / Telegram -->
-  <meta property="og:type" content="website">
-  <meta property="og:site_name" content="Prisma · Altenwald">
-  <meta property="og:url" content="https://prisma.altenwald.com/">
-  <meta property="og:title" content="Prisma — Fast, Modular Type &amp; Spec Analyzer for Erlang &amp; Elixir">
-  <meta property="og:description" content="Next-generation static type analyzer with modular .pplt tables for Erlang and Elixir. Up to 6.3x faster than Dialyzer, 20.8x less CPU. Every seeded fault caught, no known false positives in discrepancy mode.">
-  <meta property="og:image" content="https://prisma.altenwald.com/assets/prisma_og.png">
-  <meta property="og:image:secure_url" content="https://prisma.altenwald.com/assets/prisma_og.png">
-  <meta property="og:image:type" content="image/png">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Prisma — Fast, Modular Type &amp; Spec Analyzer for Erlang &amp; Elixir">
-  <meta property="og:locale" content="en_US">
-
-  <!-- Twitter / X Card / Telegram -->
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:site" content="@altenwald">
-  <meta name="twitter:creator" content="@altenwald">
-  <meta name="twitter:url" content="https://prisma.altenwald.com/">
-  <meta name="twitter:title" content="Prisma — Fast, Modular Type &amp; Spec Analyzer for Erlang &amp; Elixir">
-  <meta name="twitter:description" content="Next-generation static type analyzer with modular .pplt tables for Erlang and Elixir. Up to 6.3x faster than Dialyzer, 20.8x less CPU. Every seeded fault caught, no known false positives in discrepancy mode.">
-  <meta name="twitter:image" content="https://prisma.altenwald.com/assets/prisma_og.png">
-  <meta name="twitter:image:alt" content="Prisma — Fast, Modular Type &amp; Spec Analyzer for Erlang &amp; Elixir">
-
-  <!-- JSON-LD Structured Data for Search Engines -->
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    "name": "Prisma",
-    "applicationCategory": "DeveloperApplication",
-    "operatingSystem": "Cross-platform (BEAM, Erlang/OTP, Elixir)",
-    "url": "https://prisma.altenwald.com/",
-    "image": "https://prisma.altenwald.com/assets/prisma_og.png",
-    "description": "Fast, modular static type and spec analyzer with .pplt tables for Erlang and Elixir. Up to 6.3x faster than Dialyzer with 20.8x less CPU.",
-    "softwareVersion": "0.1.0",
-    "license": "https://github.com/altenwald/prisma/blob/main/LICENSE",
-    "codeRepository": "https://github.com/altenwald/prisma",
-    "author": {
-      "@type": "Organization",
-      "name": "Altenwald",
-      "url": "https://altenwald.com/"
-    },
-    "offers": {
-      "@type": "Offer",
-      "price": "0",
-      "priceCurrency": "USD"
-    }
-  }
-  </script>
-
-  <!-- Tailwind CSS & DaisyUI via CDN -->
-  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css" />
-  <script src="https://cdn.tailwindcss.com"></script>
-
-  <!-- Google Fonts: Plus Jakarta Sans & JetBrains Mono -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-
-  <!-- D3.js for interactive benchmark charts -->
-  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
-
-  <script>
-    tailwind.config = {
-      darkMode: ['class', '[data-theme="dark"]'],
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
-            mono: ['"JetBrains Mono"', 'monospace'],
-          },
-          colors: {
-            prisma: {
-              navy: '#1b3566',
-              blue: '#2563eb',
-              azure: '#0284c7',
-              sky: '#38bdf8',
-              teal: '#0d9488',
-              amber: '#d97706',
-              purple: '#7c3aed',
-              dark: '#0f172a',
-            }
-          }
-        }
-      }
-    }
-  </script>
-
-  <style>
-    body {
-      font-family: 'Plus Jakarta Sans', sans-serif;
-      background-color: #fafaf9;
-      color: #0f172a;
-    }
-    code, pre { font-family: 'JetBrains Mono', monospace; }
-    
-    .floating-pill {
-      background: rgba(255, 255, 255, 0.75);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(226, 232, 240, 0.85);
-      box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.05);
-    }
-
-    .clean-card {
-      background: #ffffff;
-      border: 1px solid #e2e8f0;
-      border-radius: 1.5rem;
-      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02), 0 1px 2px -1px rgba(0, 0, 0, 0.02);
-      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    .clean-card:hover {
-      box-shadow: 0 12px 24px -4px rgba(15, 23, 42, 0.06);
-      transform: translateY(-2px);
-    }
-
-    .d3-tooltip {
-      position: absolute;
-      text-align: center;
-      padding: 6px 12px;
-      font-size: 12px;
-      font-family: 'JetBrains Mono', monospace;
-      background: #0f172a;
-      color: #ffffff;
-      border-radius: 8px;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.15s ease;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
-      z-index: 50;
-    }
-  </style>
-</head>
+{% include "head.html" %}
 <body class="min-h-screen flex flex-col antialiased selection:bg-blue-100 selection:text-blue-900">
 
-  <!-- ================= FLOATING OBAN-STYLE PILL NAVBAR ================= -->
-  <header class="sticky top-4 z-50 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto w-full">
-    <div class="floating-pill rounded-full px-5 py-2.5 flex items-center justify-between">
-      
-      <!-- Brand -->
-      <a href="#" class="flex items-center gap-3 group">
-        <img src="assets/prisma.svg" alt="Prisma Logo" class="w-8 h-8 transition-transform group-hover:scale-105 duration-300">
-        <span class="font-extrabold text-xl tracking-tight text-slate-900 flex items-center gap-2">
-          Prisma
-          <span class="text-[10px] font-mono font-bold uppercase tracking-wider text-blue-600 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-full">v0.1.0</span>
-        </span>
-      </a>
-
-      <!-- Center Links -->
-      <nav class="hidden md:flex items-center gap-1 text-sm font-semibold text-slate-600">
-        <a href="#features" class="px-3.5 py-1.5 rounded-full hover:bg-slate-100 hover:text-slate-900 transition-colors">Features</a>
-        <a href="#architecture" class="px-3.5 py-1.5 rounded-full hover:bg-slate-100 hover:text-slate-900 transition-colors">Architecture</a>
-        <a href="#benchmarks" class="px-3.5 py-1.5 rounded-full hover:bg-slate-100 hover:text-slate-900 transition-colors">Benchmarks</a>
-        <a href="#quickstart" class="px-3.5 py-1.5 rounded-full hover:bg-slate-100 hover:text-slate-900 transition-colors">Quickstart</a>
-        <a href="#sponsors" class="px-3.5 py-1.5 rounded-full hover:bg-amber-50 hover:text-amber-700 transition-colors">Sponsors</a>
-      </nav>
-
-      <!-- Right CTAs -->
-      <div class="flex items-center gap-3">
-        <a href="https://github.com/altenwald/prisma" target="_blank" rel="noopener noreferrer" class="hidden sm:inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors">
-          <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-          <span>Star</span>
-        </a>
-        <a href="#quickstart" class="rounded-full bg-slate-900 hover:bg-blue-600 text-white text-xs font-semibold px-4 py-2 transition-colors shadow-sm">
-          Install
-        </a>
-      </div>
-
-    </div>
-  </header>
+{% include "header.html" %}
 
   <main class="flex-grow">
 
@@ -210,7 +10,7 @@
       
       <!-- Floating Logo -->
       <div class="w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-6 flex items-center justify-center">
-        <img src="assets/prisma.png" alt="Prisma 3D Crystal Logo" class="w-full h-full object-contain filter drop-shadow-[0_10px_16px_rgba(37,99,235,0.25)] transition-transform duration-500 hover:scale-105">
+        <img src="/assets/prisma.png" alt="Prisma 3D Crystal Logo" class="w-full h-full object-contain filter drop-shadow-[0_10px_16px_rgba(37,99,235,0.25)] transition-transform duration-500 hover:scale-105">
       </div>
 
       <!-- Eyebrow Tag -->
@@ -236,8 +36,8 @@
           <span>Get Started in Minutes</span>
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
         </a>
-        <a href="#benchmarks" class="rounded-full bg-white hover:bg-slate-50 text-slate-700 font-semibold text-sm px-6 py-3.5 border border-slate-200 shadow-sm transition-all">
-          Explore Benchmarks
+        <a href="/blog/" class="rounded-full bg-white hover:bg-slate-50 text-slate-700 font-semibold text-sm px-6 py-3.5 border border-slate-200 shadow-sm transition-all">
+          Read Case Studies
         </a>
       </div>
 
@@ -260,7 +60,7 @@
             
             <!-- Real Demo GIF -->
             <div class="relative bg-slate-950 flex items-center justify-center">
-              <img src="assets/prisma_demo.gif" alt="Prisma terminal demo on RabbitMQ" class="w-full h-auto block select-none">
+              <img src="/assets/prisma_demo.gif" alt="Prisma terminal demo on RabbitMQ" class="w-full h-auto block select-none">
             </div>
           </div>
 
@@ -702,8 +502,10 @@ cp _build/default/bin/prisma /usr/local/bin/</code></pre>
       </div>
     </section>
 
+    {{ widgets.en.recent_posts | safe }}
+
     <!-- ================= SPONSORS SECTION ================= -->
-    <section id="sponsors" class="py-24 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+    <section id="sponsors" class="py-24 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-slate-200">
       
       <div class="text-center max-w-2xl mx-auto mb-16 space-y-3">
         <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-xs font-semibold">
@@ -721,7 +523,7 @@ cp _build/default/bin/prisma /usr/local/bin/</code></pre>
         <!-- Altenwald -->
         <a href="https://altenwald.com" target="_blank" rel="noopener noreferrer" class="clean-card p-8 flex flex-col items-center justify-center text-center group">
           <div class="h-12 flex items-center justify-center mb-3">
-            <img src="assets/altenwald_logo.png" alt="Altenwald Logo" class="h-8 w-auto object-contain transition-transform group-hover:scale-105 duration-300">
+            <img src="/assets/altenwald_logo.png" alt="Altenwald Logo" class="h-8 w-auto object-contain transition-transform group-hover:scale-105 duration-300">
           </div>
           <div class="font-bold text-slate-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5 text-sm">
             Altenwald
@@ -734,7 +536,7 @@ cp _build/default/bin/prisma /usr/local/bin/</code></pre>
         <!-- Dymmer -->
         <a href="https://dymmer.com" target="_blank" rel="noopener noreferrer" class="clean-card p-8 flex flex-col items-center justify-center text-center group">
           <div class="h-12 flex items-center justify-center mb-3">
-            <img src="assets/dymmer_logo.png" alt="Dymmer Logo" class="h-8 w-auto object-contain transition-transform group-hover:scale-105 duration-300">
+            <img src="/assets/dymmer_logo.png" alt="Dymmer Logo" class="h-8 w-auto object-contain transition-transform group-hover:scale-105 duration-300">
           </div>
           <div class="font-bold text-slate-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5 text-sm">
             Dymmer
@@ -771,22 +573,7 @@ cp _build/default/bin/prisma /usr/local/bin/</code></pre>
 
   </main>
 
-  <!-- ================= MINIMALIST FOOTER ================= -->
-  <footer class="border-t border-slate-200 bg-white py-10 text-xs">
-    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-      <div class="flex items-center gap-2.5">
-        <img src="assets/prisma.svg" alt="Prisma Logo" class="w-6 h-6">
-        <span class="font-bold text-slate-900">Prisma</span>
-        <span class="text-slate-400">— Released under the Apache-2.0 License.</span>
-      </div>
-      <div class="flex items-center gap-6 text-slate-500 font-medium">
-        <a href="https://github.com/altenwald/prisma" target="_blank" class="hover:text-slate-900 transition-colors">GitHub</a>
-        <a href="https://hex.pm/packages/prisma" target="_blank" class="hover:text-slate-900 transition-colors">Hex.pm</a>
-        <a href="https://hexdocs.pm/prisma" target="_blank" class="hover:text-slate-900 transition-colors">HexDocs</a>
-        <a href="https://github.com/sponsors/altenwald" target="_blank" class="text-amber-600 hover:text-amber-700 transition-colors">Sponsor</a>
-      </div>
-    </div>
-  </footer>
+{% include "footer.html" %}
 
   <!-- ================= D3.JS MINIMALIST CHART SCRIPT ================= -->
   <script>

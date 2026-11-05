@@ -149,7 +149,16 @@ specs_in(Mod, Forms) ->
 %% against the spec by the checker. A function without a spec, or whose spec returns anything, adds nothing.
 external_contracts(Mod, ExternalSpecs) ->
     maps:fold(
-        fun({M, _F, A} = Key, Specs, Acc) when M =/= Mod ->
+        fun({M, _F, A} = Key, #func_contract{inferred_type = {fun_type, _, Inferred}, declared_specs = Specs} = C, Acc) when M =/= Mod ->
+                Ret = case prisma_infer:declared_return(Specs, A) of
+                    any -> Inferred;
+                    Declared -> Declared
+                end,
+                case Ret of
+                    any -> Acc;
+                    _ -> Acc#{Key => C#func_contract{inferred_type = {fun_type, lists:duplicate(A, any), Ret}}}
+                end;
+           ({M, _F, A} = Key, Specs, Acc) when M =/= Mod, is_list(Specs) ->
                 case prisma_infer:declared_return(Specs, A) of
                     any -> Acc;
                     Ret -> Acc#{Key => #func_contract{mfa = Key, declared_specs = Specs,
@@ -170,26 +179,29 @@ parse_abstract_forms(Forms, Exports, Summary) ->
     #module_summary{}.
 parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types = AttrExpTypes} = Summary, Opts) ->
     ExportSet = maps:from_list([{FA, true} || FA <- Exports]),
-    {RawTypes, FormExpTypes, Specs, InitialFuncs, ClausesByMFA, _GenSet} = lists:foldl(
-        fun(Form, {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc}) ->
+    {RawTypes, FormExpTypes, Specs, InitialFuncs, ClausesByMFA, _GenSet, RecDefs} = lists:foldl(
+        fun(Form, {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc}) ->
             case Form of
                 {attribute, _Anno, compiler_generated, {F, A}} ->
-                    {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc#{{Mod, F, A} => true}};
+                    {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc#{{Mod, F, A} => true}, RAcc};
                 {attribute, _Anno, export_type, ExpList} when is_list(ExpList) ->
-                    {TAcc, ExpList ++ ETAcc, SAcc, FAcc, CAcc, GAcc};
+                    {TAcc, ExpList ++ ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc};
                 {attribute, _Anno, Kind, {_TypeName, _TypeDef, _TypeArgs} = TypeAttr}
                   when Kind =:= type; Kind =:= opaque; Kind =:= nominal ->
                     Decl = prisma_type:from_type_attr(Mod, Kind, TypeAttr),
                     Key = Decl#type_decl.key,
-                    {TAcc#{Key => Decl}, ETAcc, SAcc, FAcc, CAcc, GAcc};
+                    {TAcc#{Key => Decl}, ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc};
+                {attribute, _Anno, record, {RecName, FieldList}} ->
+                    RecSize = 1 + length(FieldList),
+                    {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc#{RecName => RecSize}};
                 {attribute, _Anno, spec, {{F, A}, SpecClauses}} ->
                     Key = {Mod, F, A},
                     NormSpecs = [prisma_type:from_abstract(S) || S <- SpecClauses],
-                    {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc, CAcc, GAcc};
+                    {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc, CAcc, GAcc, RAcc};
                 {attribute, _Anno, spec, {{M, F, A}, SpecClauses}} ->
                     Key = {M, F, A},
                     NormSpecs = [prisma_type:from_abstract(S) || S <- SpecClauses],
-                    {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc, CAcc, GAcc};
+                    {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc, CAcc, GAcc, RAcc};
                 {function, Anno, F, A, Clauses} ->
                     Key = {Mod, F, A},
                     Line = erl_anno:line(Anno),
@@ -205,12 +217,12 @@ parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types 
                         compiler_generated = IsGen,
                         line = Line
                     },
-                    {TAcc, ETAcc, SAcc, FAcc#{Key => Contract}, CAcc#{Key => {Line, Clauses}}, GAcc};
+                    {TAcc, ETAcc, SAcc, FAcc#{Key => Contract}, CAcc#{Key => {Line, Clauses}}, GAcc, RAcc};
                 _ ->
-                    {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc}
+                    {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc}
             end
         end,
-        {#{}, AttrExpTypes, #{}, #{}, #{}, #{}},
+        {#{}, AttrExpTypes, #{}, #{}, #{}, #{}, #{}},
         Forms
     ),
     AllExpTypes = lists:usort(FormExpTypes),
@@ -223,8 +235,9 @@ parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types 
     ),
     WithSpecs = merge_specs_into_funcs(Mod, ExportSet, Specs, InitialFuncs),
     External = external_contracts(Mod, maps:get(external_specs, Opts, #{})),
-    Inferred = prisma_infer:infer_module_functions(Mod, ClausesByMFA, maps:merge(External, WithSpecs)),
-    InferredFuncs = maps:filter(fun({M, _, _}, _) -> M =:= Mod end, Inferred),
+    RecordContracts = maps:from_list([{{record_def, RName}, RSize} || {RName, RSize} <- maps:to_list(RecDefs)]),
+    Inferred = prisma_infer:infer_module_functions(Mod, ClausesByMFA, maps:merge(RecordContracts, maps:merge(External, WithSpecs))),
+    InferredFuncs = maps:filter(fun({M, _, _}, _) -> M =:= Mod; (_, _) -> false end, Inferred),
     ResolvedFile = case Summary#module_summary.file of
         undefined ->
             case [FPath || {attribute, _Anno, file, {FPath, _Line}} <- Forms, is_list(FPath), FPath =/= ""] of

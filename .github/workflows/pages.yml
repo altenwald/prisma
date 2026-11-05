@@ -32,11 +32,29 @@ jobs:
       - name: Web assets are in sync
         run: tools/check_web_assets.sh
 
+      - name: Set up Erlang & Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.3'
+          elixir-version: '1.17.3'
+
+      - name: Install Lambdapad (lpad)
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          MIX_ENV=prod mix escript.install github lambdapad/lambdapad --force
+
+      - name: Generate dynamic OG & X cards and compile site with Lambdapad
+        working-directory: web
+        run: |
+          elixir og_cards.exs
+          ~/.mix/escripts/lpad
+
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: web
+          path: web/site
 
       - id: deployment
         uses: actions/deploy-pages@v4

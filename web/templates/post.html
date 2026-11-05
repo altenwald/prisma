@@ -1,0 +1,139 @@
+{% include "head.html" %}
+<body class="min-h-screen flex flex-col antialiased selection:bg-blue-100 selection:text-blue-900">
+
+{% include "header.html" %}
+
+  <main class="flex-grow py-12 sm:py-16 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
+    <div class="mb-6">
+      <a href="/blog/" class="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-blue-600 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+        <span>Back to Blog &amp; Benchmarks</span>
+      </a>
+    </div>
+
+    <header class="mb-10 pb-8 border-b border-slate-200">
+      <div class="flex flex-wrap items-center gap-2.5 text-xs mb-4">
+        {% if post.category %}
+        <span class="px-2.5 py-0.5 rounded-full font-semibold bg-blue-50 text-blue-700 border border-blue-200/80">{{ post.category }}</span>
+        {% endif %}
+        {% if post.group %}
+        <span class="px-2.5 py-0.5 rounded-full font-mono font-semibold bg-slate-100 text-slate-700">{{ post.group }}</span>
+        {% endif %}
+        <span class="text-slate-400 font-mono">{{ post.date }}</span>
+        {% if post.author %}
+        <span class="text-slate-400">&middot; {{ post.author }}</span>
+        {% endif %}
+        {% if post.otp_release %}
+        <span class="px-2.5 py-0.5 rounded-full font-mono text-[11px] bg-slate-100 text-slate-600">OTP {{ post.otp_release }}</span>
+        {% endif %}
+      </div>
+
+      <h1 class="text-3xl sm:text-5xl font-extrabold text-slate-900 tracking-tight leading-tight mb-4">
+        {{ post.title }}
+      </h1>
+
+      {% if post.subtitle %}
+      <p class="text-lg sm:text-xl text-slate-600 leading-relaxed mb-6">{{ post.subtitle }}</p>
+      {% endif %}
+
+      {% if post._tags %}
+      <div class="flex flex-wrap gap-1.5 mb-6">
+        {% for tag in post._tags %}
+        <span class="px-2.5 py-0.5 rounded-md text-xs font-mono text-slate-500 bg-slate-100 border border-slate-200/60">#{{ tag }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if post.prisma_wall_s %}
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 p-4 rounded-2xl bg-white border border-slate-200 shadow-sm">
+        {% if post.repo %}
+        <div>
+          <div class="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Target Project</div>
+          <div class="text-sm font-mono font-bold mt-0.5">
+            <a href="{{ post.repo }}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">{{ post.project }} ({{ post.modules }} mods)</a>
+          </div>
+        </div>
+        {% endif %}
+        <div>
+          <div class="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Prisma Check</div>
+          <div class="text-sm font-mono font-bold text-blue-600 mt-0.5">{{ post.prisma_wall_s }}s <span class="text-xs font-normal text-slate-500">({{ post.prisma_cpu_s }}s CPU)</span></div>
+        </div>
+        <div>
+          <div class="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Dialyzer Check</div>
+          <div class="text-sm font-mono font-bold text-slate-700 mt-0.5">{{ post.dialyzer_wall_s }}s <span class="text-xs font-normal text-slate-500">({{ post.dialyzer_cpu_s }}s CPU)</span></div>
+        </div>
+        <div>
+          <div class="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Cache (.pplt vs .plt)</div>
+          <div class="text-sm font-mono font-bold text-teal-600 mt-0.5">{{ post.prisma_pplt_kb }} KB <span class="text-xs font-normal text-slate-500">vs {{ post.dialyzer_plt_kb }} KB</span></div>
+        </div>
+        <div>
+          <div class="text-[11px] uppercase tracking-wider font-semibold text-slate-400">True Warnings</div>
+          <div class="text-sm font-mono font-bold text-amber-600 mt-0.5">{{ post.prisma_warnings }} <span class="text-xs font-normal text-slate-500">vs {{ post.dialyzer_warnings }}</span></div>
+        </div>
+      </div>
+      {% endif %}
+    </header>
+
+    <article class="article-prose">
+      {{ post.content | safe }}
+    </article>
+  </main>
+
+{% include "footer.html" %}
+
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/erlang.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/elixir.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/plaintext.min.js"></script>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+    document.querySelectorAll('pre > code.mermaid').forEach((codeEl) => {
+      const pre = codeEl.parentElement;
+      const wrapper = document.createElement('div');
+      wrapper.className = 'mermaid-card';
+      const mermaidDiv = document.createElement('div');
+      mermaidDiv.className = 'mermaid';
+      mermaidDiv.textContent = codeEl.textContent;
+      wrapper.appendChild(mermaidDiv);
+      pre.replaceWith(wrapper);
+    });
+
+    document.querySelectorAll('.article-prose pre > code').forEach((codeEl) => {
+      const classes = Array.from(codeEl.classList);
+      classes.forEach((cls) => {
+        if (!cls.startsWith('language-') && cls !== 'hljs') {
+          const lang = cls === 'text' ? 'plaintext' : cls;
+          codeEl.classList.add(`language-${lang}`);
+        }
+      });
+      if (window.hljs) {
+        window.hljs.highlightElement(codeEl);
+      }
+    });
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'default',
+      themeVariables: {
+        primaryColor: '#eff6ff',
+        primaryTextColor: '#0f172a',
+        primaryBorderColor: '#2563eb',
+        lineColor: '#64748b',
+        secondaryColor: '#f8fafc',
+        tertiaryColor: '#f1f5f9'
+      }
+    });
+
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+    }
+
+    await mermaid.run({
+      querySelector: '.mermaid'
+    });
+  </script>
+</body>
+</html>

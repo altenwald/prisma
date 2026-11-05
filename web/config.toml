@@ -1,0 +1,15 @@
+[blog]
+title = "Prisma — Fast, Modular Type & Spec Analyzer for Erlang & Elixir"
+description = "Next-generation static type analyzer with modular .pplt tables for Erlang and Elixir. Up to 6.3x faster than Dialyzer, 20.8x less CPU. Every seeded fault caught, no known false positives in discrepancy mode."
+url = "https://prisma.altenwald.com/"
+version = "0.1.0"
+output_dir = "site"
+
+[authors]
+
+[authors.manuel]
+shortname = "manuel"
+name = "Manuel Rubio"
+url = "https://altenwald.com"
+email = "manuel@altenwald.com"
+description = "Founder at Altenwald & BEAM Ecosystem Researcher"

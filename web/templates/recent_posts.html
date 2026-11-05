@@ -1,0 +1,49 @@
+    <!-- ================= RECENT BLOG & CASE STUDIES SECTION ================= -->
+    <section id="blog" class="py-24 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-slate-200">
+      <div class="flex flex-col sm:flex-row sm:items-end justify-between mb-12 gap-4">
+        <div class="space-y-2">
+          <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-xs font-semibold">
+            <span>📊 Engineering Blog &amp; Case Studies</span>
+          </div>
+          <h2 class="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">Latest Audits &amp; Benchmarks</h2>
+          <p class="text-base text-slate-600">Deep-dive analyses of real-world Erlang &amp; Elixir libraries audited with Prisma vs. Dialyzer.</p>
+        </div>
+        <a href="/blog/" class="inline-flex items-center gap-1.5 text-sm font-bold text-blue-600 hover:text-blue-700 whitespace-nowrap group">
+          <span>View all articles</span>
+          <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+        </a>
+      </div>
+
+      <div class="grid grid-cols-1 gap-6">
+        {% for post in posts %}
+        <a href="/blog/{{ post.id }}/" class="clean-card p-6 sm:p-8 block group">
+          <div class="flex flex-wrap items-center gap-2.5 text-xs mb-3">
+            <span class="px-2.5 py-0.5 rounded-full font-semibold bg-blue-50 text-blue-700 border border-blue-200/80">{{ post.category }}</span>
+            {% if post.group %}
+            <span class="px-2.5 py-0.5 rounded-full font-mono font-semibold bg-slate-100 text-slate-700">{{ post.group }}</span>
+            {% endif %}
+            <span class="text-slate-400 font-mono">{{ post.date }}</span>
+            {% if post.modules %}
+            <span class="px-2.5 py-0.5 rounded-full font-mono text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200/80">{{ post.modules }} BEAM modules</span>
+            {% endif %}
+            {% if post.prisma_cpu_s %}
+            <span class="px-2.5 py-0.5 rounded-full font-mono text-[11px] bg-indigo-50 text-indigo-700 border border-indigo-200/80">Prisma CPU: {{ post.prisma_cpu_s }}s vs Dialyzer: {{ post.dialyzer_cpu_s }}s</span>
+            {% endif %}
+          </div>
+          <h3 class="text-xl sm:text-2xl font-extrabold text-slate-900 group-hover:text-blue-600 transition-colors mb-1.5">
+            {{ post.title }}
+          </h3>
+          {% if post.subtitle %}
+          <p class="text-sm font-medium text-slate-500 mb-3">{{ post.subtitle }}</p>
+          {% endif %}
+          <div class="text-sm text-slate-600 leading-relaxed mb-4">
+            {{ post.excerpt }}
+          </div>
+          <div class="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 group-hover:text-blue-700">
+            <span>Read full case study</span>
+            <svg class="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+    </section>

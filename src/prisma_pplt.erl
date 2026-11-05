@@ -68,21 +68,25 @@ from_beams(Beams, Opts0) ->
     Specs = lists:foldl(fun(Beam, Acc) -> maps:merge(Acc, prisma_abstract:specs_of_beam(Beam)) end,
                         maps:get(external_specs, Opts0, #{}), Beams),
     Opts = Opts0#{external_specs => Specs},
-    lists:foldl(
+    {Result, _} = lists:foldl(
         fun
-            (Beam, {ok, #prisma_pplt{modules = Mods} = Pplt}) ->
-                case prisma_abstract:extract_beam(Beam, Opts) of
-                    {ok, #module_summary{module = Mod} = Summary} ->
-                        {ok, Pplt#prisma_pplt{modules = Mods#{Mod => Summary}}};
+            (Beam, {{ok, #prisma_pplt{modules = Mods} = Pplt}, CurOpts}) ->
+                case prisma_abstract:extract_beam(Beam, CurOpts) of
+                    {ok, #module_summary{module = Mod, functions = Funcs} = Summary} ->
+                        NewContracts = maps:from_list([{{Mod, F, A}, C} || {{_, F, A}, C} <- maps:to_list(Funcs)]),
+                        CurExt = maps:get(external_specs, CurOpts, #{}),
+                        UpdatedExt = maps:merge(CurExt, NewContracts),
+                        {{ok, Pplt#prisma_pplt{modules = Mods#{Mod => Summary}}}, CurOpts#{external_specs => UpdatedExt}};
                     {error, Reason} ->
-                        {error, {beam_extract_failed, Beam, Reason}}
+                        {{error, {beam_extract_failed, Beam, Reason}}, CurOpts}
                 end;
-            (_Beam, {error, _} = Err) ->
-                Err
+            (_Beam, {{error, _} = Err, CurOpts}) ->
+                {Err, CurOpts}
         end,
-        {ok, BasePplt},
+        {{ok, BasePplt}, Opts},
         Beams
-    ).
+    ),
+    Result.
 
 %% @doc Merges a list of `#prisma_pplt{}` records into one.
 -spec merge([#prisma_pplt{}]) -> #prisma_pplt{}.

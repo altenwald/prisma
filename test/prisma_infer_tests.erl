@@ -1072,3 +1072,58 @@ meet_of_fun_types_whose_return_never_comes_back_test_() ->
      %% still disjoint when the arguments are, or the arity differs
      ?_assertEqual(none, prisma_type:meet({fun_type, [integer], none}, {fun_type, [atom], {atom_lit, ok}})),
      ?_assertEqual(none, prisma_type:meet({fun_type, [any], none}, {fun_type, [any, any], {atom_lit, ok}}))].
+
+binary_guards_and_record_check_test() ->
+    Src = "-module(bg_test).\n"
+          "-export([f/1]).\n"
+          "-record(tztime, {time, flag}).\n"
+          "f(X) ->\n"
+          "    case {1, 2} of\n"
+          "        T when is_record(T, tztime) -> ok;\n"
+          "        _ -> err\n"
+          "    end.\n",
+    {ok, Toks, _} = erl_scan:string(Src),
+    {ok, bg_test, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+    {ok, Ws} = prisma:analyze_beams([Beam], #{oxbow => false}),
+    DeadGuards = [L || #prisma_warning{kind = dead_code, line = L} <- Ws],
+    ?assertEqual([6], DeadGuards).
+
+relational_op_on_positive_integers_detects_dead_code_test() ->
+    Src = "-module(relop_test).\n"
+          "-export([day_to_num/1, day_pattern/1]).\n"
+          "day_to_num(\"Mon\") -> 1;\n"
+          "day_to_num(\"Tue\") -> 2;\n"
+          "day_to_num(X) -> erlang:error(badday, X).\n"
+          "day_pattern(Day) ->\n"
+          "    case day_to_num(Day) > 0 of\n"
+          "        true -> ok;\n"
+          "        false -> dead\n"
+          "    end.\n",
+    {ok, Toks, _} = erl_scan:string(Src),
+    {ok, relop_test, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+    {ok, Ws} = prisma:analyze_beams([Beam], #{oxbow => false}),
+    DeadBranches = [L || #prisma_warning{kind = dead_code, line = L} <- Ws],
+    ?assertEqual([9], DeadBranches).
+
+cross_module_unspecced_return_type_propagates_test() ->
+    ModA = "-module(cm_a).\n"
+           "-export([val/0]).\n"
+           "val() -> 1.\n",
+    ModB = "-module(cm_b).\n"
+           "-export([chk/0]).\n"
+           "chk() ->\n"
+           "    case cm_a:val() > 0 of\n"
+           "        true -> ok;\n"
+           "        false -> dead\n"
+           "    end.\n",
+    Compile = fun(Src) ->
+        {ok, Toks, _} = erl_scan:string(Src),
+        {ok, Mod, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+        {Mod, Beam}
+    end,
+    {cm_a, BeamA} = Compile(ModA),
+    {cm_b, BeamB} = Compile(ModB),
+    {ok, Ws} = prisma:analyze_beams([BeamA, BeamB], #{oxbow => false}),
+    DeadBranches = [L || #prisma_warning{kind = dead_code, line = L} <- Ws],
+    ?assertEqual([6], DeadBranches).
+
