@@ -11,6 +11,7 @@
     infer_module_functions/3,
     check_call_site/4,
     declared_return/2,
+    declared_return/3,
     extract_leex_token_map/2
 ]).
 
@@ -1457,7 +1458,7 @@ infer_contract_call(CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, Env0, Contrac
         {ok, #func_contract{inferred_type = {fun_type, ExpectedArgs, Inferred}, declared_specs = Specs}} ->
             %% what the callee declares, not what its body happens to give: if the body contradicts the spec the
             %% warning belongs to the callee, and its callers are not named for it
-            RetType = case declared_return(Specs, length(ExpectedArgs)) of
+            RetType = case declared_return(Specs, length(ExpectedArgs), ArgTypes) of
                 any -> Inferred;
                 Declared -> Declared
             end,
@@ -1496,10 +1497,40 @@ infer_yecc_helper_call(Mod, CalleeMFA, ArgTypes, LocalClauses, Contracts) ->
 %% here (`t()`, `other:t()`, an opaque, a type variable) are unknown, not impossible: a pattern does not match against them.
 -spec declared_return([prisma_type:stype()], non_neg_integer()) -> prisma_type:stype().
 declared_return(Specs, Arity) ->
-    Rets = [Ret || Spec <- Specs, {fun_type, Args, Ret} <- [prisma_type:unfold_bounded_fun(Spec)], length(Args) =:= Arity],
-    case Rets of
+    declared_return(Specs, Arity, []).
+
+-spec declared_return([prisma_type:stype()], non_neg_integer(), [prisma_type:stype()]) -> prisma_type:stype().
+declared_return(Specs, Arity, ArgTypes) ->
+    Clauses = [
+        {Args, Ret}
+     || Spec <- Specs,
+        {fun_type, Args, Ret} <- [prisma_type:unfold_bounded_fun(Spec)],
+        length(Args) =:= Arity
+    ],
+    Matching = case ArgTypes of
+        [] ->
+            [Ret || {_, Ret} <- Clauses];
+        _ when length(ArgTypes) =:= Arity ->
+            Compatible = [
+                Ret
+             || {DeclArgs, Ret} <- Clauses,
+                lists:all(
+                    fun({Actual, Decl}) ->
+                        Actual =:= any orelse Decl =:= any orelse prisma_type:meet(Actual, Decl) =/= none
+                    end,
+                    lists:zip(ArgTypes, DeclArgs)
+                )
+            ],
+            case Compatible of
+                [] -> [Ret || {_, Ret} <- Clauses];
+                _ -> Compatible
+            end;
+        _ ->
+            [Ret || {_, Ret} <- Clauses]
+    end,
+    case Matching of
         [] -> any;
-        _ -> erase_unresolved(prisma_type:normalize_union(Rets))
+        _ -> erase_unresolved(prisma_type:normalize_union(Matching))
     end.
 
 erase_unresolved({local_type, _, _}) -> any;
