@@ -39,8 +39,26 @@ blog do
 
   source(posts: "posts/**/*.md")
 
-  assets "general" do
-    set(from: "assets/**")
+  assets "css" do
+    set(from: "assets/**/*.css")
+    set(to: "site/")
+    set(tool: :tailwind)
+    set(tailwind: [
+      path:
+        System.get_env("TAILWIND_PATH") ||
+          System.find_executable("tailwind") ||
+          Path.expand("tailwind-macos-arm64"),
+      extra_args: ~w(--minify)
+    ])
+  end
+
+  assets "images" do
+    set(from: "assets/*.{png,svg,gif}")
+    set(to: "site/assets")
+  end
+
+  assets "social" do
+    set(from: "assets/{og,x}/**")
     set(to: "site/assets")
   end
 
