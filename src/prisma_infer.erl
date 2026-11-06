@@ -1657,7 +1657,7 @@ bif_return_type(is_record, [TermType, {atom_lit, Tag}], _Static, Contracts) ->
     case prisma_type:meet(TermType, TupleType) of
         none when TermType =/= none -> {atom_lit, false};
         _ ->
-            case prisma_type:consistent_subtype(TermType, TupleType) of
+            case TermType =/= any andalso not has_unknown(TermType) andalso prisma_type:consistent_subtype(TermType, TupleType) of
                 true -> {atom_lit, true};
                 false -> boolean
             end
@@ -1667,7 +1667,7 @@ bif_return_type(is_record, [TermType, {atom_lit, Tag}, {int_lit, Size}], _Static
     case prisma_type:meet(TermType, TupleType) of
         none when TermType =/= none -> {atom_lit, false};
         _ ->
-            case prisma_type:consistent_subtype(TermType, TupleType) of
+            case TermType =/= any andalso not has_unknown(TermType) andalso prisma_type:consistent_subtype(TermType, TupleType) of
                 true -> {atom_lit, true};
                 false -> boolean
             end
@@ -1677,7 +1677,7 @@ bif_return_type(is_function, [TermType, {int_lit, Arity}], _Static, _Contracts) 
     case prisma_type:meet(TermType, any_fun) of
         none when TermType =/= none -> {atom_lit, false};
         _ ->
-            case prisma_type:consistent_subtype(TermType, FunType) of
+            case TermType =/= any andalso not has_unknown(TermType) andalso prisma_type:consistent_subtype(TermType, FunType) of
                 true -> {atom_lit, true};
                 false -> boolean
             end
