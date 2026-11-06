@@ -200,7 +200,8 @@ normalize_union_general(Types) ->
             any;
         false ->
             Unique = lists:usort(collapse_booleans(WithoutNone)),
-            case Unique of
+            Absorbed = absorb_subtypes(Unique),
+            case Absorbed of
                 [] -> none;
                 [Single] -> Single;
                 Many -> {union, Many}
@@ -1022,6 +1023,39 @@ collapse_booleans(Types) ->
         false ->
             Types
     end.
+
+absorb_subtypes([_] = Types) ->
+    Types;
+absorb_subtypes(Types) ->
+    lists:filter(fun(A) ->
+        not lists:any(fun(B) ->
+            A =/= B andalso is_strict_subtype(A, B)
+        end, Types)
+    end, Types).
+
+is_strict_subtype({var, _}, _) -> false;
+is_strict_subtype(_, {var, _}) -> false;
+is_strict_subtype({recursive_ref, _, _}, _) -> false;
+is_strict_subtype(_, {recursive_ref, _, _}) -> false;
+is_strict_subtype(any, _) -> false;
+is_strict_subtype(_, any) -> true;
+is_strict_subtype(A, B) ->
+    case is_integer_type(A) andalso is_integer_type(B) of
+        true ->
+            {LoA, HiA} = int_bounds(A),
+            {LoB, HiB} = int_bounds(B),
+            bound_ge(LoA, LoB) andalso bound_le(HiA, HiB);
+        false ->
+            consistent_subtype(A, B) andalso not consistent_subtype(B, A)
+    end.
+
+is_integer_type(integer) -> true;
+is_integer_type(pos_integer) -> true;
+is_integer_type(non_neg_integer) -> true;
+is_integer_type(neg_integer) -> true;
+is_integer_type({int_lit, _}) -> true;
+is_integer_type({int_range, _, _}) -> true;
+is_integer_type(_) -> false.
 
 builtin_remote_type('Elixir.String', t, [], _Key) -> {ok, {binary, 0, 8}};
 builtin_remote_type('Elixir.String', grapheme, [], _Key) -> {ok, {binary, 0, 8}};
