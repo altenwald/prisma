@@ -1,0 +1,187 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 680" width="100%" height="100%" style="background:#0b1120; font-family:'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b1120"/>
+      <stop offset="50%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#090d16"/>
+    </linearGradient>
+
+    <linearGradient id="dialyzerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ef4444" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#f59e0b" stop-opacity="0.05"/>
+    </linearGradient>
+
+    <linearGradient id="prismaGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#0d9488" stop-opacity="0.1"/>
+    </linearGradient>
+
+    <linearGradient id="badgePrisma" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#0d9488"/>
+    </linearGradient>
+
+    <linearGradient id="glowPrisma" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+
+    <!-- Filters -->
+    <filter id="cardShadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="1200" height="680" fill="url(#bgGrad)"/>
+  
+  <!-- Subtle Grid Pattern -->
+  <g opacity="0.06" stroke="#ffffff" stroke-width="1">
+    <path d="M 0 68 L 1200 68 M 0 136 L 1200 136 M 0 204 L 1200 204 M 0 272 L 1200 272 M 0 340 L 1200 340 M 0 408 L 1200 408 M 0 476 L 1200 476 M 0 544 L 1200 544 M 0 612 L 1200 612"/>
+    <path d="M 120 0 L 120 680 M 240 0 L 240 680 M 360 0 L 360 680 M 480 0 L 480 680 M 600 0 L 600 680 M 720 0 L 720 680 M 840 0 L 840 680 M 960 0 L 960 680 M 1080 0 L 1080 680"/>
+  </g>
+
+  <!-- Header Section -->
+  <g transform="translate(60, 48)">
+    <text x="0" y="0" font-size="12" font-weight="700" letter-spacing="2" fill="#38bdf8" text-transform="uppercase">ARCHITECTURAL COMPARISON</text>
+    <text x="0" y="32" font-size="30" font-weight="800" fill="#f8fafc" letter-spacing="-0.5">Dialyzer PLT vs. Prisma PPLT</text>
+    <text x="0" y="58" font-size="15" font-weight="400" fill="#94a3b8">Why Persistent Lookup Tables needed a ground-up reinvention for modern BEAM development</text>
+  </g>
+
+  <!-- Central Comparison Column: Left (Dialyzer PLT) -->
+  <g transform="translate(60, 140)" filter="url(#cardShadow)">
+    <!-- Card Frame -->
+    <rect width="520" height="430" rx="20" fill="#131d31" stroke="#334155" stroke-width="1.2"/>
+    <rect width="520" height="430" rx="20" fill="url(#dialyzerGrad)"/>
+
+    <!-- Header Badge -->
+    <rect x="24" y="24" width="76" height="26" rx="6" fill="#ef4444" fill-opacity="0.2" stroke="#ef4444" stroke-opacity="0.4"/>
+    <text x="62" y="41" font-size="11" font-weight="700" fill="#fca5a5" text-anchor="middle">DIALYZER</text>
+    
+    <text x="112" y="42" font-size="20" font-weight="800" fill="#f1f5f9">Traditional PLT</text>
+    <text x="24" y="74" font-size="13" font-weight="400" fill="#94a3b8">Persistent Lookup Table (Designed 2004–2006)</text>
+
+    <line x1="24" y1="92" x2="496" y2="92" stroke="#334155" stroke-width="1"/>
+
+    <!-- Feature 1: Monolithic Storage -->
+    <g transform="translate(24, 114)">
+      <circle cx="12" cy="12" r="12" fill="#ef4444" fill-opacity="0.15"/>
+      <path d="M 8 12 L 16 12" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/>
+      <text x="36" y="10" font-size="14" font-weight="700" fill="#f8fafc">Monolithic Memory Dump</text>
+      <text x="36" y="28" font-size="12" font-weight="400" fill="#cbd5e1">50 MB – 250 MB+. Stores full ASTs, ETS dumps, and call graphs.</text>
+    </g>
+
+    <!-- Feature 2: Machine Bound -->
+    <g transform="translate(24, 174)">
+      <circle cx="12" cy="12" r="12" fill="#ef4444" fill-opacity="0.15"/>
+      <path d="M 8 12 L 16 12" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/>
+      <text x="36" y="10" font-size="14" font-weight="700" fill="#f8fafc">Machine-Bound Absolute Paths</text>
+      <text x="36" y="28" font-size="12" font-weight="400" fill="#cbd5e1">Hardcodes <tspan font-family="'JetBrains Mono', monospace" fill="#fda4af">/Users/...</tspan> paths. Non-portable across dev and CI.</text>
+    </g>
+
+    <!-- Feature 3: Package Distribution -->
+    <g transform="translate(24, 234)">
+      <circle cx="12" cy="12" r="12" fill="#ef4444" fill-opacity="0.15"/>
+      <path d="M 8 12 L 16 12" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/>
+      <text x="36" y="10" font-size="14" font-weight="700" fill="#f8fafc">Zero Package Distribution</text>
+      <text x="36" y="28" font-size="12" font-weight="400" fill="#cbd5e1">Cannot ship in Hex. Every user &amp; CI re-analyzes every dependency.</text>
+    </g>
+
+    <!-- Feature 4: Cold Start Speed -->
+    <g transform="translate(24, 294)">
+      <circle cx="12" cy="12" r="12" fill="#ef4444" fill-opacity="0.15"/>
+      <path d="M 8 12 L 16 12" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/>
+      <text x="36" y="10" font-size="14" font-weight="700" fill="#f8fafc">Slow Cold Starts (1 – 5+ min)</text>
+      <text x="36" y="28" font-size="12" font-weight="400" fill="#cbd5e1">Heavy CPU churning computing whole-program fixpoint convergence.</text>
+    </g>
+
+    <!-- Feature 5: Invalidation -->
+    <g transform="translate(24, 354)">
+      <circle cx="12" cy="12" r="12" fill="#ef4444" fill-opacity="0.15"/>
+      <path d="M 8 12 L 16 12" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/>
+      <text x="36" y="10" font-size="14" font-weight="700" fill="#f8fafc">Fragile Invalidation &amp; Crash on Missing Dbgi</text>
+      <text x="36" y="28" font-size="12" font-weight="400" fill="#cbd5e1">Stale PLT warnings force <tspan font-family="'JetBrains Mono', monospace" fill="#fda4af">rm -rf</tspan>. Fatal crash if debug_info is absent.</text>
+    </g>
+  </g>
+
+  <!-- Central Comparison Column: Right (Prisma PPLT) -->
+  <g transform="translate(620, 140)" filter="url(#cardShadow)">
+    <!-- Card Frame -->
+    <rect width="520" height="430" rx="20" fill="#111c33" stroke="#0284c7" stroke-width="1.8"/>
+    <rect width="520" height="430" rx="20" fill="url(#prismaGrad)"/>
+
+    <!-- Header Badge -->
+    <rect x="24" y="24" width="68" height="26" rx="6" fill="url(#badgePrisma)"/>
+    <text x="58" y="41" font-size="11" font-weight="800" fill="#ffffff" text-anchor="middle">PRISMA</text>
+    
+    <text x="104" y="42" font-size="20" font-weight="800" fill="#f1f5f9">Modern PPLT</text>
+    <text x="24" y="74" font-size="13" font-weight="400" fill="#38bdf8">Prisma Persistent Lookup Table (.pplt)</text>
+
+    <line x1="24" y1="92" x2="496" y2="92" stroke="#0369a1" stroke-opacity="0.5" stroke-width="1"/>
+
+    <!-- Feature 1: Lean Contract Serialization -->
+    <g transform="translate(24, 114)">
+      <circle cx="12" cy="12" r="12" fill="#0284c7" fill-opacity="0.25"/>
+      <path d="M 7 12 L 10.5 15.5 L 17 9" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="36" y="10" font-size="14" font-weight="700" fill="#f8fafc">Lean Contract Serialization</text>
+      <text x="36" y="28" font-size="12" font-weight="400" fill="#e2e8f0">5 KB – 64 KB. Strips AST (<tspan font-family="'JetBrains Mono', monospace" fill="#38bdf8">without_code</tspan>), stores only specs &amp; types.</text>
+    </g>
+
+    <!-- Feature 2: 100% Path-Independent -->
+    <g transform="translate(24, 174)">
+      <circle cx="12" cy="12" r="12" fill="#0284c7" fill-opacity="0.25"/>
+      <path d="M 7 12 L 10.5 15.5 L 17 9" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="36" y="10" font-size="14" font-weight="700" fill="#f8fafc">100% Path-Independent &amp; Portable</text>
+      <text x="36" y="28" font-size="12" font-weight="400" fill="#e2e8f0">Indexed by module atoms. Built on macOS, runs identically in Linux CI.</text>
+    </g>
+
+    <!-- Feature 3: Package Distribution via Hex.pm -->
+    <g transform="translate(24, 234)">
+      <circle cx="12" cy="12" r="12" fill="#0284c7" fill-opacity="0.25"/>
+      <path d="M 7 12 L 10.5 15.5 L 17 9" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="36" y="10" font-size="14" font-weight="700" fill="#f8fafc">Shipped in Hex.pm Packages</text>
+      <text x="36" y="28" font-size="12" font-weight="400" fill="#e2e8f0">Pre-built contracts bundled in release. Zero CPU spent re-analyzing deps.</text>
+    </g>
+
+    <!-- Feature 4: Instant Loading & In-Memory Merge -->
+    <g transform="translate(24, 294)">
+      <circle cx="12" cy="12" r="12" fill="#0284c7" fill-opacity="0.25"/>
+      <path d="M 7 12 L 10.5 15.5 L 17 9" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="36" y="10" font-size="14" font-weight="700" fill="#f8fafc">1 – 5 ms Load &amp; Microsecond Merge</text>
+      <text x="36" y="28" font-size="12" font-weight="400" fill="#e2e8f0">Pure functional merge (<tspan font-family="'JetBrains Mono', monospace" fill="#38bdf8">maps:merge/2</tspan>) combining OTP + Hex deps.</text>
+    </g>
+
+    <!-- Feature 5: Cryptographic Source Hash & Missing Dbgi Resilient -->
+    <g transform="translate(24, 354)">
+      <circle cx="12" cy="12" r="12" fill="#0284c7" fill-opacity="0.25"/>
+      <path d="M 7 12 L 10.5 15.5 L 17 9" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="36" y="10" font-size="14" font-weight="700" fill="#f8fafc">Source Hash Tracking &amp; Stripped BEAM Support</text>
+      <text x="36" y="28" font-size="12" font-weight="400" fill="#e2e8f0">Detects stale code instantly. Recovers signatures from chunk headers.</text>
+    </g>
+  </g>
+
+  <!-- Bottom Key Metrics Bar -->
+  <g transform="translate(60, 590)">
+    <rect width="1080" height="60" rx="14" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+    
+    <g transform="translate(40, 36)">
+      <text x="0" y="0" font-size="18" font-weight="800" fill="#38bdf8">20x – 280x</text>
+      <text x="110" y="-1" font-size="13" font-weight="500" fill="#94a3b8">Smaller disk artifact size</text>
+    </g>
+
+    <line x1="390" y1="14" x2="390" y2="46" stroke="#334155" stroke-width="1"/>
+
+    <g transform="translate(430, 36)">
+      <text x="0" y="0" font-size="18" font-weight="800" fill="#34d399">1 – 5 ms</text>
+      <text x="80" y="-1" font-size="13" font-weight="500" fill="#94a3b8">Instant binary load time</text>
+    </g>
+
+    <line x1="740" y1="14" x2="740" y2="46" stroke="#334155" stroke-width="1"/>
+
+    <g transform="translate(780, 36)">
+      <text x="0" y="0" font-size="18" font-weight="800" fill="#f59e0b">Zero-Cost</text>
+      <text x="96" y="-1" font-size="13" font-weight="500" fill="#94a3b8">Hex dependency type checking</text>
+    </g>
+  </g>
+</svg>
