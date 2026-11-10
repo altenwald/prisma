@@ -262,6 +262,100 @@ prisma check --no-warnings           # only errors
 prisma check --warnings-as-errors    # warnings fail too
 ```
 
+---
+
+## 🔌 Language Server Protocol (`prisma_ls`)
+
+Prisma includes a built-in Language Server Protocol (LSP) server providing instant diagnostics directly within your code editor for both **Erlang** and **Elixir**.
+
+### Key Architectural Guarantees
+- **100% Static & In-Memory**: Prisma parses and validates files via pure AST representations without ever loading modules into the BEAM code server (`code:load_*`). Module-level initialization code and `-on_load` hooks (such as NIF drivers or C libraries) are **never executed**.
+- **Unified Erlang & Elixir Support**: Real-time syntax error reporting, gradual contract verification, and dead-code detection across `.erl`, `.hrl`, `.ex`, and `.exs`.
+- **Pure Stdio JSON-RPC**: Strict separation of standard I/O streams ensuring internal logs never contaminate editor protocol communication.
+
+### Starting the Language Server
+
+You can launch `prisma_ls` from any of the following entry points:
+
+```bash
+# Standalone CLI
+prisma lsp
+
+# Rebar3 projects (Erlang)
+rebar3 prisma lsp
+
+# Mix projects (Elixir)
+mix prisma.lsp
+```
+
+### Editor Integration
+
+#### 1. VS Code / Cursor
+Install or link the extension from `editors/vscode/` or configure via a generic LSP extension:
+
+```json
+{
+  "prisma.serverPath": "prisma",
+  "prisma.serverArguments": ["lsp"]
+}
+```
+
+#### 2. Zed
+Add to your Zed `settings.json`:
+
+```json
+{
+  "lsp": {
+    "prisma_ls": {
+      "binary": {
+        "path": "prisma",
+        "arguments": ["lsp"]
+      }
+    }
+  },
+  "languages": {
+    "Erlang": {
+      "language_servers": ["prisma_ls", "!elp", "!erlang-ls"]
+    },
+    "Elixir": {
+      "language_servers": ["prisma_ls", "..."]
+    }
+  }
+}
+```
+
+#### 3. Emacs (`eglot`)
+Add to your `init.el`:
+
+```elisp
+(with-eval-after-load 'eglot
+  (add-to-list 'eglot-server-programs
+               '((erlang-mode elixir-mode elixir-ts-mode) . ("prisma" "lsp"))))
+```
+
+#### 4. Neovim (`nvim-lspconfig`)
+Add to your Neovim configuration:
+
+```lua
+local lspconfig = require('lspconfig')
+local configs = require('lspconfig.configs')
+
+if not configs.prisma_ls then
+  configs.prisma_ls = {
+    default_config = {
+      cmd = {'prisma', 'lsp'},
+      filetypes = {'erlang', 'elixir'},
+      root_dir = function(fname)
+        return lspconfig.util.root_pattern('rebar.config', 'mix.exs', '.git')(fname)
+      end,
+      settings = {},
+    },
+  }
+end
+
+lspconfig.prisma_ls.setup{}
+```
+
 **Errors, warnings and notes.** An *error* is what Prisma proves fails when the code runs: a call or clause that cannot succeed (`discrepancy`), a call to a function that does not exist (`unknown_function`) and a contract that the code contradicts (`gradual_mismatch`). A *warning* is certain or handled but does not fail: dead code (a clause that can never match), an unused parameter (`oxbow_code`), and a call to a missing function inside a `try` that catches every error (`handled_undef`, which would hide a misspelled name for good). Warnings are written `[warning: kind]`. A *note* is something that was not checked, and is only counted (`prisma: N branches that depend on the system were not checked` on stderr). The exit status is not zero only for errors (and for warnings with `--warnings-as-errors`); the JSON output has a `severity` per item.
 
 A call that the code protects itself is not reported. A `case` on what the system has (`erlang:function_exported/3`, `erlang:system_info(otp_release)` and comparisons over it) is decided on the system that runs the analysis: the branch it takes is checked like any other code, because it runs here; the ones it does not take are not checked (they would be judged with the API of this OTP, not the one they are written for) and are counted, and are not dead code either. If the condition cannot be decided (`code:ensure_loaded`, `os:type()`...), nothing that depends on the system is said in any branch. A call in a `try` that catches `error:undef` is not reported either.

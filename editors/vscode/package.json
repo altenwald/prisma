@@ -1,0 +1,48 @@
+{
+  "name": "vscode-prisma-ls",
+  "displayName": "Prisma Language Server",
+  "description": "Language Server Protocol integration for Prisma: static gradual & success typing for Erlang and Elixir",
+  "version": "0.2.0",
+  "publisher": "altenwald",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "keywords": [
+    "erlang",
+    "elixir",
+    "prisma",
+    "lsp",
+    "types",
+    "dialyzer"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "configuration": {
+      "type": "object",
+      "title": "Prisma LS",
+      "properties": {
+        "prisma.serverPath": {
+          "type": "string",
+          "default": "prisma",
+          "description": "Path to the prisma executable or command (e.g. 'prisma', 'mix prisma.lsp', 'rebar3 prisma lsp')"
+        },
+        "prisma.serverArguments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": ["lsp"],
+          "description": "Arguments passed to the Prisma language server executable"
+        }
+      }
+    }
+  },
+  "activationEvents": [
+    "onLanguage:erlang",
+    "onLanguage:elixir"
+  ]
+}

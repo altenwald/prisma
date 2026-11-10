@@ -1,7 +1,7 @@
 defmodule Prisma.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
   @source_url "https://github.com/altenwald/prisma"
 
   def project do
@@ -11,7 +11,7 @@ defmodule Prisma.MixProject do
       language: :erlang,
       erlc_options: [:debug_info],
       description: "Hybrid Success & Gradual Type Analyzer with Modular PPLTs for Erlang and Elixir",
-      escript: [main_module: :prisma, name: "prisma", embed_elixir: false],
+      escript: [main_module: :prisma, name: "prisma", embed_elixir: true],
       package: package(),
       docs: docs(),
       deps: deps()
@@ -20,7 +20,7 @@ defmodule Prisma.MixProject do
 
   def application do
     [
-      extra_applications: [:compiler, :syntax_tools]
+      extra_applications: [:compiler, :syntax_tools, :elixir]
     ]
   end
 

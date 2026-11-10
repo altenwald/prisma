@@ -4,7 +4,7 @@
 -include("prisma.hrl").
 
 extract_and_portable_pplt_test() ->
-    ?assertEqual(<<"0.1.0">>, prisma:version()),
+    ?assertEqual(<<"0.2.0">>, prisma:version()),
     BeamFile = code:where_is_file("prisma.beam"),
     ?assert(is_list(BeamFile)),
     EbinDir = filename:dirname(BeamFile),

@@ -273,6 +273,22 @@ translate_expr({'_', Meta, Ctx}) when is_atom(Ctx) ->
     {var, meta_anno(Meta), '_'};
 translate_expr({VarName, Meta, Ctx}) when is_atom(VarName), is_atom(Ctx) ->
     {var, meta_anno(Meta), elixir_var(VarName, Meta, Ctx)};
+translate_expr({Op, Meta, [L, R]}) when is_atom(Op) ->
+    case is_erl_binop(Op) of
+        true ->
+            {op, meta_anno(Meta), Op, translate_expr(L), translate_expr(R)};
+        false ->
+            Anno = meta_anno(Meta),
+            {call, Anno, {atom, Anno, Op}, [translate_expr(L), translate_expr(R)]}
+    end;
+translate_expr({Op, Meta, [Arg]}) when is_atom(Op) ->
+    case is_erl_unop(Op) of
+        true ->
+            {op, meta_anno(Meta), Op, translate_expr(Arg)};
+        false ->
+            Anno = meta_anno(Meta),
+            {call, Anno, {atom, Anno, Op}, [translate_expr(Arg)]}
+    end;
 translate_expr({FunAtom, Meta, Args}) when is_atom(FunAtom), is_list(Args) ->
     Anno = meta_anno(Meta),
     {call, Anno, {atom, Anno, FunAtom}, [translate_expr(A) || A <- Args]};

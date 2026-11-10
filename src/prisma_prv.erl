@@ -38,7 +38,8 @@ init(State) ->
                 {short_desc, "Run Prisma hybrid type and discrepancy analysis"},
                 {desc, "Analyzes compiled BEAM files using Prisma's hybrid gradual and discrepancy checker."}
             ]),
-            {ok, rebar_state:add_provider(State, Provider)};
+            State1 = rebar_state:add_provider(State, Provider),
+            prisma_prv_lsp:init(State1);
         _ ->
             {ok, State}
     end.

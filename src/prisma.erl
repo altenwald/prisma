@@ -15,7 +15,9 @@
     analyze_dirs/2,
     analyze_beams/2,
     parse_check_args/1,
-    parse_check_opts/1
+    parse_check_opts/1,
+    lsp/0,
+    start_lsp/0
 ]).
 
 %% @doc Rebar3 plugin entrypoint.
@@ -26,7 +28,7 @@ init(State) ->
 %% @doc Returns the current Prisma version.
 -spec version() -> binary().
 version() ->
-    <<"0.1.0">>.
+    <<"0.2.0">>.
 
 %% @doc Builds a portable `.pplt` file from BEAM directories or files.
 -spec build([file:filename_all()], file:filename_all()) ->
@@ -236,15 +238,29 @@ main(["check" | Rest]) ->
             io:format(standard_error, "Prisma check failed: ~p~n", [Reason]),
             erlang:halt(1)
     end;
+main(["lsp" | _]) ->
+    start_lsp();
+main(["server" | _]) ->
+    start_lsp();
 main(_) ->
     io:format(
         "Usage:~n"
         "  prisma version~n"
+        "  prisma lsp~n"
         "  prisma build~n"
         "  prisma build --output <file.pplt> <ebin_or_beam...>~n"
         "  prisma check [--mode <hybrid|gradual|discrepancy>] [--format <human|pretty|oneline|json>] [--no-color] [--color] [--no-warnings] [--warnings-as-errors] [--pplt <file.pplt>...] [<ebin_or_beam...>]~n"
     ),
     erlang:halt(1).
+
+%% @doc Starts the Prisma Language Server (LSP).
+-spec lsp() -> no_return().
+lsp() ->
+    start_lsp().
+
+-spec start_lsp() -> no_return().
+start_lsp() ->
+    prisma_lsp_server:start().
 
 %% @doc Parses CLI options for `prisma check` into a map.
 -spec parse_check_opts([string()]) -> map().
