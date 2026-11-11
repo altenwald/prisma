@@ -1028,12 +1028,34 @@ collapse_booleans(Types) ->
 
 absorb_subtypes([_] = Types) ->
     Types;
+absorb_subtypes(Types) when length(Types) =< 24 ->
+    absorb_pairwise(Types, Types);
 absorb_subtypes(Types) ->
+    %% Avoid O(N^2) pairwise checks on large unions (e.g., 256+ clause literal lookup tables):
+    %% only test against members that can actually subsume another distinct type.
+    Broad = [T || T <- Types, may_be_supertype(T)],
+    case Broad of
+        [] ->
+            Types;
+        _ when length(Broad) =< 24 ->
+            absorb_pairwise(Types, Broad);
+        _ ->
+            Types
+    end.
+
+absorb_pairwise(Types, Candidates) ->
     lists:filter(fun(A) ->
         not lists:any(fun(B) ->
             A =/= B andalso is_strict_subtype(A, B)
-        end, Types)
+        end, Candidates)
     end, Types).
+
+may_be_supertype({atom_lit, _}) -> false;
+may_be_supertype({int_lit, _}) -> false;
+may_be_supertype({binary, _, 0}) -> false;
+may_be_supertype(nil) -> false;
+may_be_supertype({tuple, Elems}) -> lists:any(fun may_be_supertype/1, Elems);
+may_be_supertype(_) -> true.
 
 is_strict_subtype({var, _}, _) -> false;
 is_strict_subtype(_, {var, _}) -> false;
