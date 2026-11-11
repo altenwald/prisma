@@ -144,14 +144,14 @@
           </p>
         </div>
 
-        <!-- Card 3: Zero-Friction Setup (Indigo Pastel) -->
+        <!-- Card 3: Built-in LSP & Zero-Friction Tooling (Indigo Pastel) -->
         <div class="rounded-3xl p-8 bg-indigo-50/70 border border-indigo-100/90 transition-all duration-300 hover:shadow-lg hover:shadow-indigo-500/5">
           <div class="w-10 h-10 rounded-2xl bg-white text-indigo-600 flex items-center justify-center mb-6 shadow-sm border border-indigo-100">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
           </div>
-          <h3 class="text-lg font-bold text-slate-900 mb-2">Zero-Friction Tooling</h3>
+          <h3 class="text-lg font-bold text-slate-900 mb-2">Built-in LSP &amp; Zero Friction</h3>
           <p class="text-sm text-slate-600 leading-relaxed">
-            Add <code>{plugins, [prisma]}.</code> to <code>rebar.config</code> or <code>{:prisma, ...}</code> to <code>mix.exs</code>. Zero external runtime dependencies, no global server setups, and no ceremony.
+            Add <code>{project_plugins, [{prisma, "~> 0.2.0"}]}.</code> to <code>rebar.config</code> or <code>{:prisma, "~> 0.2.0"}</code> to <code>mix.exs</code>. Includes <strong><code>prisma_ls</code></strong> (VS Code, Zed, Emacs, Neovim) analyzing pure ASTs in-memory without loading bytecode or firing <code>-on_load</code>.
           </p>
         </div>
 
@@ -447,12 +447,13 @@
               </div>
               <p class="text-xs text-slate-600 mb-4">Add to <code>rebar.config</code>:</p>
               <pre class="bg-slate-900 text-slate-200 p-3.5 rounded-xl text-xs font-mono overflow-x-auto mb-4"><code>{project_plugins, [
-    {prisma, "0.1.0"}
+    {prisma, "0.2.0"}
 ]}.</code></pre>
             </div>
             <div>
-              <div class="text-[11px] text-slate-500 mb-1.5">Run in project:</div>
-              <pre class="bg-slate-100 text-blue-600 p-2 rounded-lg text-xs font-mono"><code>rebar3 prisma</code></pre>
+              <div class="text-[11px] text-slate-500 mb-1.5">Run check or LSP server:</div>
+              <pre class="bg-slate-100 text-blue-600 p-2 rounded-lg text-xs font-mono"><code>rebar3 prisma
+rebar3 prisma lsp</code></pre>
             </div>
           </div>
 
@@ -466,15 +467,16 @@
               <p class="text-xs text-slate-600 mb-4">Add to <code>deps</code> in <code>mix.exs</code>:</p>
               <pre class="bg-slate-900 text-slate-200 p-3.5 rounded-xl text-xs font-mono overflow-x-auto mb-4"><code>defp deps do
   [
-    {:prisma, "~> 0.1.0",
+    {:prisma, "~> 0.2.0",
      only: [:dev, :test],
      runtime: false}
   ]
 end</code></pre>
             </div>
             <div>
-              <div class="text-[11px] text-slate-500 mb-1.5">Run in project:</div>
-              <pre class="bg-slate-100 text-blue-600 p-2 rounded-lg text-xs font-mono"><code>mix prisma</code></pre>
+              <div class="text-[11px] text-slate-500 mb-1.5">Run check or LSP server:</div>
+              <pre class="bg-slate-100 text-blue-600 p-2 rounded-lg text-xs font-mono"><code>mix prisma
+mix prisma.lsp</code></pre>
             </div>
           </div>
 
@@ -492,8 +494,9 @@ rebar3 escriptize
 cp _build/default/bin/prisma /usr/local/bin/</code></pre>
             </div>
             <div>
-              <div class="text-[11px] text-slate-500 mb-1.5">Analyze any BEAM path:</div>
-              <pre class="bg-slate-100 text-blue-600 p-2 rounded-lg text-xs font-mono"><code>prisma check _build/default/lib/*/ebin</code></pre>
+              <div class="text-[11px] text-slate-500 mb-1.5">Check BEAMs or start LSP:</div>
+              <pre class="bg-slate-100 text-blue-600 p-2 rounded-lg text-xs font-mono"><code>prisma check _build/default/lib/*/ebin
+prisma lsp</code></pre>
             </div>
           </div>
 
@@ -675,7 +678,7 @@ cp _build/default/bin/prisma /usr/local/bin/</code></pre>
       caption.innerHTML = `<strong>${ds.name}</strong>: ${dataInfo.title} — <span class="text-blue-600 font-bold">${dataInfo.multiplier} with Prisma</span>`;
 
       const chartData = [
-        { tool: "Prisma 0.1.0", value: dataInfo.prisma, color: "#2563eb" },
+        { tool: "Prisma 0.2.0", value: dataInfo.prisma, color: "#2563eb" },
         { tool: "Dialyzer (OTP 29)", value: dataInfo.dialyzer, color: "#94a3b8" }
       ];
 

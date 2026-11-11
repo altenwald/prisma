@@ -2,7 +2,7 @@
 title = "Prisma — Fast, Modular Type & Spec Analyzer for Erlang & Elixir"
 description = "Fast, modular static type analyzer with .pplt tables for Erlang & Elixir. Up to 6.3x faster than Dialyzer, 20.8x less CPU, and zero false positives."
 url = "https://prisma.altenwald.com/"
-version = "0.1.0"
+version = "0.2.0"
 output_dir = "site"
 
 [authors]
