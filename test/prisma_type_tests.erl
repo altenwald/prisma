@@ -405,3 +405,20 @@ meet_of_big_improper_unions_is_bounded_test() ->
     ?assert(erts_debug:flat_size(R) =< erts_debug:flat_size(A) + erts_debug:flat_size(B)),
     %% a superset of the exact meet: every operand fits in it or it fits in the operands
     ?assert(prisma_type:consistent_subtype(R, A) orelse prisma_type:consistent_subtype(R, B)).
+
+canonical_int_range_union_absorption_test_() ->
+    [?_assertEqual(pos_integer, prisma_type:join({int_range, 1, pos_inf}, pos_integer)),
+     ?_assertEqual(pos_integer, prisma_type:join(pos_integer, {int_range, 1, pos_inf})),
+     ?_assertEqual(non_neg_integer, prisma_type:join({int_range, 0, pos_inf}, non_neg_integer)),
+     ?_assertEqual(neg_integer, prisma_type:join({int_range, neg_inf, -1}, neg_integer)),
+     ?_assertEqual(integer, prisma_type:join({int_range, neg_inf, pos_inf}, integer)),
+     ?_assertEqual({int_lit, 5}, prisma_type:join({int_range, 5, 5}, {int_lit, 5})),
+     ?_assertEqual(non_neg_integer,
+         prisma_type:meet({int_range, 0, pos_inf}, {union, [{union, [integer]}, number]}))].
+
+fixed_binary_subtyping_test_() ->
+    [?_assert(prisma_type:consistent_subtype({binary, 8, 0}, {binary, 8, 8})),
+     ?_assert(prisma_type:consistent_subtype({binary, 8, 0}, {binary, 0, 8})),
+     ?_assertNot(prisma_type:consistent_subtype({binary, 8, 8}, {binary, 8, 0})),
+     ?_assertNot(prisma_type:consistent_subtype({binary, 16, 0}, {binary, 8, 0})),
+     ?_assert(prisma_type:consistent_subtype({binary, 8, 0}, {binary, 8, 0}))].

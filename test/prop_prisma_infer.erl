@@ -302,3 +302,83 @@ prop_inference_and_warnings_agree_with_execution() ->
                 R = check(Src, CalleeSrc, Samples),
                 ?WHENFAIL(io:format("~n~s~n~s~n~p~n", [Src, CalleeSrc, R]), R =:= ok)
             end)).
+
+%% Soundness of guard narrowing (is_* BIFs, boolean combinations, negated guards,
+%% numeric bounds, maps and binaries) verified against BEAM execution and cover.
+prop_guard_narrowing_is_sound() ->
+    ?FORALL({ClausesSpec, CatchAll}, {resize(5, non_empty(list(guard_clause()))), boolean()},
+        begin
+            R = check_guard_program(ClausesSpec, CatchAll),
+            ?WHENFAIL(io:format("~nGuard spec: ~p (catchall=~p)~nResult: ~p~n", [ClausesSpec, CatchAll, R]), R =:= ok)
+        end).
+
+guard_clause() ->
+    oneof([
+        {"is_integer(X) andalso X >= 0", "X + 1"},
+        {"is_integer(X) andalso X < 0", "-X"},
+        {"is_float(X)", "trunc(X)"},
+        {"is_number(X) andalso not is_integer(X)", "round(X)"},
+        {"is_binary(X)", "byte_size(X)"},
+        {"is_map(X) andalso map_size(X) > 0", "map_size(X)"},
+        {"is_map(X)", "map_size(X)"},
+        {"is_list(X)", "length(X)"},
+        {"is_tuple(X) andalso tuple_size(X) =:= 2", "tuple_size(X)"},
+        {"is_boolean(X)", "case X of true -> 1; false -> 0 end"},
+        {"is_atom(X) andalso not is_boolean(X)", "length(atom_to_list(X))"},
+        {"X =:= ok orelse X =:= error", "length(atom_to_list(X))"}
+    ]).
+
+guard_samples() ->
+    [[-3], [0], [5], [1.5], [-2.5], [<<>>], [<<"ok">>], [#{a => 1}], [#{}],
+     [[]], [[1, 2]], [{1, 2}], [{a, b, c}], [true], [false], [ok], [error], [foo]].
+
+check_guard_program(ClausesSpec, CatchAll) ->
+    Name = "pg" ++ integer_to_list(erlang:unique_integer([positive])),
+    Catch = case CatchAll of true -> ["h(_) -> 0"]; false -> [] end,
+    RenderedClauses = [fmt("h(X) when ~s -> ~s", [G, B]) || {G, B} <- ClausesSpec] ++ Catch,
+    Src = lists:flatten([
+        "-module(", Name, ").\n-export([h/1]).\n",
+        string:join(RenderedClauses, ";\n"), ".\n"
+    ]),
+    {ok, Mod, Beam} = compile:forms([{attribute, 1, file, {Name ++ ".erl", 1}} | forms(Src)], [debug_info, binary]),
+    Dir = filename:absname(filename:join(["_build", "test", "prop_infer"])),
+    File = filename:join(Dir, Name ++ ".beam"),
+    ok = filelib:ensure_dir(File),
+    ok = file:write_file(File, Beam),
+    try
+        {ok, Pplt} = prisma_pplt:from_beams([Beam]),
+        #module_summary{functions = Funcs} = maps:get(Mod, Pplt#prisma_pplt.modules),
+        {fun_type, [Dom1], Ret} = (maps:get({Mod, h, 1}, Funcs))#func_contract.inferred_type,
+        {ok, Warnings} = prisma:analyze_beams([Beam], #{mode => discrepancy, oxbow => false}),
+        Claims = [W || #prisma_warning{kind = K, mfa = {WMod, _, _}} = W <- Warnings,
+                       WMod =:= Mod,
+                       K =:= discrepancy orelse K =:= dead_code],
+        _ = cover:start(),
+        {ok, Mod} = cover:compile_beam(File),
+        run_guard_samples(Mod, guard_samples(), Dom1, Ret, Claims)
+    after
+        _ = cover:stop(),
+        code:purge(Mod),
+        code:delete(Mod),
+        file:delete(File)
+    end.
+
+run_guard_samples(_Mod, [], _Dom1, _Ret, _Claims) -> ok;
+run_guard_samples(Mod, [[Arg] | Rest], Dom1, Ret, Claims) ->
+    cover:reset(Mod),
+    case try {ok, Mod:h(Arg)} catch _:_ -> crashed end of
+        {ok, Result} ->
+            {ok, Lines} = cover:analyse(Mod, coverage, line),
+            Ran = [L || {{_, L}, {1, 0}} <- Lines],
+            Refuted = [W || #prisma_warning{line = L} = W <- Claims, lists:member(L, Ran)],
+            case {prisma_oracle:member(Result, Ret),
+                  prisma_oracle:member(Arg, Dom1),
+                  Refuted} of
+                {true, true, []} -> run_guard_samples(Mod, Rest, Dom1, Ret, Claims);
+                {false, _, _} -> {refuted, {guard_result_outside_inferred_type, Arg, Result, Ret}};
+                {_, false, _} -> {refuted, {guard_arg_outside_inferred_domain, Arg, Dom1}};
+                {_, _, _} -> {refuted, {guard_warning_on_line_that_ran, Arg, Refuted}}
+            end;
+        crashed ->
+            run_guard_samples(Mod, Rest, Dom1, Ret, Claims)
+    end.

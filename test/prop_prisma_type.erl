@@ -41,7 +41,8 @@ leaf() ->
         {int_lit, range(-5, 5)},
         ?LET({A, B}, {range(-20, 20), range(-20, 20)}, {int_range, min(A, B), max(A, B)}),
         {int_range, range(-10, 10), pos_inf},
-        {atom_lit, oneof([a, b, true, false, undefined])}
+        {atom_lit, oneof([a, b, true, false, undefined])},
+        {binary, oneof([0, 4, 8, 16]), oneof([0, 1, 2, 4, 8, 16])}
     ]).
 
 %% A term of type T.
@@ -57,6 +58,11 @@ value(number) -> oneof([integer(), float()]);
 value(atom) -> oneof([a, b, c, true, false, undefined]);
 value(boolean) -> boolean();
 value({atom_lit, A}) -> A;
+value({binary, Base, 0}) ->
+    ?LET(Bits, vector(Base, oneof([0, 1])), bits_to_bitstring(Bits));
+value({binary, Base, Unit}) when Unit > 0 ->
+    ?LET(K, range(0, 3),
+        ?LET(Bits, vector(Base + K * Unit, oneof([0, 1])), bits_to_bitstring(Bits)));
 value(any_tuple) -> ?LET(L, resize(3, list(oneof([integer(), atom()]))), list_to_tuple(L));
 value({tuple, Ts}) -> ?LET(L, [value(T) || T <- Ts], list_to_tuple(L));
 value(nil) -> [];
@@ -71,6 +77,10 @@ value({union, Ts}) -> ?LET(T, oneof(Ts), value(T)).
 %% A type that has at least one inhabitant, with one of them.
 inhabited() ->
     ?LET(T, stype(), ?LET(V, value(T), {T, V})).
+
+%% A term of type T.
+bits_to_bitstring(Bits) ->
+    <<<<B:1>> || B <- Bits>>.
 
 %% A supertype of T by construction (T is included in the result).
 widen(T) ->
@@ -89,6 +99,7 @@ widen_inner({atom_lit, A}) when is_boolean(A) -> oneof([boolean, atom]);
 widen_inner({atom_lit, _}) -> atom;
 widen_inner(boolean) -> atom;
 widen_inner(nil) -> {list, atom};
+widen_inner({binary, _, _}) -> {binary, 0, 1};
 widen_inner({improper_list, H, T}) -> ?LET({WH, WT}, {widen(H), widen(T)}, {improper_list, WH, WT});
 widen_inner(T) -> T.
 
@@ -134,3 +145,57 @@ prop_normalize_union_is_idempotent() ->
 prop_widening_is_accepted() ->
     ?FORALL({{A, V}, B}, ?LET(AV, inhabited(), {AV, widen(element(1, AV))}),
         member(V, B) andalso prisma_type:consistent_subtype(A, B)).
+
+%% Subtyping is transitive over chains A <: B <: C.
+prop_subtype_is_transitive() ->
+    ?FORALL({A, B, C},
+        ?LET(A0, stype(),
+            ?LET(B0, widen(A0),
+                {A0, B0, widen(B0)})),
+        (prisma_type:consistent_subtype(A, B) andalso prisma_type:consistent_subtype(B, C))
+        andalso prisma_type:consistent_subtype(A, C)).
+
+%% meet/2 is a consistent lower bound when the intersection is non-empty.
+prop_meet_is_consistent_lower_bound() ->
+    ?FORALL({A, B}, {stype(), stype()},
+        begin
+            M = prisma_type:meet(A, B),
+            prisma_type:consistent_subtype(M, A) andalso prisma_type:consistent_subtype(M, B)
+        end).
+
+%% Both operands of join/2 are consistent subtypes of the joined type.
+prop_join_is_consistent_upper_bound() ->
+    ?FORALL({A, B}, {stype(), stype()},
+        begin
+            J = prisma_type:join(A, B),
+            prisma_type:consistent_subtype(A, J) andalso prisma_type:consistent_subtype(B, J)
+        end).
+
+%% meet/2 is semantically commutative (holds the exact same set of inhabited values).
+prop_meet_is_commutative() ->
+    ?FORALL({{A, V}, B}, {inhabited(), stype()},
+        member(V, prisma_type:meet(A, B)) =:= member(V, prisma_type:meet(B, A))).
+
+%% meet/2 is semantically idempotent.
+prop_meet_is_idempotent() ->
+    ?FORALL({T, V}, inhabited(),
+        begin
+            M = prisma_type:meet(T, T),
+            member(V, M) andalso prisma_type:consistent_subtype(M, T) andalso prisma_type:consistent_subtype(T, M)
+        end).
+
+%% Prisma's real widen/1 preserves all inhabited values and produces a consistent supertype.
+prop_prisma_widen_is_sound() ->
+    ?FORALL({T, V}, inhabited(),
+        begin
+            W = prisma_type:widen(T),
+            member(V, W) andalso prisma_type:consistent_subtype(T, W)
+        end).
+
+%% Prisma's real widen/1 is idempotent (essential for fixpoint convergence).
+prop_prisma_widen_is_idempotent() ->
+    ?FORALL(T, stype(),
+        begin
+            W = prisma_type:widen(T),
+            W =:= prisma_type:widen(W)
+        end).

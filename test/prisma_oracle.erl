@@ -20,6 +20,10 @@ member(V, number) -> is_number(V);
 member(V, atom) -> is_atom(V);
 member(V, boolean) -> is_boolean(V);
 member(V, {atom_lit, A}) -> V =:= A;
+member(V, {binary, Base, 0}) ->
+    is_bitstring(V) andalso bit_size(V) =:= Base;
+member(V, {binary, Base, Unit}) when Unit > 0 ->
+    is_bitstring(V) andalso bit_size(V) >= Base andalso (bit_size(V) - Base) rem Unit =:= 0;
 member(V, any_tuple) -> is_tuple(V);
 member(V, {tuple, Ts}) ->
     is_tuple(V) andalso tuple_size(V) =:= length(Ts) andalso
@@ -30,6 +34,16 @@ member(V, {nonempty_list, T}) -> V =/= [] andalso member(V, {list, T});
 member(V, {improper_list, H, T}) ->
     %% maybe_improper_list(H, T): [] | [H | Rest] where Rest is again that type or a T
     V =:= [] orelse (is_list(V) andalso improper_ok(V, H, T));
+member(V, any_map) -> is_map(V);
+member(V, {map, Fields}) ->
+    is_map(V) andalso lists:all(
+        fun
+            ({exact, {atom_lit, K}, VT}) -> maps:is_key(K, V) andalso member(maps:get(K, V), VT);
+            ({exact, {int_lit, K}, VT}) -> maps:is_key(K, V) andalso member(maps:get(K, V), VT);
+            (_) -> true
+        end,
+        Fields
+    );
 member(V, {union, Ts}) -> lists:any(fun(T) -> member(V, T) end, Ts);
 member(_, _Unmodelled) -> true.
 

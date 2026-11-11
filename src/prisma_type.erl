@@ -387,8 +387,10 @@ bound_le(A, B) -> A =< B.
 subtype_non_numeric({atom_lit, B}, boolean) when is_boolean(B) -> true;
 subtype_non_numeric(boolean, atom) -> true;
 subtype_non_numeric({atom_lit, _}, atom) -> true;
+subtype_non_numeric({binary, B1, U1}, {binary, B2, 0}) ->
+    U1 =:= 0 andalso B1 =:= B2;
 subtype_non_numeric({binary, B1, U1}, {binary, B2, U2}) ->
-    B1 >= B2 andalso (U2 =:= 0 orelse (U1 rem U2 =:= 0 andalso (B1 - B2) rem U2 =:= 0));
+    B1 >= B2 andalso U1 rem U2 =:= 0 andalso (B1 - B2) rem U2 =:= 0;
 subtype_non_numeric(nil, {list, _}) -> true;
 subtype_non_numeric(nil, {improper_list, _, _}) -> true;
 subtype_non_numeric({nonempty_list, E1}, {nonempty_list, E2}) ->
@@ -1044,7 +1046,13 @@ is_strict_subtype(A, B) ->
         true ->
             {LoA, HiA} = int_bounds(A),
             {LoB, HiB} = int_bounds(B),
-            bound_ge(LoA, LoB) andalso bound_le(HiA, HiB);
+            case {LoA, HiA} =:= {LoB, HiB} of
+                true ->
+                    Canon = range_to_stype(LoA, HiA),
+                    A =/= Canon andalso B =:= Canon;
+                false ->
+                    bound_ge(LoA, LoB) andalso bound_le(HiA, HiB)
+            end;
         false ->
             consistent_subtype(A, B) andalso not consistent_subtype(B, A)
     end.
