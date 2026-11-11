@@ -89,7 +89,7 @@ Add Prisma to your `rebar.config` under `project_plugins`:
 
 ```erlang
 {project_plugins, [
-    {prisma, "~> 0.1.0"}
+    {prisma, "~> 0.2.0"}
 ]}.
 ```
 
@@ -153,7 +153,7 @@ Add Prisma to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:prisma, "~> 0.1.0", only: [:dev, :test], runtime: false}
+    {:prisma, "~> 0.2.0", only: [:dev, :test], runtime: false}
   ]
 end
 ```
@@ -377,10 +377,11 @@ See the correctness review, the comparison with Dialyzer and the complete teleme
 
 ## 🧪 Testing & Code Quality
 
-Run the test suite and coverage analysis:
+Run the test suite, property-based soundness tests, and coverage analysis:
 
 ```bash
 rebar3 eunit
+rebar3 proper
 rebar3 cover
 ```
 
