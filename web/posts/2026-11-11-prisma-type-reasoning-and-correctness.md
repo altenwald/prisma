@@ -75,11 +75,11 @@ Prisma relies on **three complementary verification layers** rather than trustin
 
 ### Layer 1: Semantic Property-Based Testing with PropEr (`18/18` Properties)
 
-Inside [`test/prisma_oracle.erl`](https://github.com/altenwald/prisma/blob/main/test/prisma_oracle.erl), we define a denotational oracle `member(Term, Type)` that decides whether a concrete Erlang value belongs to a ground type $\llbracket T \rrbracket = \{ v \mid \text{member}(v, T) \}$.
+Inside [`test/prisma_oracle.erl`](https://github.com/altenwald/prisma/blob/main/test/prisma_oracle.erl), we define a denotational oracle `member(Term, Type)` that decides whether a concrete Erlang value belongs to a ground type (`⟦T⟧ = { v | member(v, T) }`).
 
 Using this oracle, [`test/prop_prisma_type.erl`](https://github.com/altenwald/prisma/blob/main/test/prop_prisma_type.erl) tests **16 algebraic and lattice properties** directly against `prisma_type`:
 
-* **Subtyping laws:** Reflexivity, soundness (`consistent_subtype(A, B) => member(V, B)`), and transitivity over chains $A \lesssim B \lesssim C$.
+* **Subtyping laws:** Reflexivity, soundness (`consistent_subtype(A, B) => member(V, B)`), and transitivity over chains `A ≲ B ≲ C`.
 * **Join & Meet laws:** `join` upper-bound consistency and value preservation; `meet` soundness, common-value preservation, commutativity, idempotence, and lower-bound consistency.
 * **Normalization & Widening:** Union normalization preserves members and is idempotent; `prisma_type:widen/1` is both sound (`T <~ widen(T)` and keeps all concrete values) and idempotent (`widen(widen(T)) =:= widen(T)`).
 
