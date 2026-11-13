@@ -50,13 +50,41 @@ report(All, Opts) ->
         [] ->
             case maps:get(format, Opts, human) of
                 json -> <<"[]\n">>;
-                _ -> [colorize("Prisma: 0 warnings found.", "\e[1;32m", should_color(Opts)), $\n]
+                _ ->
+                    [
+                        format_timing(Opts),
+                        colorize("Prisma: 0 warnings found.", "\e[1;32m", should_color(Opts)),
+                        $\n
+                    ]
             end;
         _ ->
-            [format_warnings(Shown, Opts), $\n]
+            case maps:get(format, Opts, human) of
+                json ->
+                    [format_warnings(Shown, Opts), $\n];
+                _ ->
+                    Timing = case format_timing(Opts) of
+                        [] -> [];
+                        T -> ["\n", T]
+                    end,
+                    [format_warnings(Shown, Opts), $\n, Timing]
+            end
     end,
     Failed = Errors =/= [] orelse (maps:get(warnings_as_errors, Opts, false) andalso Warnings =/= []),
     #{output => Output, failed => Failed, errors => length(Errors), warnings => length(Warnings), unchecked => Unchecked}.
+
+format_timing(Opts) ->
+    case maps:get(format, Opts, human) of
+        human ->
+            case maps:find(elapsed_us, Opts) of
+                {ok, Us} when is_integer(Us), Us >= 0 ->
+                    Secs = Us / 1000000,
+                    io_lib:format("Finished in ~.3f seconds~n", [Secs]);
+                _ ->
+                    []
+            end;
+        _ ->
+            []
+    end.
 
 %% @doc Analyzes all modules in `TargetPplt` against `DepsPplt` in hybrid mode.
 -spec check_pplt(#prisma_pplt{}, #prisma_pplt{}) -> [#prisma_warning{}].

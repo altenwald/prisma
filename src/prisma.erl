@@ -221,13 +221,16 @@ main(["check" | Rest]) ->
             ok
     end,
     Targets = maps:get(targets, Opts, []),
+    T0 = erlang:monotonic_time(),
     Result = case Targets of
         [] -> analyze_project(".", Opts);
         _ -> analyze_dirs(Targets, Opts#{project_root => "."})
     end,
     case Result of
         {ok, Warnings} ->
-            Report = prisma_checker:report(Warnings, Opts),
+            T1 = erlang:monotonic_time(),
+            TimeUs = erlang:convert_time_unit(T1 - T0, native, microsecond),
+            Report = prisma_checker:report(Warnings, Opts#{elapsed_us => TimeUs}),
             io:put_chars(maps:get(output, Report)),
             case maps:get(unchecked, Report) of
                 0 -> ok;

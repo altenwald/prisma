@@ -94,9 +94,12 @@ run(RawArgs) ->
     Opts = Merged#{pplts => CombinedPplts},
     Root = maps:get(root, Opts, "."),
     Dirs = resolve_ebin_dirs(maps:get(targets, Opts, []), Opts),
+    T0 = erlang:monotonic_time(),
     case prisma:analyze_dirs(Dirs, Opts#{project_root => Root}) of
         {ok, Warnings} ->
-            Report = prisma_checker:report(Warnings, Opts),
+            T1 = erlang:monotonic_time(),
+            TimeUs = erlang:convert_time_unit(T1 - T0, native, microsecond),
+            Report = prisma_checker:report(Warnings, Opts#{elapsed_us => TimeUs}),
             io:put_chars(maps:get(output, Report)),
             case maps:get(unchecked, Report) of
                 0 -> ok;

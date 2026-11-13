@@ -163,6 +163,30 @@ report_levels_test() ->
     ?assertEqual(nomatch, string:find(iolist_to_binary(maps:get(output, R4)), "handled_undef")),
     ?assertMatch(#{failed := false, errors := 0, warnings := 0}, prisma_checker:report([], #{})).
 
+report_timing_test() ->
+    R0 = prisma_checker:report([], #{elapsed_us => 560000}),
+    Out0 = iolist_to_binary(maps:get(output, R0)),
+    ?assert(binary:match(Out0, <<"Finished in 0.560 seconds\n">>) =/= nomatch),
+    ?assert(binary:match(Out0, <<"Prisma: 0 warnings found.">>) =/= nomatch),
+
+    W = #prisma_warning{
+        kind = discrepancy,
+        mfa = {mod, fun_a, 0},
+        line = 10,
+        message = "broken spec"
+    },
+    R1 = prisma_checker:report([W], #{elapsed_us => 1234000}),
+    Out1 = iolist_to_binary(maps:get(output, R1)),
+    ?assert(binary:match(Out1, <<"Finished in 1.234 seconds\n">>) =/= nomatch),
+
+    %% In json and oneline formats, no timing line is printed
+    RJson = prisma_checker:report([], #{format => json, elapsed_us => 560000}),
+    ?assertEqual(<<"[]\n">>, maps:get(output, RJson)),
+
+    ROneline = prisma_checker:report([W], #{format => oneline, elapsed_us => 560000}),
+    OutOneline = iolist_to_binary(maps:get(output, ROneline)),
+    ?assertEqual(nomatch, binary:match(OutOneline, <<"Finished in">>)).
+
 cli_options_for_warnings_test() ->
     ?assertMatch(#{no_warnings := true}, prisma:parse_check_opts(["--no-warnings"])),
     ?assertMatch(#{warnings_as_errors := true}, prisma:parse_check_opts(["--warnings-as-errors"])),
