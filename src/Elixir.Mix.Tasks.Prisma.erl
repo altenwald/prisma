@@ -89,7 +89,7 @@ run(RawArgs) ->
     ConfigOpts = read_mix_project_config(),
     CliOpts = parse_args(RawArgs),
     CombinedPplts = maps:get(pplts, ConfigOpts, []) ++ maps:get(pplts, CliOpts, []),
-    Defaults = #{mode => hybrid, format => human, color => auto},
+    Defaults = #{mode => hybrid, format => human, color => auto, elixir => true},
     Merged = maps:merge(Defaults, maps:merge(ConfigOpts, CliOpts)),
     Opts = Merged#{pplts => CombinedPplts},
     Root = maps:get(root, Opts, "."),

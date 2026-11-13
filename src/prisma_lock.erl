@@ -277,7 +277,10 @@ ensure_elixir_pplt(Opts) ->
     CacheDir = maps:get(cache_dir, Opts, default_cache_dir()),
     case elixir_cache_path(CacheDir) of
         error ->
-            {error, no_elixir};
+            case lists:sort(filelib:wildcard(filename:join(unicode:characters_to_list(CacheDir), "elixir_*.pplt"))) of
+                [Cached | _] -> prisma_pplt:load(Cached);
+                [] -> {error, no_elixir}
+            end;
         {ok, Path} ->
             case filelib:is_regular(Path) of
                 true ->
@@ -333,7 +336,11 @@ resolve_project_pplts(ProjectRoot, Opts) ->
         [] -> [];
         _ -> [P || {ok, P} <- [ensure_otp_pplt(OtpApps, SysOpts)]]
     end,
-    Elixir = case maps:get(elixir, Opts, false) of
+    ElixirFlag = case maps:find(elixir, Opts) of
+        {ok, Val} -> Val;
+        error -> filelib:is_regular(filename:join(unicode:characters_to_list(ProjectRoot), "mix.exs"))
+    end,
+    Elixir = case ElixirFlag of
         true -> [P || {ok, P} <- [ensure_elixir_pplt(SysOpts)]];
         false -> []
     end,

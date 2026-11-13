@@ -165,7 +165,10 @@ analyze_beams(Beams, Opts) ->
         {ok, ExplicitPplt} ->
             LockPplt = resolve_lock_pplt(Opts),
             DepsPplt = prisma_pplt:merge(ExplicitPplt, LockPplt),
-            case prisma_pplt:from_beams(Beams, Opts#{external_specs => prisma_pplt:declared_specs(DepsPplt)}) of
+            case prisma_pplt:from_beams(Beams, Opts#{
+                external_specs => prisma_pplt:declared_specs(DepsPplt),
+                external_types => prisma_pplt:declared_types(DepsPplt)
+            }) of
                 {ok, TargetPplt} ->
                     Warnings = prisma_checker:check_pplt(TargetPplt, DepsPplt, Opts),
                     {ok, Warnings};

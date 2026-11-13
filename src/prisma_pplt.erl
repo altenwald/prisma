@@ -21,6 +21,7 @@
     lookup_mfa/2,
     lookup_module/2,
     declared_specs/1,
+    declared_types/1,
     lookup_type/2,
     resolve_type/3,
     resolve_type/4,
@@ -252,6 +253,14 @@ declared_specs(#prisma_pplt{modules = Mods}) ->
                     fun(Key, #func_contract{declared_specs = [_ | _] = Specs}, A) -> A#{Key => Specs};
                        (_, _, A) -> A
                     end, Acc, Funcs)
+        end, #{}, Mods).
+
+%% @doc The declared `-type` and `-opaque` definitions of every module in the PPLT.
+-spec declared_types(#prisma_pplt{}) -> #{type_key() => #type_decl{}}.
+declared_types(#prisma_pplt{modules = Mods}) ->
+    maps:fold(
+        fun(_Mod, #module_summary{types = Types}, Acc) ->
+                maps:merge(Acc, Types)
         end, #{}, Mods).
 
 %% @doc Looks up what is known about module `Mod` in the PPLT.

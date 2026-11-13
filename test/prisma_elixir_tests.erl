@@ -330,3 +330,107 @@ elixir_cond_default_branch_test() ->
     Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
     Warnings = prisma_checker:check_module(Summary, Pplt, #{mode => hybrid}),
     ?assertEqual([], Warnings).
+
+elixir_struct_update_preserves_struct_test() ->
+    Mod = 'Elixir.MyApp.Partial',
+    StructMeta = [
+        #{field => '__struct__', required => true},
+        #{field => id, required => true},
+        #{field => name, required => false}
+    ],
+    SpecsForms = [
+        {attribute, 1, export_type, [{t, 0}]},
+        {attribute, 5, type, {t,
+            {type, 5, map, [
+                {type, 5, map_field_exact, [{atom, 5, '__struct__'}, {atom, 5, Mod}]},
+                {type, 5, map_field_exact, [{atom, 5, id}, {type, 5, pos_integer, []}]},
+                {type, 5, map_field_exact, [{atom, 5, name}, {type, 5, binary, []}]}
+            ]},
+            []
+        }},
+        {attribute, 10, spec, {{rename, 2}, [
+            {type, 10, 'fun', [
+                {type, 10, product, [{user_type, 10, t, []}, {type, 10, binary, []}]},
+                {user_type, 10, t, []}
+            ]}
+        ]}}
+    ],
+    Definitions = [
+        {{rename, 2}, def, [{line, 11}], [
+            {[{line, 11}],
+             [{'%', [{line, 11}], [Mod, {'%{}', [{line, 11}], []}]}, {name, [{line, 11}], nil}],
+             [],
+             {'%', [{line, 12}], [Mod, {'%{}', [{line, 12}], [{'|', [{line, 12}], [
+                 {partial, [{line, 12}], nil},
+                 [{name, {name, [{line, 12}], nil}}]
+             ]}]}]}}
+        ]}
+    ],
+    %% Rewrite first arg pattern to bind `partial` variable in struct pattern:
+    %% %Mod{} = partial -> {'=', ..., [{'%', ..., [Mod, {'%{}', ..., []}]}, {partial, ..., nil}]}
+    Pat = {'=', [{line, 11}], [
+        {'%', [{line, 11}], [Mod, {'%{}', [{line, 11}], []}]},
+        {partial, [{line, 11}], nil}
+    ]},
+    [{{rename, 2}, def, Meta, [{CMeta, [_, NameVar], Guards, Body}]}] = Definitions,
+    Dbgi = {debug_info_v1, elixir_erl, {elixir_v1, #{
+        module => Mod,
+        struct => StructMeta,
+        definitions => [{{rename, 2}, def, Meta, [{CMeta, [Pat, NameVar], Guards, Body}]}]
+    }, SpecsForms}},
+    Exports = [{rename, 2}],
+    Summary = prisma_elixir:from_elixir_dbgi(Mod, Dbgi, Exports, #module_summary{
+        module = Mod,
+        language = elixir,
+        exports = Exports
+    }),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    Warnings = prisma_checker:check_module(Summary, Pplt, #{mode => hybrid}),
+    ?assertEqual([], Warnings).
+
+elixir_defmacro_tracks_private_helpers_test() ->
+    Mod = 'Elixir.MyApp.Macros',
+    Definitions = [
+        {{halt, 1}, defmacro, [{line, 5}], [
+            {[{line, 5}], [{call, [{line, 5}], nil}], [],
+             {build_context, [{line, 6}], [{call, [{line, 6}], nil}]}}
+        ]},
+        {{build_context, 1}, defp, [{line, 10}], [
+            {[{line, 10}], [{x, [{line, 10}], nil}], [], {x, [{line, 10}], nil}}
+        ]}
+    ],
+    Dbgi = {debug_info_v1, elixir_erl, {elixir_v1, #{
+        module => Mod,
+        definitions => Definitions
+    }, []}},
+    Exports = [{'MACRO-halt', 2}],
+    Summary = prisma_elixir:from_elixir_dbgi(Mod, Dbgi, Exports, #module_summary{
+        module = Mod,
+        language = elixir,
+        exports = Exports
+    }),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).
+
+elixir_remote_type_return_and_nested_tuple_union_test() ->
+    StringDecl = #type_decl{
+        key = {'Elixir.String', t, 0},
+        kind = type,
+        exported = true,
+        params = [],
+        body = {binary, 0, 8}
+    },
+    ExternalTypes = #{{'Elixir.String', t, 0} => StringDecl},
+    LookupFun = fun(Key) -> maps:find(Key, ExternalTypes) end,
+    Spec = [{fun_type, [any], {remote_type, 'Elixir.String', t, []}}],
+    ?assertEqual(
+        {binary, 0, 8},
+        prisma_infer:declared_return(Spec, 1, [any], 'Elixir.String.Chars', LookupFun)
+    ),
+    Sub = {tuple, [{atom_lit, reference}, {tuple, [{union, [{atom_lit, decimal}, {atom_lit, hexadecimal}]}, integer]}]},
+    Super = {union, [
+        {tuple, [{atom_lit, reference}, {tuple, [{atom_lit, decimal}, integer]}]},
+        {tuple, [{atom_lit, reference}, {tuple, [{atom_lit, entity}, {binary, 0, 8}]}]},
+        {tuple, [{atom_lit, reference}, {tuple, [{atom_lit, hexadecimal}, integer]}]}
+    ]},
+    ?assert(prisma_type:consistent_subtype(Sub, Super)).

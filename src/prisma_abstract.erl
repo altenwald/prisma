@@ -106,7 +106,7 @@ enrich_from_debug_info(Beam, Module, Dbgi, Exports, Summary, Opts) ->
         {ok, Forms} ->
             {ok, parse_abstract_forms(Forms, Exports, Summary, Opts)};
         error ->
-            {ok, prisma_elixir:from_elixir_dbgi(Module, Dbgi, Exports, Summary)}
+            {ok, prisma_elixir:from_elixir_dbgi(Module, Dbgi, Exports, Summary, Opts)}
     end.
 
 %% The abstract forms of a module. The debug_info chunk of an Erlang module already holds them, in the same form that
@@ -151,20 +151,21 @@ specs_in(Mod, Forms) ->
 %% What the inference of a module may assume about the functions of the others: the return type their `-spec` declares
 %% (the contract is the interface, not whatever their body happens to give). The arguments are left alone: they are checked
 %% against the spec by the checker. A function without a spec, or whose spec returns anything, adds nothing.
-external_contracts(Mod, InitialFuncs, ExternalSpecs) ->
+external_contracts(Mod, InitialFuncs, ExternalSpecs, AllTypes) ->
     RemoteCalls = lists:usort([Call || #func_contract{calls = Calls} <- maps:values(InitialFuncs),
                                        {M, _, _} = Call <- Calls, M =/= Mod]),
     Base = case maps:find('$leex_tokens', ExternalSpecs) of
         {ok, Tokens} -> #{'$leex_tokens' => Tokens};
         error -> #{}
     end,
+    LookupFun = fun(TKey) -> maps:find(TKey, AllTypes) end,
     lists:foldl(
         fun({M, _F, A} = Key, Acc) when M =/= Mod ->
                 case maps:find(Key, ExternalSpecs) of
                     {ok, #func_contract{} = C} ->
                         Acc#{Key => C};
                     {ok, Specs} when is_list(Specs) ->
-                        case prisma_infer:declared_return(Specs, A) of
+                        case prisma_infer:declared_return(Specs, A, [], M, LookupFun) of
                             any -> Acc;
                             Ret -> Acc#{Key => #func_contract{mfa = Key, declared_specs = Specs,
                                                               inferred_type = {fun_type, lists:duplicate(A, any), Ret}}}
@@ -248,9 +249,12 @@ parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types 
         RawTypes
     ),
     WithSpecs = merge_specs_into_funcs(Mod, ExportSet, Specs, InitialFuncs),
-    External = external_contracts(Mod, InitialFuncs, maps:get(external_specs, Opts, #{})),
+    ExternalTypes = maps:get(external_types, Opts, #{}),
+    AllTypes = maps:merge(ExternalTypes, MarkedTypes),
+    External = external_contracts(Mod, InitialFuncs, maps:get(external_specs, Opts, #{}), AllTypes),
     RecordContracts = maps:from_list([{{record_def, RName}, RSize} || {RName, RSize} <- maps:to_list(RecDefs)]),
-    Inferred = prisma_infer:infer_module_functions(Mod, ClausesByMFA, maps:merge(RecordContracts, maps:merge(External, WithSpecs))),
+    TypeContracts = #{{type_defs, Mod} => MarkedTypes, {type_defs, all} => AllTypes},
+    Inferred = prisma_infer:infer_module_functions(Mod, ClausesByMFA, maps:merge(TypeContracts, maps:merge(RecordContracts, maps:merge(External, WithSpecs)))),
     InferredFuncs = maps:filter(fun({M, _, _}, _) -> M =:= Mod; (_, _) -> false end, Inferred),
     ResolvedFile = case Summary#module_summary.file of
         undefined ->

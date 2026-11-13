@@ -341,7 +341,7 @@ consistent_subtype(Same, Same) -> true;
 consistent_subtype({union, SubMembers}, Super) ->
     lists:all(fun(M) -> consistent_subtype(M, Super) end, SubMembers);
 consistent_subtype({tuple, Elems} = Sub, {union, SuperMembers} = Super) ->
-    case lists:any(fun is_union/1, Elems) of
+    case lists:any(fun has_split_union/1, Elems) of
         false ->
             lists:any(fun(M) -> consistent_subtype(Sub, M) end, SuperMembers);
         true ->
@@ -735,13 +735,32 @@ meet_record_fields(Name, F1, F2) ->
 is_union({union, _}) -> true;
 is_union(_) -> false.
 
+has_split_union({union, _}) -> true;
+has_split_union({tuple, Elems}) -> lists:any(fun has_split_union/1, Elems);
+has_split_union(_) -> false.
+
 %% Every way of choosing one member of each union element of a tuple, or `too_many` past 32.
 tuple_combinations(Elems) ->
-    Options = [case E of {union, Ms} -> Ms; _ -> [E] end || E <- Elems],
+    Options = [tuple_elem_options(E) || E <- Elems],
     case lists:foldl(fun(Os, N) -> N * length(Os) end, 1, Options) =< 32 of
         true -> combinations(Options);
         false -> too_many
     end.
+
+tuple_elem_options({union, Ms}) ->
+    Ms;
+tuple_elem_options({tuple, InnerElems} = T) ->
+    case lists:any(fun has_split_union/1, InnerElems) of
+        false ->
+            [T];
+        true ->
+            case tuple_combinations(InnerElems) of
+                too_many -> [T];
+                Combs -> [{tuple, C} || C <- Combs]
+            end
+    end;
+tuple_elem_options(E) ->
+    [E].
 
 combinations([]) -> [[]];
 combinations([Options | Rest]) ->

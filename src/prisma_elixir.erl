@@ -8,17 +8,24 @@
 
 -export([
     from_elixir_dbgi/4,
+    from_elixir_dbgi/5,
     to_abstract_forms/3
 ]).
 
 %% @doc Builds a `#module_summary{}` from an Elixir `debug_info_v1` chunk.
 -spec from_elixir_dbgi(module(), term(), [{atom(), arity()}], #module_summary{}) ->
     #module_summary{}.
-from_elixir_dbgi(Mod, {debug_info_v1, elixir_erl, {elixir_v1, Map, SpecsForms}}, Exports, Summary)
+from_elixir_dbgi(Mod, Dbgi, Exports, Summary) ->
+    from_elixir_dbgi(Mod, Dbgi, Exports, Summary, #{}).
+
+%% @doc Like `from_elixir_dbgi/4`, passing `Opts` (such as `external_specs` and `external_types`).
+-spec from_elixir_dbgi(module(), term(), [{atom(), arity()}], #module_summary{}, map()) ->
+    #module_summary{}.
+from_elixir_dbgi(Mod, {debug_info_v1, elixir_erl, {elixir_v1, Map, SpecsForms}}, Exports, Summary, Opts)
   when is_map(Map), is_list(SpecsForms) ->
     Forms = to_abstract_forms(Mod, Map, SpecsForms),
-    prisma_abstract:parse_abstract_forms(Forms, Exports, Summary);
-from_elixir_dbgi(_Mod, _Dbgi, Exports, #module_summary{module = Mod} = Summary) ->
+    prisma_abstract:parse_abstract_forms(Forms, Exports, Summary, Opts);
+from_elixir_dbgi(_Mod, _Dbgi, Exports, #module_summary{module = Mod} = Summary, _Opts) ->
     Funcs = maps:from_list([
         {{Mod, F, A}, #func_contract{mfa = {Mod, F, A}, exported = true}}
         || {F, A} <- Exports
@@ -33,7 +40,7 @@ to_abstract_forms(Mod, Map, SpecsForms) ->
     FunForms = lists:append([
         translate_definition(Def)
         || {{_F, _A}, Kind, _Meta, _Clauses} = Def <- Defs,
-           Kind =:= def orelse Kind =:= defp
+           Kind =:= def orelse Kind =:= defp orelse Kind =:= defmacro orelse Kind =:= defmacrop
     ]),
     SpecsForms ++ StructForms ++ FunForms.
 
@@ -73,13 +80,22 @@ extract_struct_forms(Mod, StructFields, SpecsForms) when is_list(StructFields) -
 extract_struct_forms(_Mod, _Struct, _SpecsForms) ->
     [].
 
-translate_definition({{Name, Arity}, _Kind, Meta, Clauses}) when is_list(Clauses) ->
+translate_definition({{Name, Arity}, Kind, Meta, Clauses}) when is_list(Clauses) ->
     Anno = meta_anno(Meta),
-    ErlClauses = [translate_clause(C, Name) || C <- Clauses],
-    FunForm = {function, Anno, Name, Arity, ErlClauses},
+    {ErlName, ErlArity, ExtraArg} = case Kind of
+        K when K =:= defmacro; K =:= defmacrop ->
+            {list_to_atom("MACRO-" ++ atom_to_list(Name)), Arity + 1, [{var, Anno, '_@CALLER'}]};
+        _ ->
+            {Name, Arity, []}
+    end,
+    ErlClauses = [begin
+        {clause, CAnno, Pats, Guards, Body} = translate_clause(C, Name),
+        {clause, CAnno, ExtraArg ++ Pats, Guards, Body}
+    end || C <- Clauses],
+    FunForm = {function, Anno, ErlName, ErlArity, ErlClauses},
     case is_elixir_generated(Name, Meta) of
         true ->
-            [{attribute, Anno, compiler_generated, {Name, Arity}}, FunForm];
+            [{attribute, Anno, compiler_generated, {ErlName, ErlArity}}, FunForm];
         false ->
             [FunForm]
     end.

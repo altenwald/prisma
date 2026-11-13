@@ -12,6 +12,7 @@
     check_call_site/4,
     declared_return/2,
     declared_return/3,
+    declared_return/5,
     extract_leex_token_map/2
 ]).
 
@@ -299,10 +300,16 @@ pattern_variables([H | T]) -> pattern_variables(H) ++ pattern_variables(T);
 pattern_variables(_) -> [].
 
 bind_map_pat_fields([], Expected, Env, Acc) ->
-    %% the keys of the pattern are not all the keys: with nothing known of the scrutinee it is a map, not a map with only those
+    %% the keys of the pattern are not all the keys: with nothing known of the scrutinee it is a map, not a map with only those;
+    %% if it matches a struct tag (`__struct__`), preserve that tag so struct updates retain their identity.
     Type = case unresolved(Expected) of
-        true -> any_map;
-        false -> prisma_type:meet({map, lists:usort(Acc)}, Expected)
+        true ->
+            case [F || {exact, {atom_lit, '__struct__'}, {atom_lit, _}} = F <- Acc] of
+                [StructTag | _] -> {map, [StructTag]};
+                [] -> any_map
+            end;
+        false ->
+            prisma_type:meet({map, lists:usort(Acc)}, Expected)
     end,
     {Type, Env};
 bind_map_pat_fields([{map_field_exact, _, KAst, VP} | Rest], Expected, Env0, Acc) ->
@@ -1462,12 +1469,14 @@ infer_call(Mod, CallerMFA, Anno, Target, ArgAsts, ArgTypes, Env0, Contracts, War
             {any, Env0, Warns0, Sites0}
     end.
 
-infer_contract_call(CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites1) ->
+infer_contract_call(CallerMFA, Line, {CalleeMod, _, _} = CalleeMFA, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites1) ->
     case maps:find(CalleeMFA, Contracts) of
         {ok, #func_contract{inferred_type = {fun_type, ExpectedArgs, Inferred}, declared_specs = Specs}} ->
             %% what the callee declares, not what its body happens to give: if the body contradicts the spec the
             %% warning belongs to the callee, and its callers are not named for it
-            RetType = case declared_return(Specs, length(ExpectedArgs), ArgTypes) of
+            AllTypes = maps:get({type_defs, all}, Contracts, maps:get({type_defs, CalleeMod}, Contracts, #{})),
+            LookupFun = fun(Key) -> maps:find(Key, AllTypes) end,
+            RetType = case declared_return(Specs, length(ExpectedArgs), ArgTypes, CalleeMod, LookupFun) of
                 any -> Inferred;
                 Declared -> Declared
             end,
@@ -1510,6 +1519,10 @@ declared_return(Specs, Arity) ->
 
 -spec declared_return([prisma_type:stype()], non_neg_integer(), [prisma_type:stype()]) -> prisma_type:stype().
 declared_return(Specs, Arity, ArgTypes) ->
+    declared_return(Specs, Arity, ArgTypes, undefined, undefined).
+
+-spec declared_return([prisma_type:stype()], non_neg_integer(), [prisma_type:stype()], module() | undefined, prisma_type:type_lookup_fun() | undefined) -> prisma_type:stype().
+declared_return(Specs, Arity, ArgTypes, CalleeMod, LookupFun) ->
     Clauses = [
         {Args, Ret}
      || Spec <- Specs,
@@ -1538,8 +1551,20 @@ declared_return(Specs, Arity, ArgTypes) ->
             [Ret || {_, Ret} <- Clauses]
     end,
     case Matching of
-        [] -> any;
-        _ -> erase_unresolved(prisma_type:normalize_union(Matching))
+        [] ->
+            any;
+        _ ->
+            UnionRet = prisma_type:normalize_union(Matching),
+            ExpandedRet = case LookupFun of
+                _ when is_function(LookupFun, 1) ->
+                    case prisma_type:expand(CalleeMod, CalleeMod, UnionRet, LookupFun) of
+                        {ok, Expanded} -> Expanded;
+                        {error, _} -> UnionRet
+                    end;
+                _ ->
+                    UnionRet
+            end,
+            erase_unresolved(ExpandedRet)
     end.
 
 erase_unresolved({local_type, _, _}) -> any;
@@ -1798,14 +1823,16 @@ is_generated_ast(Node) when is_tuple(Node), tuple_size(Node) >= 2 ->
 is_generated_ast(_) ->
     false.
 
-seed_arg_types(MFA, Arity, AllContracts) ->
+seed_arg_types({Mod, _F, _A} = MFA, Arity, AllContracts) ->
+    TypeDefs = maps:get({type_defs, all}, AllContracts, maps:get({type_defs, Mod}, AllContracts, #{})),
+    LookupFun = fun(Key) -> maps:find(Key, TypeDefs) end,
     case maps:find(MFA, AllContracts) of
         {ok, #func_contract{declared_specs = [_ | _] = Specs}} ->
             SpecArgLists = lists:filtermap(
                 fun(Spec) ->
                     case prisma_type:unfold_bounded_fun(Spec) of
                         {fun_type, SpecArgs, _} when length(SpecArgs) =:= Arity ->
-                            {true, [sanitize_seed_type(A) || A <- SpecArgs]};
+                            {true, [sanitize_seed_type(expand_local_seed(Mod, A, LookupFun)) || A <- SpecArgs]};
                         _ ->
                             false
                     end
@@ -1828,11 +1855,18 @@ seed_arg_types(MFA, Arity, AllContracts) ->
             lists:duplicate(Arity, any)
     end.
 
+expand_local_seed(Mod, Type, LookupFun) ->
+    case prisma_type:expand(Mod, Mod, Type, LookupFun) of
+        {ok, Expanded} -> Expanded;
+        {error, _} -> Type
+    end.
+
 sanitize_seed_type({local_type, _, _}) -> any;
 sanitize_seed_type({remote_type, _, _, _}) -> any;
 sanitize_seed_type({list, E}) -> {list, sanitize_seed_type(E)};
 sanitize_seed_type({nonempty_list, E}) -> {nonempty_list, sanitize_seed_type(E)};
 sanitize_seed_type({tuple, Es}) -> {tuple, [sanitize_seed_type(E) || E <- Es]};
+sanitize_seed_type({map, Fs}) -> {map, [{Kind, sanitize_seed_type(K), sanitize_seed_type(V)} || {Kind, K, V} <- Fs]};
 sanitize_seed_type({union, Ms}) -> prisma_type:normalize_union([sanitize_seed_type(M) || M <- Ms]);
 sanitize_seed_type(Other) -> Other.
 
