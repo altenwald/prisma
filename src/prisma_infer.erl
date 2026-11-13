@@ -151,18 +151,22 @@ join_arg_vectors(Arity, Vectors) ->
 
 infer_clause(Mod, MFA, {clause, Anno, PatArgs, Guards, Body}, AllContracts) ->
     SeedArgs = seed_arg_types(MFA, length(PatArgs), AllContracts),
+    IsGen = is_generated_function(MFA) orelse is_generated_anno(Anno) orelse is_generated_guard(Guards),
     case bind_patterns(PatArgs, SeedArgs, #{}) of
         unreachable ->
-            ClauseWarns = case is_generated_function(MFA) of
+            ClauseWarns = case IsGen of
                 true -> [];
                 false -> [make_warning(dead_code, MFA, Anno, <<"Function clause pattern cannot match">>)]
             end,
             {unreachable, ClauseWarns};
         {ok, PatTypes, Env0} ->
-            TestWarns = guard_warnings(MFA, Guards, Env0, AllContracts),
+            TestWarns = case IsGen of
+                true -> [];
+                false -> guard_warnings(MFA, Guards, Env0, AllContracts)
+            end,
             case apply_guard_disjunction(Guards, Env0, AllContracts) of
                 unreachable ->
-                    GuardWarns = case is_generated_function(MFA) of
+                    GuardWarns = case IsGen of
                         true -> [];
                         false -> [make_warning(dead_code, MFA, Anno, <<"Function clause guard cannot succeed">>)]
                     end,
@@ -1289,8 +1293,10 @@ constrain_ast_var(_, _Type, Env) ->
     Env.
 
 infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0) ->
+    IsCaseGen = is_generated_function(MFA) orelse is_generated_anno(Anno),
     {BranchRets, BranchEnvs, Warns1, Sites1, _Remaining} = lists:foldl(
         fun({clause, CAnno, Pats, CGuards, CBody}, {RetsAcc, EnvsAcc, WAcc, SAcc, Remaining}) ->
+            IsClauseGen = IsCaseGen orelse is_generated_anno(CAnno) orelse is_generated_guard(CGuards),
             PatResult = case Pats of
                 [SinglePat] -> bind_pattern(SinglePat, ScrutType, Env0);
                 [] -> {any, Env0};
@@ -1298,7 +1304,7 @@ infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0) 
             end,
             case PatResult of
                 {none, _} when ScrutType =/= none ->
-                    PWarns = case is_generated_function(MFA) of
+                    PWarns = case IsClauseGen of
                         true -> [];
                         false -> [make_warning(dead_code, MFA, CAnno, <<"Clause pattern cannot match scrutinee type">>)]
                     end,
@@ -1310,14 +1316,17 @@ infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0) 
                             %% covered by the clauses before it: nothing is said (a catch-all after exhaustive clauses is common)
                             {RetsAcc, EnvsAcc, WAcc, SAcc, Remaining};
                         {ok, CEnv0} ->
-                            TestWarns = guard_warnings(MFA, CGuards, CEnv0, Contracts),
+                            TestWarns = case IsClauseGen of
+                                true -> [];
+                                false -> guard_warnings(MFA, CGuards, CEnv0, Contracts)
+                            end,
                             Remaining1 = case CGuards of
                                 [] -> subtract_pattern(Remaining, Pats, Env0);
                                 _ -> Remaining
                             end,
                             case apply_guard_disjunction(CGuards, CEnv0, Contracts) of
                                 unreachable ->
-                                    GWarns = case is_generated_function(MFA) of
+                                    GWarns = case IsClauseGen of
                                         true -> [];
                                         false -> [make_warning(dead_code, MFA, CAnno, <<"Clause guard cannot succeed">>)]
                                     end,
@@ -1759,9 +1768,34 @@ make_warning(Kind, MFA, Anno, Msg) ->
 is_generated_function({_Mod, Fun, _Arity}) when is_atom(Fun) ->
     case atom_to_binary(Fun, utf8) of
         <<"__", _/binary>> -> true;
-        _ -> false
+        Bin ->
+            binary:match(Bin, <<" (overridable ">>) =/= nomatch
     end;
 is_generated_function(_) ->
+    false.
+
+is_generated_anno(Anno) ->
+    try
+        erl_anno:generated(Anno)
+    catch
+        _:_ ->
+            case is_list(Anno) of
+                true -> proplists:get_value(generated, Anno, false) =:= true;
+                false -> false
+            end
+    end.
+
+is_generated_guard(Guards) when is_list(Guards) ->
+    lists:any(fun(Conj) ->
+        is_list(Conj) andalso lists:any(fun is_generated_ast/1, Conj)
+    end, Guards);
+is_generated_guard(_) ->
+    false.
+
+is_generated_ast(Node) when is_tuple(Node), tuple_size(Node) >= 2 ->
+    Anno = element(2, Node),
+    is_generated_anno(Anno);
+is_generated_ast(_) ->
     false.
 
 seed_arg_types(MFA, Arity, AllContracts) ->

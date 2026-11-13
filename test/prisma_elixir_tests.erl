@@ -306,3 +306,27 @@ elixir_ssa_versioning_and_wildcard_struct_test() ->
     ?assertMatch({fun_type, [any, any], _}, CompleteContract#func_contract.inferred_type),
     {ok, AnyStructContract} = prisma_pplt:lookup_mfa({Mod, handle_any_struct, 1}, Pplt),
     ?assertMatch({fun_type, [{map, [{exact, {atom_lit, '__struct__'}, any}]}], _}, AnyStructContract#func_contract.inferred_type).
+
+elixir_cond_default_branch_test() ->
+    Mod = 'Elixir.PrismaRepro',
+    ClauseAnno = [{generated, true}, {location, {5, 12}}],
+    Expr = {'case', {3, 5},
+        {op, {4, 9}, '==', {var, {4, 7}, '_x@1'}, {integer, {4, 9}, 1}},
+        [
+            {clause, {4, 14}, [{atom, {4, 14}, true}], [], [{atom, {4, 14}, one}]},
+            {clause, {5, 12}, [{atom, {5, 12}, false}], [], [
+                {'case', {5, 12}, {atom, {5, 12}, true}, [
+                    {clause, {5, 12}, [{atom, {5, 12}, true}], [], [{atom, {5, 12}, other}]},
+                    {clause, ClauseAnno, [{atom, ClauseAnno, false}], [], [
+                        {call, {5, 12}, {remote, {5, 12}, {atom, {5, 12}, erlang}, {atom, {5, 12}, error}}, [{atom, {5, 12}, cond_clause}]}
+                    ]}
+                ]}
+            ]}
+        ]
+    },
+    Function = {function, {2, 7}, a, 1, [{clause, {2, 7}, [{var, {2, 9}, '_x@1'}], [], [Expr]}]},
+    Forms = [Function],
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{a, 1}], #module_summary{module = Mod, language = elixir}, #{}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    Warnings = prisma_checker:check_module(Summary, Pplt, #{mode => hybrid}),
+    ?assertEqual([], Warnings).
