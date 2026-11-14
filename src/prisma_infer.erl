@@ -118,16 +118,22 @@ called(_Mod, _) ->
     [].
 
 infer_function(Mod, {_M, _F, Arity} = MFA, Clauses, Contract, AllContracts) ->
-    {ArgVectors, RetTypes, Warnings, CallSites} = lists:foldl(
-        fun(Clause, {ArgAcc, RetAcc, WarnAcc, SiteAcc}) ->
-            case infer_clause(Mod, MFA, Clause, AllContracts) of
+    SpecArgLists = seed_spec_arg_lists(MFA, Arity, AllContracts),
+    InitialRemaining = case SpecArgLists of
+        [] -> lists:duplicate(Arity, any);
+        _ -> join_arg_vectors(Arity, SpecArgLists)
+    end,
+    {ArgVectors, RetTypes, Warnings, CallSites, _FinalRemaining} = lists:foldl(
+        fun(Clause, {ArgAcc, RetAcc, WarnAcc, SiteAcc, RemArgs}) ->
+            {Result, NextRem} = infer_clause(Mod, MFA, Clause, SpecArgLists, RemArgs, AllContracts),
+            case Result of
                 {unreachable, ClauseWarns} ->
-                    {ArgAcc, RetAcc, WarnAcc ++ ClauseWarns, SiteAcc};
+                    {ArgAcc, RetAcc, WarnAcc ++ ClauseWarns, SiteAcc, NextRem};
                 {ok, ClauseArgTypes, ClauseRet, ClauseWarns, ClauseSites} ->
-                    {[ClauseArgTypes | ArgAcc], [ClauseRet | RetAcc], WarnAcc ++ ClauseWarns, SiteAcc ++ ClauseSites}
+                    {[ClauseArgTypes | ArgAcc], [ClauseRet | RetAcc], WarnAcc ++ ClauseWarns, SiteAcc ++ ClauseSites, NextRem}
             end
         end,
-        {[], [], [], []},
+        {[], [], [], [], InitialRemaining},
         Clauses
     ),
     JoinedArgs = join_arg_vectors(Arity, lists:reverse(ArgVectors)),
@@ -150,8 +156,12 @@ join_arg_vectors(Arity, Vectors) ->
         lists:seq(1, Arity)
     ).
 
-infer_clause(Mod, MFA, {clause, Anno, PatArgs, Guards, Body}, AllContracts) ->
-    SeedArgs = seed_arg_types(MFA, length(PatArgs), AllContracts),
+infer_clause(Mod, MFA, {clause, Anno, PatArgs, Guards, Body}, SpecArgLists, RemArgs, AllContracts) ->
+    SeedArgs = clause_seed_args(PatArgs, Guards, SpecArgLists, RemArgs, AllContracts),
+    NextRem = case Guards of
+        [] -> subtract_clause_args(RemArgs, PatArgs);
+        _ -> RemArgs
+    end,
     IsGen = is_generated_function(MFA) orelse is_generated_anno(Anno) orelse is_generated_guard(Guards),
     case bind_patterns(PatArgs, SeedArgs, #{}) of
         unreachable ->
@@ -159,7 +169,7 @@ infer_clause(Mod, MFA, {clause, Anno, PatArgs, Guards, Body}, AllContracts) ->
                 true -> [];
                 false -> [make_warning(dead_code, MFA, Anno, <<"Function clause pattern cannot match">>)]
             end,
-            {unreachable, ClauseWarns};
+            {{unreachable, ClauseWarns}, RemArgs};
         {ok, PatTypes, Env0} ->
             TestWarns = case IsGen of
                 true -> [];
@@ -171,11 +181,11 @@ infer_clause(Mod, MFA, {clause, Anno, PatArgs, Guards, Body}, AllContracts) ->
                         true -> [];
                         false -> [make_warning(dead_code, MFA, Anno, <<"Function clause guard cannot succeed">>)]
                     end,
-                    {unreachable, TestWarns ++ GuardWarns};
+                    {{unreachable, TestWarns ++ GuardWarns}, RemArgs};
                 {ok, Env1} ->
                     {RetType, EnvFinal, Warns, Sites} = infer_body(Mod, MFA, Body, Env1, AllContracts, [], []),
                     RefinedArgs = [refine_pat_type(P, T, EnvFinal) || {P, T} <- lists:zip(PatArgs, PatTypes)],
-                    {ok, RefinedArgs, RetType, TestWarns ++ Warns, Sites}
+                    {{ok, RefinedArgs, RetType, TestWarns ++ Warns, Sites}, NextRem}
             end
     end.
 
@@ -622,6 +632,20 @@ infer_expr(Mod, MFA, {match, Anno, Pat, Rhs}, Env0, Contracts, Warns0, Sites0) -
         {MatchedType, Env2} ->
             {MatchedType, Env2, Warns1, Sites1}
     end;
+infer_expr(Mod, MFA, {op, Anno, Op, L, R}, Env0, Contracts, Warns0, Sites0)
+  when Op =:= 'andalso'; Op =:= 'orelse' ->
+    {LType, Env1, Warns1, Sites1} = infer_expr(Mod, MFA, L, Env0, Contracts, Warns0, Sites0),
+    EnvR = case Op of
+        'andalso' ->
+            case apply_guard_test(L, Env1, Contracts) of
+                {ok, Narrowed} -> Narrowed;
+                unreachable -> Env1
+            end;
+        'orelse' ->
+            negate_guard_test(L, Env1)
+    end,
+    {RType, _Env2, Warns2, Sites2} = infer_expr(Mod, MFA, R, EnvR, Contracts, Warns1, Sites1),
+    infer_binop(MFA, Anno, Op, L, LType, R, RType, Env1, Warns2, Sites2);
 infer_expr(Mod, MFA, {op, Anno, Op, L, R}, Env0, Contracts, Warns0, Sites0) ->
     {LType, Env1, Warns1, Sites1} = infer_expr(Mod, MFA, L, Env0, Contracts, Warns0, Sites0),
     {RType, Env2, Warns2, Sites2} = infer_expr(Mod, MFA, R, Env1, Contracts, Warns1, Sites1),
@@ -633,7 +657,7 @@ infer_expr(Mod, MFA, {'case', Anno, Scrutinee, Clauses}, Env0, Contracts, Warns0
     {ScrutType, Env1, Warns1, Sites1} = infer_expr(Mod, MFA, Scrutinee, Env0, Contracts, Warns0, Sites0),
     case depends_on_the_system(Scrutinee) of
         false ->
-            infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env1, Contracts, Warns1, Sites1);
+            infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env1, Contracts, Warns1, Sites1, Scrutinee);
         true ->
             %% The branches depend on what the running system has. Where the condition can be decided on the system that runs the
             %% analysis, the branch that it takes is checked like any other (it runs here) and the ones it does not take are not an error
@@ -1300,6 +1324,9 @@ constrain_ast_var(_, _Type, Env) ->
     Env.
 
 infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0) ->
+    infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0, undefined).
+
+infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0, Scrutinee) ->
     IsCaseGen = is_generated_function(MFA) orelse is_generated_anno(Anno),
     {BranchRets, BranchEnvs, Warns1, Sites1, _Remaining} = lists:foldl(
         fun({clause, CAnno, Pats, CGuards, CBody}, {RetsAcc, EnvsAcc, WAcc, SAcc, Remaining}) ->
@@ -1323,15 +1350,16 @@ infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0) 
                             %% covered by the clauses before it: nothing is said (a catch-all after exhaustive clauses is common)
                             {RetsAcc, EnvsAcc, WAcc, SAcc, Remaining};
                         {ok, CEnv0} ->
+                            CEnvRef = refine_case_scrutinee(Scrutinee, Pats, CEnv0, Contracts),
                             TestWarns = case IsClauseGen of
                                 true -> [];
-                                false -> guard_warnings(MFA, CGuards, CEnv0, Contracts)
+                                false -> guard_warnings(MFA, CGuards, CEnvRef, Contracts)
                             end,
                             Remaining1 = case CGuards of
                                 [] -> subtract_pattern(Remaining, Pats, Env0);
-                                _ -> Remaining
+                                _ -> subtract_guarded_pattern(Remaining, Pats, CGuards, Env0)
                             end,
-                            case apply_guard_disjunction(CGuards, CEnv0, Contracts) of
+                            case apply_guard_disjunction(CGuards, CEnvRef, Contracts) of
                                 unreachable ->
                                     GWarns = case IsClauseGen of
                                         true -> [];
@@ -1396,6 +1424,15 @@ closed_pattern({string, _, _}, _Env) -> true;
 closed_pattern({nil, _}, _Env) -> true;
 closed_pattern({tuple, _, Elems}, Env) -> lists:all(fun(E) -> closed_pattern(E, Env) end, Elems);
 closed_pattern({cons, _, H, T}, Env) -> closed_pattern(H, Env) andalso closed_pattern(T, Env);
+closed_pattern({map, _, Fields}, Env) ->
+    lists:all(
+        fun({map_field_exact, _, K, V}) -> closed_pattern(K, Env) andalso closed_pattern(V, Env);
+           (_) -> false
+        end,
+        Fields
+    );
+closed_pattern({match, _, L, R}, Env) ->
+    closed_pattern(L, Env) andalso closed_pattern(R, Env);
 closed_pattern({op, _, '-', {integer, _, _}}, _Env) -> true;
 closed_pattern(_, _Env) -> false.
 
@@ -1417,6 +1454,21 @@ covers({union, Ps}, M) -> lists:any(fun(P) -> covers(P, M) end, Ps);
 covers(P, P) -> true;
 covers({tuple, Ps}, {tuple, Ms}) when length(Ps) =:= length(Ms) ->
     lists:all(fun({P, M}) -> covers(P, M) end, lists:zip(Ps, Ms));
+covers({map, PFields}, {map, MFields}) ->
+    MExact = #{K => V || {exact, K, V} <- MFields},
+    lists:all(
+        fun({exact, K, PV}) ->
+            case maps:find(K, MExact) of
+                {ok, MV} -> covers(PV, MV);
+                error -> false
+            end;
+           ({assoc, _, _}) ->
+            true
+        end,
+        PFields
+    );
+covers({improper_list, _, _}, nil) -> false;
+covers({improper_list, _, _}, {list, _}) -> false;
 covers(P, M) ->
     not has_unknown(M) andalso prisma_type:consistent_subtype(M, P).
 
@@ -1460,30 +1512,82 @@ infer_call(Mod, CallerMFA, Anno, Target, ArgAsts, ArgTypes, Env0, Contracts, War
                         {ok, HelperRet} ->
                             {HelperRet, Env0, Warns0, Sites1};
                         error ->
-                            infer_contract_call(CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites1)
+                            infer_contract_call(Mod, CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites1)
                     end;
                 _ ->
-                    infer_contract_call(CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites1)
+                    infer_contract_call(Mod, CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites1)
             end;
         dynamic ->
             {any, Env0, Warns0, Sites0}
     end.
 
-infer_contract_call(CallerMFA, Line, {CalleeMod, _, _} = CalleeMFA, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites1) ->
+infer_contract_call(Mod, CallerMFA, Line, {CalleeMod, _, _} = CalleeMFA, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites1) ->
     case maps:find(CalleeMFA, Contracts) of
-        {ok, #func_contract{inferred_type = {fun_type, ExpectedArgs, Inferred}, declared_specs = Specs}} ->
+        {ok, #func_contract{inferred_type = {fun_type, ExpectedArgs, Inferred}, declared_specs = Specs,
+                            exported = Exported, clauses = Clauses}} ->
             %% what the callee declares, not what its body happens to give: if the body contradicts the spec the
             %% warning belongs to the callee, and its callers are not named for it
             AllTypes = maps:get({type_defs, all}, Contracts, maps:get({type_defs, CalleeMod}, Contracts, #{})),
             LookupFun = fun(Key) -> maps:find(Key, AllTypes) end,
             RetType = case declared_return(Specs, length(ExpectedArgs), ArgTypes, CalleeMod, LookupFun) of
-                any -> Inferred;
-                Declared -> Declared
+                any when Specs =:= [], CalleeMod =:= Mod, Exported =:= false,
+                         length(Clauses) >= 2, length(Clauses) =< 8 ->
+                    case should_specialize_local(CalleeMFA, ArgTypes, Inferred, Contracts) of
+                        true ->
+                            case infer_specialized_local_call(Mod, CalleeMFA, ArgTypes, Clauses, Contracts) of
+                                {ok, SpecRet} -> SpecRet;
+                                error -> Inferred
+                            end;
+                        false ->
+                            Inferred
+                    end;
+                any ->
+                    Inferred;
+                Declared ->
+                    Declared
             end,
             apply_callee_signature(CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, ExpectedArgs, RetType, Env0, Warns0, Sites1,
                                    Specs =/= []);
         _ ->
             {any, Env0, Warns0, Sites1}
+    end.
+
+should_specialize_local(CalleeMFA, ArgTypes, Inferred, Contracts) ->
+    WorthSpecializing = Inferred =:= any orelse (is_tuple(Inferred) andalso element(1, Inferred) =:= union),
+    Visited = maps:get('$specializing', Contracts, #{}),
+    WorthSpecializing andalso
+        map_size(Visited) < 2 andalso
+        not maps:is_key(CalleeMFA, Visited) andalso
+        lists:any(fun(T) -> T =/= any end, ArgTypes).
+
+infer_specialized_local_call(Mod, CalleeMFA, ArgTypes, Clauses, Contracts) ->
+    Visited = maps:get('$specializing', Contracts, #{}),
+    SubContracts = Contracts#{'$specializing' => Visited#{CalleeMFA => true}},
+    {RetsRev, _} = lists:foldl(
+        fun({clause, _, PatArgs, Guards, Body}, {RetsAcc, RemArgs}) ->
+            NextRem = case Guards of
+                [] -> subtract_clause_args(RemArgs, PatArgs);
+                _ -> RemArgs
+            end,
+            case bind_patterns(PatArgs, RemArgs, #{}) of
+                unreachable ->
+                    {RetsAcc, RemArgs};
+                {ok, _PatTypes, CEnv0} ->
+                    case apply_guard_disjunction(Guards, CEnv0, SubContracts) of
+                        unreachable ->
+                            {RetsAcc, RemArgs};
+                        {ok, CEnv1} ->
+                            {Ret, _, _, _} = infer_body(Mod, CalleeMFA, Body, CEnv1, SubContracts, [], []),
+                            {[Ret | RetsAcc], NextRem}
+                    end
+            end
+        end,
+        {[], ArgTypes},
+        Clauses
+    ),
+    case RetsRev of
+        [] -> error;
+        _ -> {ok, prisma_type:normalize_union(lists:reverse(RetsRev))}
     end.
 
 infer_yecc_helper_call(Mod, CalleeMFA, ArgTypes, LocalClauses, Contracts) ->
@@ -1823,12 +1927,12 @@ is_generated_ast(Node) when is_tuple(Node), tuple_size(Node) >= 2 ->
 is_generated_ast(_) ->
     false.
 
-seed_arg_types({Mod, _F, _A} = MFA, Arity, AllContracts) ->
+seed_spec_arg_lists({Mod, _F, _A} = MFA, Arity, AllContracts) ->
     TypeDefs = maps:get({type_defs, all}, AllContracts, maps:get({type_defs, Mod}, AllContracts, #{})),
     LookupFun = fun(Key) -> maps:find(Key, TypeDefs) end,
     case maps:find(MFA, AllContracts) of
         {ok, #func_contract{declared_specs = [_ | _] = Specs}} ->
-            SpecArgLists = lists:filtermap(
+            lists:filtermap(
                 fun(Spec) ->
                     case prisma_type:unfold_bounded_fun(Spec) of
                         {fun_type, SpecArgs, _} when length(SpecArgs) =:= Arity ->
@@ -1838,27 +1942,216 @@ seed_arg_types({Mod, _F, _A} = MFA, Arity, AllContracts) ->
                     end
                 end,
                 Specs
-            ),
-            case SpecArgLists of
-                [] ->
-                    lists:duplicate(Arity, any);
-                _ ->
-                    lists:map(
-                        fun(Idx) ->
-                            Col = [lists:nth(Idx, Args) || Args <- SpecArgLists],
-                            prisma_type:normalize_union(Col)
-                        end,
-                        lists:seq(1, Arity)
-                    )
-            end;
+            );
         _ ->
-            lists:duplicate(Arity, any)
+            []
+    end.
+
+clause_seed_args(_PatArgs, _Guards, [], RemArgs, _AllContracts) ->
+    RemArgs;
+clause_seed_args(PatArgs, Guards, SpecArgLists, RemArgs, AllContracts) ->
+    Matching = case SpecArgLists of
+        [_] ->
+            SpecArgLists;
+        _ ->
+            Filtered = [
+                SpecArgs
+             || SpecArgs <- SpecArgLists,
+                clause_matches_spec(PatArgs, Guards, SpecArgs, AllContracts)
+            ],
+            case Filtered of
+                [] -> SpecArgLists;
+                _ -> Filtered
+            end
+    end,
+    SpecUnion = join_arg_vectors(length(PatArgs), Matching),
+    [
+        case prisma_type:meet(S, R) of
+            none -> S;
+            M -> M
+        end
+     || {S, R} <- lists:zip(SpecUnion, RemArgs)
+    ].
+
+clause_matches_spec(PatArgs, Guards, SpecArgs, AllContracts) ->
+    case bind_patterns(PatArgs, SpecArgs, #{}) of
+        unreachable ->
+            false;
+        {ok, _PatTypes, Env0} ->
+            apply_guard_disjunction(Guards, Env0, AllContracts) =/= unreachable
+    end.
+
+subtract_clause_args(RemArgs, PatArgs) ->
+    SharedEnv = repeated_pat_vars(PatArgs),
+    PatInfos = [
+        case closed_pattern(P, SharedEnv) of
+            true ->
+                case bind_pattern(P, Rem, #{}) of
+                    {none, _} -> {false, any};
+                    {PT, _} -> {true, PT}
+                end;
+            false ->
+                {false, any}
+        end
+     || {P, Rem} <- lists:zip(PatArgs, RemArgs)
+    ],
+    Indexed = lists:zip3(lists:seq(1, length(RemArgs)), RemArgs, PatInfos),
+    [
+        case Closed of
+            false ->
+                Rem;
+            true ->
+                OthersCover = lists:all(
+                    fun({J, OtherRem, {OtherClosed, OtherPT}}) ->
+                        J =:= I orelse (OtherClosed andalso covers(OtherPT, OtherRem))
+                    end,
+                    Indexed
+                ),
+                case OthersCover andalso PatType =/= any andalso Rem =/= any of
+                    true ->
+                        case subtract_covered(Rem, PatType) of
+                            none -> Rem;
+                            Sub -> Sub
+                        end;
+                    false ->
+                        Rem
+                end
+        end
+     || {I, Rem, {Closed, PatType}} <- Indexed
+    ].
+
+repeated_pat_vars(Patterns) ->
+    Counts = lists:foldl(fun collect_pat_vars/2, #{}, Patterns),
+    maps:filter(fun(_K, V) -> V > 1 end, Counts).
+
+collect_pat_vars({var, _, '_'}, Acc) ->
+    Acc;
+collect_pat_vars({var, _, Name}, Acc) ->
+    Acc#{Name => maps:get(Name, Acc, 0) + 1};
+collect_pat_vars(T, Acc) when is_tuple(T) ->
+    collect_pat_vars(tuple_to_list(T), Acc);
+collect_pat_vars(L, Acc) when is_list(L) ->
+    lists:foldl(fun collect_pat_vars/2, Acc, L);
+collect_pat_vars(_, Acc) ->
+    Acc.
+
+subtract_guarded_pattern(Remaining, [{var, _, V}], [Conj], Env) when not is_map_key(V, Env) ->
+    case [guard_covered_type(V, G) || G <- Conj] of
+        [{ok, Covered}] -> subtract_covered(Remaining, Covered);
+        _ -> Remaining
+    end;
+subtract_guarded_pattern(Remaining, _, _, _Env) ->
+    Remaining.
+
+guard_covered_type(V, {op, _, '=:=', {var, _, V}, Lit}) ->
+    literal_covered(Lit);
+guard_covered_type(V, {op, _, '=:=', Lit, {var, _, V}}) ->
+    literal_covered(Lit);
+guard_covered_type(V, {op, _, '==', {var, _, V}, {atom, _, A}}) ->
+    {ok, {atom_lit, A}};
+guard_covered_type(V, {op, _, '==', {atom, _, A}, {var, _, V}}) ->
+    {ok, {atom_lit, A}};
+guard_covered_type(V, {op, _, 'orelse', L, R}) ->
+    case {guard_covered_type(V, L), guard_covered_type(V, R)} of
+        {{ok, LT}, {ok, RT}} -> {ok, prisma_type:normalize_union([LT, RT])};
+        _ -> error
+    end;
+guard_covered_type(V, {call, _, {remote, _, {atom, _, erlang}, {atom, _, GuardName}}, [{var, _, V}]}) ->
+    case guard_type(GuardName) of
+        undefined -> error;
+        Type -> {ok, Type}
+    end;
+guard_covered_type(_, _) ->
+    error.
+
+literal_covered({atom, _, A}) -> {ok, {atom_lit, A}};
+literal_covered({integer, _, I}) -> {ok, {int_lit, I}};
+literal_covered({nil, _}) -> {ok, nil};
+literal_covered(_) -> error.
+
+refine_case_scrutinee(undefined, _Pats, Env, _Contracts) ->
+    Env;
+refine_case_scrutinee(Scrutinee, [{atom, _, true}], Env, Contracts) ->
+    case apply_guard_test(Scrutinee, Env, Contracts) of
+        {ok, Narrowed} -> Narrowed;
+        unreachable -> Env
+    end;
+refine_case_scrutinee(Scrutinee, [{atom, _, false}], Env, _Contracts) ->
+    negate_guard_test(Scrutinee, Env);
+refine_case_scrutinee(_, _, Env, _) ->
+    Env.
+
+negate_guard_test({op, _, '=:=', {var, _, V}, Lit}, Env) ->
+    subtract_var_lit(V, Lit, Env);
+negate_guard_test({op, _, '=:=', Lit, {var, _, V}}, Env) ->
+    subtract_var_lit(V, Lit, Env);
+negate_guard_test({op, _, '==', {var, _, V}, {atom, _, A}}, Env) ->
+    subtract_var_type(V, {atom_lit, A}, Env);
+negate_guard_test({op, _, '==', {atom, _, A}, {var, _, V}}, Env) ->
+    subtract_var_type(V, {atom_lit, A}, Env);
+negate_guard_test({op, _, 'orelse', L, R}, Env) ->
+    negate_guard_test(R, negate_guard_test(L, Env));
+negate_guard_test({call, _, {remote, _, {atom, _, erlang}, {atom, _, GuardName}}, [{var, _, V}]}, Env) ->
+    case guard_type(GuardName) of
+        undefined -> Env;
+        Type -> subtract_var_type(V, Type, Env)
+    end;
+negate_guard_test(_, Env) ->
+    Env.
+
+subtract_var_lit(V, Lit, Env) ->
+    case literal_covered(Lit) of
+        {ok, Type} -> subtract_var_type(V, Type, Env);
+        error -> Env
+    end.
+
+subtract_var_type(V, Type, Env) ->
+    case maps:find(V, Env) of
+        {ok, Prev} ->
+            case subtract_covered(Prev, Type) of
+                none -> Env;
+                Narrowed -> Env#{V => Narrowed}
+            end;
+        error ->
+            Env
     end.
 
 expand_local_seed(Mod, Type, LookupFun) ->
     case prisma_type:expand(Mod, Mod, Type, LookupFun) of
         {ok, Expanded} -> Expanded;
-        {error, _} -> Type
+        {error, _} -> expand_seed_shallow(Mod, Type, LookupFun, #{})
+    end.
+
+expand_seed_shallow(Mod, {local_type, Name, []}, LookupFun, Visited) ->
+    expand_seed_ref(Mod, Mod, Name, LookupFun, Visited);
+expand_seed_shallow(Mod, {remote_type, TargetMod, Name, []}, LookupFun, Visited) ->
+    expand_seed_ref(Mod, TargetMod, Name, LookupFun, Visited);
+expand_seed_shallow(Mod, {tuple, Es}, LookupFun, Visited) ->
+    {tuple, [expand_seed_shallow(Mod, E, LookupFun, Visited) || E <- Es]};
+expand_seed_shallow(Mod, {list, E}, LookupFun, Visited) ->
+    {list, expand_seed_shallow(Mod, E, LookupFun, Visited)};
+expand_seed_shallow(Mod, {nonempty_list, E}, LookupFun, Visited) ->
+    {nonempty_list, expand_seed_shallow(Mod, E, LookupFun, Visited)};
+expand_seed_shallow(Mod, {map, Fs}, LookupFun, Visited) ->
+    {map, [{Kind, expand_seed_shallow(Mod, K, LookupFun, Visited), expand_seed_shallow(Mod, V, LookupFun, Visited)} || {Kind, K, V} <- Fs]};
+expand_seed_shallow(Mod, {union, Ms}, LookupFun, Visited) ->
+    prisma_type:normalize_union([expand_seed_shallow(Mod, M, LookupFun, Visited) || M <- Ms]);
+expand_seed_shallow(_Mod, Other, _LookupFun, _Visited) ->
+    Other.
+
+expand_seed_ref(Mod, TargetMod, Name, LookupFun, Visited) ->
+    Key = {TargetMod, Name, 0},
+    case maps:is_key(Key, Visited) of
+        true ->
+            any;
+        false ->
+            case LookupFun(Key) of
+                {ok, #type_decl{kind = Kind, params = [], body = Body}}
+                  when Kind =:= type orelse TargetMod =:= Mod ->
+                    expand_seed_shallow(TargetMod, Body, LookupFun, Visited#{Key => true});
+                _ ->
+                    any
+            end
     end.
 
 sanitize_seed_type({local_type, _, _}) -> any;

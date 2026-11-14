@@ -9,7 +9,8 @@
 -export([
     from_elixir_dbgi/4,
     from_elixir_dbgi/5,
-    to_abstract_forms/3
+    to_abstract_forms/3,
+    spec_and_type_forms/2
 ]).
 
 %% @doc Builds a `#module_summary{}` from an Elixir `debug_info_v1` chunk.
@@ -31,6 +32,11 @@ from_elixir_dbgi(_Mod, _Dbgi, Exports, #module_summary{module = Mod} = Summary, 
         || {F, A} <- Exports
     ]),
     Summary#module_summary{functions = Funcs}.
+
+%% @doc Extracts `@spec`, `@type`, `@opaque`, and generated struct `t()` forms from an `elixir_v1` map and specs list.
+-spec spec_and_type_forms(module(), {map(), [term()]}) -> [term()].
+spec_and_type_forms(Mod, {Map, SpecsForms}) ->
+    SpecsForms ++ extract_struct_forms(Mod, maps:get(struct, Map, nil), SpecsForms).
 
 %% @doc Converts an Elixir `elixir_v1` metadata map and specs list into Erlang Abstract Format forms.
 -spec to_abstract_forms(module(), map(), [term()]) -> [term()].

@@ -488,8 +488,17 @@ is_domain_key_type(atom) -> true;
 is_domain_key_type(binary) -> true;
 is_domain_key_type({binary, _, _}) -> true;
 is_domain_key_type(integer) -> true;
+is_domain_key_type(pos_integer) -> true;
+is_domain_key_type(non_neg_integer) -> true;
+is_domain_key_type(neg_integer) -> true;
+is_domain_key_type(float) -> true;
 is_domain_key_type(number) -> true;
 is_domain_key_type(any) -> true;
+is_domain_key_type({union, Ms}) -> lists:any(fun is_domain_key_type/1, Ms);
+is_domain_key_type({tuple, Es}) -> lists:any(fun is_domain_key_type/1, Es);
+is_domain_key_type({list, _}) -> true;
+is_domain_key_type({nonempty_list, _}) -> true;
+is_domain_key_type({map, _}) -> true;
 is_domain_key_type(_) -> false.
 
 is_numeric(number) -> true;

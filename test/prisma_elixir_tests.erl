@@ -434,3 +434,179 @@ elixir_remote_type_return_and_nested_tuple_union_test() ->
         {tuple, [{atom_lit, reference}, {tuple, [{atom_lit, hexadecimal}, integer]}]}
     ]},
     ?assert(prisma_type:consistent_subtype(Sub, Super)).
+
+map_domain_union_key_subtyping_test() ->
+    Super = {map, [{exact, {union, [{tuple, [{binary, 0, 8}, {binary, 0, 8}]}, {binary, 0, 8}]}, {binary, 0, 8}}]},
+    ?assert(prisma_type:consistent_subtype({map, []}, Super)),
+    ?assert(prisma_type:consistent_subtype({map, [{assoc, {binary, 0, 8}, {binary, 0, 8}}]}, Super)).
+
+multi_spec_clause_filtering_test() ->
+    Mod = 'Elixir.MyApp.MultiSpec',
+    ClientType = {type, 1, map, [{type, 1, map_field_exact, [{atom, 1, '__struct__'}, {atom, 1, 'Elixir.Tesla.Client'}]}]},
+    Forms = [
+        {attribute, 1, spec, {{req, 2}, [
+            {type, 1, 'fun', [{type, 1, product, [ClientType, {type, 1, binary, []}]}, {type, 1, binary, []}]}
+        ]}},
+        {attribute, 2, spec, {{delete, 2}, [
+            {type, 2, 'fun', [{type, 2, product, [ClientType, {type, 2, binary, []}]}, {type, 2, binary, []}]},
+            {type, 2, 'fun', [{type, 2, product, [{type, 2, binary, []}, {type, 2, list, [{type, 2, atom, []}]}]}, {type, 2, binary, []}]}
+        ]}},
+        {function, 3, req, 2, [
+            {clause, 3, [{var, 3, '_c'}, {var, 3, 'u'}], [], [{var, 3, 'u'}]}
+        ]},
+        {function, 4, delete, 2, [
+            {clause, 4,
+             [{match, 4, {map, 4, [{map_field_exact, 4, {atom, 4, '__struct__'}, {atom, 4, 'Elixir.Tesla.Client'}}]}, {var, 4, 'c'}} , {var, 4, 'url'}],
+             [],
+             [{call, 4, {atom, 4, req}, [{var, 4, 'c'}, {var, 4, 'url'}]}]},
+            {clause, 5,
+             [{var, 5, 'url'}, {var, 5, 'opts'}],
+             [[{call, 5, {remote, 5, {atom, 5, erlang}, {atom, 5, is_list}}, [{var, 5, 'opts'}]}]],
+             [{var, 5, 'url'}]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{delete, 2}, {req, 2}], #module_summary{module = Mod, language = elixir}, #{}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).
+
+guarded_case_and_nil_narrowing_test() ->
+    Mod = 'Elixir.MyApp.Narrowing',
+    Forms = [
+        {attribute, 1, spec, {{or_else_int, 1}, [
+            {type, 1, 'fun', [{type, 1, product, [{type, 1, union, [{type, 1, non_neg_integer, []}, {atom, 1, nil}]}]}, {type, 1, integer, []}]}
+        ]}},
+        {function, 2, or_else_int, 1, [
+            {clause, 2, [{var, 2, 'x'}], [], [
+                {'case', 2, {var, 2, 'x'}, [
+                    {clause, 2, [{var, 2, 'y'}],
+                     [[{op, 2, 'orelse', {op, 2, '=:=', {var, 2, 'y'}, {atom, 2, false}}, {op, 2, '=:=', {var, 2, 'y'}, {atom, 2, nil}}}]],
+                     [{integer, 2, 0}]},
+                    {clause, 2, [{var, 2, 'z'}], [], [{var, 2, 'z'}]}
+                ]}
+            ]}
+        ]},
+        {attribute, 5, spec, {{require_int, 1}, [
+            {type, 5, 'fun', [{type, 5, product, [{type, 5, integer, []}]}, {type, 5, boolean, []}]}
+        ]}},
+        {function, 6, require_int, 1, [
+            {clause, 6, [{var, 6, '_'}], [], [{atom, 6, true}]}
+        ]},
+        {attribute, 8, spec, {{nil_or_check, 1}, [
+            {type, 8, 'fun', [{type, 8, product, [{type, 8, union, [{type, 8, integer, []}, {atom, 8, nil}]}]}, {type, 8, boolean, []}]}
+        ]}},
+        {function, 9, nil_or_check, 1, [
+            {clause, 9, [{var, 9, 'v'}], [], [
+                {'case', 9, {op, 9, '==', {var, 9, 'v'}, {atom, 9, nil}}, [
+                    {clause, 9, [{atom, 9, false}], [], [{call, 9, {atom, 9, require_int}, [{var, 9, 'v'}]}]},
+                    {clause, 9, [{atom, 9, true}], [], [{atom, 9, true}]}
+                ]}
+            ]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{or_else_int, 1}, {require_int, 1}, {nil_or_check, 1}], #module_summary{module = Mod, language = elixir}, #{}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).
+
+clause_arg_subtraction_with_struct_test() ->
+    Mod = 'Elixir.MyApp.ClauseSub',
+    HostMod = 'Elixir.MyApp.Host',
+    HostDecl = #type_decl{
+        key = {HostMod, t, 0},
+        kind = type,
+        exported = true,
+        params = [],
+        body = {map, [
+            {exact, {atom_lit, '__struct__'}, {atom_lit, HostMod}},
+            {exact, {atom_lit, missing_field}, {remote_type, 'Elixir.Unknown', t, []}}
+        ]}
+    },
+    HostType = {remote_type, 1, [{atom, 1, HostMod}, {atom, 1, t}, []]},
+    TargetType = {type, 1, union, [{atom, 1, daemon}, {atom, 1, disabled}, {atom, 1, ssh}]},
+    NonDaemonType = {type, 1, union, [{atom, 1, disabled}, {atom, 1, ssh}]},
+    Forms = [
+        {attribute, 2, spec, {{release, 1}, [
+            {type, 2, 'fun', [{type, 2, product, [NonDaemonType]}, {atom, 2, ok}]}
+        ]}},
+        {function, 3, release, 1, [
+            {clause, 3, [{var, 3, '_'}], [], [{atom, 3, ok}]}
+        ]},
+        {attribute, 5, spec, {{change, 2}, [
+            {type, 5, 'fun', [{type, 5, product, [HostType, TargetType]}, {atom, 5, ok}]}
+        ]}},
+        {function, 6, change, 2, [
+            {clause, 6,
+             [{match, 6, {map, 6, [{map_field_exact, 6, {atom, 6, '__struct__'}, {atom, 6, HostMod}}]}, {var, 6, '_h'}}, {atom, 6, daemon}],
+             [],
+             [{atom, 6, ok}]},
+            {clause, 7,
+             [{var, 7, '_h'}, {var, 7, 't'}],
+             [],
+             [{call, 7, {atom, 7, release}, [{var, 7, 't'}]}]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(
+        Forms,
+        [{change, 2}, {release, 1}],
+        #module_summary{module = Mod, language = elixir},
+        #{external_types => #{{HostMod, t, 0} => HostDecl}}
+    ),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).
+
+cons_pattern_does_not_cover_nil_test() ->
+    Mod = 'Elixir.MyApp.ConsNil',
+    ListOrNil = {type, 1, union, [{nil, 1}, {type, 1, nonempty_list, [{type, 1, atom, []}]}]},
+    Panel = {type, 1, union, [{atom, 1, a}, {atom, 1, b}]},
+    Forms = [
+        {attribute, 2, spec, {{dispatch, 2}, [
+            {type, 2, 'fun', [{type, 2, product, [ListOrNil, Panel]}, {atom, 2, ok}]}
+        ]}},
+        {function, 3, dispatch, 2, [
+            {clause, 3, [{var, 3, 'errs'}, {var, 3, 'panel'}], [], [
+                {'case', 3, {tuple, 3, [{var, 3, 'errs'}, {var, 3, 'panel'}]}, [
+                    {clause, 4,
+                     [{tuple, 4, [{match, 4, {cons, 4, {var, 4, '_'}, {var, 4, '_'}}, {var, 4, '_e'}}, {var, 4, '_p'}]}],
+                     [],
+                     [{atom, 4, ok}]},
+                    {clause, 5,
+                     [{tuple, 5, [{nil, 5}, {atom, 5, a}]}],
+                     [],
+                     [{atom, 5, ok}]},
+                    {clause, 6,
+                     [{tuple, 6, [{nil, 6}, {atom, 6, b}]}],
+                     [],
+                     [{atom, 6, ok}]}
+                ]}
+            ]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{dispatch, 2}], #module_summary{module = Mod, language = elixir}, #{}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).
+
+nonlinear_repeated_var_clause_test() ->
+    Mod = 'Elixir.MyApp.NonLinear',
+    ConnType = {type, 1, union, [{atom, 1, ssh}, {atom, 1, disabled}]},
+    HostType = {type, 1, map, [{type, 1, map_field_exact, [{atom, 1, connection}, ConnType]}]},
+    Forms = [
+        {attribute, 2, spec, {{change, 2}, [
+            {type, 2, 'fun', [{type, 2, product, [HostType, ConnType]}, {atom, 2, ok}]}
+        ]}},
+        {function, 3, change, 2, [
+            {clause, 3,
+             [{map, 3, [{map_field_exact, 3, {atom, 3, connection}, {var, 3, 'same'}}]}, {var, 3, 'same'}],
+             [],
+             [{atom, 3, ok}]},
+            {clause, 4,
+             [{map, 4, []}, {atom, 4, ssh}],
+             [],
+             [{atom, 4, ok}]},
+            {clause, 5,
+             [{map, 5, []}, {atom, 5, disabled}],
+             [],
+             [{atom, 5, ok}]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{change, 2}], #module_summary{module = Mod, language = elixir}, #{}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).

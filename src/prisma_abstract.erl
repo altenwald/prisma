@@ -10,6 +10,7 @@
     extract_beam/1,
     extract_beam/2,
     specs_of_beam/1,
+    specs_and_types_of_beam/1,
     detect_language/2,
     parse_abstract_forms/3,
     parse_abstract_forms/4
@@ -123,30 +124,56 @@ abstract_forms(Beam, _Dbgi) ->
 %% @doc The `-spec`s of a BEAM file, `#{{M, F, A} => [stype()]}` (nothing if it has no abstract code).
 -spec specs_of_beam(file:filename_all() | binary()) -> #{mfa_key() => [prisma_type:stype()]}.
 specs_of_beam(BeamInput) ->
+    {Specs, _Types} = specs_and_types_of_beam(BeamInput),
+    Specs.
+
+-spec specs_and_types_of_beam(file:filename_all() | binary()) ->
+    {#{mfa_key() => [prisma_type:stype()]}, #{type_key() => #type_decl{}}}.
+specs_and_types_of_beam(BeamInput) ->
     Beam = normalize_input(BeamInput),
     case beam_lib:chunks(Beam, [debug_info], [allow_missing_chunks]) of
         {ok, {Mod, [{debug_info, Dbgi}]}} ->
-            case abstract_forms(Beam, Dbgi) of
-                {ok, Forms} -> specs_in(Mod, Forms);
-                error -> #{}
-            end;
+            Forms = case abstract_forms(Beam, Dbgi) of
+                {ok, F} -> F;
+                error ->
+                    case Dbgi of
+                        {debug_info_v1, elixir_erl, {elixir_v1, Map, SpecsForms}}
+                          when is_map(Map), is_list(SpecsForms) ->
+                            prisma_elixir:spec_and_type_forms(Mod, {Map, SpecsForms});
+                        _ ->
+                            []
+                    end
+            end,
+            specs_and_types_in(Mod, Forms);
         _ ->
-            #{}
+            {#{}, #{}}
     end.
 
-specs_in(Mod, Forms) ->
+specs_and_types_in(Mod, Forms) ->
     lists:foldl(
-        fun({attribute, _, spec, {{F, A}, Clauses}}, Acc) ->
-                Acc#{{Mod, F, A} => [prisma_type:from_abstract(C) || C <- Clauses]};
-           ({attribute, _, spec, {{M, F, A}, Clauses}}, Acc) ->
-                Acc#{{M, F, A} => [prisma_type:from_abstract(C) || C <- Clauses]};
-           ({function, _, yystate, 7, _}, Acc) ->
-                Acc#{{'$beam_kind', Mod} => leex};
-           ({function, _, yeccpars1, 7, _}, Acc) ->
-                Acc#{{'$beam_kind', Mod} => yecc};
+        fun({attribute, _, spec, {{F, A}, Clauses}}, {SAcc, TAcc}) ->
+                {SAcc#{{Mod, F, A} => [prisma_type:from_abstract(C) || C <- Clauses]}, TAcc};
+           ({attribute, _, spec, {{M, F, A}, Clauses}}, {SAcc, TAcc}) ->
+                {SAcc#{{M, F, A} => [prisma_type:from_abstract(C) || C <- Clauses]}, TAcc};
+           ({attribute, _, Kind, {TName, BodyAst, Params}}, {SAcc, TAcc})
+             when (Kind =:= type orelse Kind =:= opaque), is_list(Params) ->
+                Arity = length(Params),
+                Key = {Mod, TName, Arity},
+                Decl = #type_decl{
+                    key = Key,
+                    kind = Kind,
+                    exported = true,
+                    params = [prisma_type:from_abstract(P) || P <- Params],
+                    body = prisma_type:from_abstract(BodyAst)
+                },
+                {SAcc, TAcc#{Key => Decl}};
+           ({function, _, yystate, 7, _}, {SAcc, TAcc}) ->
+                {SAcc#{{'$beam_kind', Mod} => leex}, TAcc};
+           ({function, _, yeccpars1, 7, _}, {SAcc, TAcc}) ->
+                {SAcc#{{'$beam_kind', Mod} => yecc}, TAcc};
            (_, Acc) ->
                 Acc
-        end, #{}, Forms).
+        end, {#{}, #{}}, Forms).
 
 %% What the inference of a module may assume about the functions of the others: the return type their `-spec` declares
 %% (the contract is the interface, not whatever their body happens to give). The arguments are left alone: they are checked

@@ -33,8 +33,9 @@ check_module(#module_summary{module = Mod, functions = Funcs}, _Opts) when is_ma
             Roots = find_roots(Funcs),
             CallGraph = build_local_call_graph(Mod, Funcs),
             Reachable = compute_reachable(Roots, sets:from_list(Roots), CallGraph),
+            FixedArity = collect_fixed_arity_funs(Mod, Funcs),
             UnusedFuncsWarns = check_unused_functions(Funcs, Reachable),
-            UnusedParamsWarns = check_unused_params(Funcs, Reachable),
+            UnusedParamsWarns = check_unused_params(Funcs, Reachable, FixedArity),
             lists:sort(
                 fun(W1, W2) ->
                     {W1#prisma_warning.line, W1#prisma_warning.mfa} =<
@@ -125,7 +126,7 @@ check_unused_functions(Funcs, Reachable) ->
 %% Unused Ignored Parameters in Private Functions
 %% -------------------------------------------------------------------------
 
-check_unused_params(Funcs, Reachable) ->
+check_unused_params(Funcs, Reachable, FixedArity) ->
     maps:fold(
         fun({_M, F, Arity} = MFA, #func_contract{exported = Exported, compiler_generated = Gen, clauses = Clauses, line = Line}, Acc) ->
             case not Exported andalso
@@ -133,6 +134,7 @@ check_unused_params(Funcs, Reachable) ->
                  Line > 1 andalso
                  not is_compiler_generated_name(F) andalso
                  sets:is_element(MFA, Reachable) andalso
+                 not sets:is_element(MFA, FixedArity) andalso
                  Arity >= 1 andalso
                  Clauses =/= [] of
                 true ->
@@ -145,6 +147,55 @@ check_unused_params(Funcs, Reachable) ->
         [],
         Funcs
     ).
+
+collect_fixed_arity_funs(Mod, Funcs) ->
+    maps:fold(
+        fun({_M, CallerFun, _A}, #func_contract{compiler_generated = Gen, line = Line, calls = Calls, clauses = Clauses}, Acc0) ->
+            Acc1 = case Gen orelse Line =< 1 orelse is_compiler_generated_name(CallerFun) of
+                true ->
+                    lists:foldl(
+                        fun(C, S) when element(1, C) =:= Mod -> sets:add_element(C, S);
+                           (_, S) -> S
+                        end,
+                        Acc0,
+                        Calls
+                    );
+                false ->
+                    Acc0
+            end,
+            collect_fixed_arity_in_ast(Mod, Clauses, Acc1)
+        end,
+        sets:new(),
+        Funcs
+    ).
+
+collect_fixed_arity_in_ast(Mod, {'fun', _, {function, Fun, Arity}}, Acc) ->
+    sets:add_element({Mod, Fun, Arity}, Acc);
+collect_fixed_arity_in_ast(Mod, {'fun', _, {function, Mod, Fun, Arity}}, Acc) ->
+    sets:add_element({Mod, Fun, Arity}, Acc);
+collect_fixed_arity_in_ast(Mod, {'fun', _, {function, {atom, _, Mod}, {atom, _, Fun}, {integer, _, Arity}}}, Acc) ->
+    sets:add_element({Mod, Fun, Arity}, Acc);
+collect_fixed_arity_in_ast(Mod, {call, Anno, {atom, _, Fun}, Args}, Acc) ->
+    Acc1 = case erl_anno:generated(Anno) orelse erl_anno:line(Anno) =< 1 orelse has_macro_hygiene_var(Args) of
+        true -> sets:add_element({Mod, Fun, length(Args)}, Acc);
+        false -> Acc
+    end,
+    collect_fixed_arity_in_ast(Mod, Args, Acc1);
+collect_fixed_arity_in_ast(Mod, T, Acc) when is_tuple(T) ->
+    collect_fixed_arity_in_ast(Mod, tuple_to_list(T), Acc);
+collect_fixed_arity_in_ast(Mod, L, Acc) when is_list(L) ->
+    lists:foldl(fun(E, S) -> collect_fixed_arity_in_ast(Mod, E, S) end, Acc, L);
+collect_fixed_arity_in_ast(_Mod, _, Acc) ->
+    Acc.
+
+has_macro_hygiene_var({var, _, Name}) when is_atom(Name) ->
+    string:find(atom_to_list(Name), "@Elixir.") =/= nomatch;
+has_macro_hygiene_var(T) when is_tuple(T) ->
+    has_macro_hygiene_var(tuple_to_list(T));
+has_macro_hygiene_var(L) when is_list(L) ->
+    lists:any(fun has_macro_hygiene_var/1, L);
+has_macro_hygiene_var(_) ->
+    false.
 
 detect_ignored_params({Mod, Fun, Arity} = MFA, Line, Arity, Clauses) ->
     CleanMod = prisma_type:clean_module(Mod),

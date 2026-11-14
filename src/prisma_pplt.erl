@@ -66,24 +66,25 @@ from_beams(Beams, Opts0) ->
     PkgVsn = maps:get(package_vsn, Opts0, undefined),
     BasePplt = (new(Pkg, PkgVsn))#prisma_pplt{source_hash = maps:get(source_hash, Opts0, undefined)},
     %% first the -specs of every module, so that each one is inferred knowing what the others declare
-    {Specs, LeexRev, YeccRev, OtherRev} = lists:foldl(
-        fun(Beam, {SAcc, LAcc, YAcc, OAcc}) ->
-            BeamSpecs = prisma_abstract:specs_of_beam(Beam),
+    {Specs, Types, LeexRev, YeccRev, OtherRev} = lists:foldl(
+        fun(Beam, {SAcc, TAcc, LAcc, YAcc, OAcc}) ->
+            {BeamSpecs, BeamTypes} = prisma_abstract:specs_and_types_of_beam(Beam),
             SAcc1 = maps:merge(SAcc, BeamSpecs),
+            TAcc1 = maps:merge(TAcc, BeamTypes),
             case [Kind || {{'$beam_kind', _}, Kind} <- maps:to_list(BeamSpecs)] of
-                [leex | _] -> {SAcc1, [Beam | LAcc], YAcc, OAcc};
-                [yecc | _] -> {SAcc1, LAcc, [Beam | YAcc], OAcc};
-                _ -> {SAcc1, LAcc, YAcc, [Beam | OAcc]}
+                [leex | _] -> {SAcc1, TAcc1, [Beam | LAcc], YAcc, OAcc};
+                [yecc | _] -> {SAcc1, TAcc1, LAcc, [Beam | YAcc], OAcc};
+                _ -> {SAcc1, TAcc1, LAcc, YAcc, [Beam | OAcc]}
             end
         end,
-        {maps:get(external_specs, Opts0, #{}), [], [], []},
+        {maps:get(external_specs, Opts0, #{}), maps:get(external_types, Opts0, #{}), [], [], []},
         Beams
     ),
     OrderedBeams = case LeexRev =:= [] andalso YeccRev =:= [] of
         true -> Beams;
         false -> lists:reverse(LeexRev) ++ lists:reverse(YeccRev) ++ lists:reverse(OtherRev)
     end,
-    Opts = Opts0#{external_specs => Specs},
+    Opts = Opts0#{external_specs => Specs, external_types => Types},
     {Result, _} = lists:foldl(
         fun
             (Beam, {{ok, #prisma_pplt{modules = Mods} = Pplt}, CurOpts}) ->

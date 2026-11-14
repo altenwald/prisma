@@ -142,3 +142,46 @@ oxbow_disable_option_test() ->
     ?assertEqual(1, length(WithOxbow)),
     WithoutOxbow = prisma_checker:check_module(Summary, Pplt, #{oxbow => false}),
     ?assertEqual([], WithoutOxbow).
+
+fun_capture_fixed_arity_param_not_flagged_test() ->
+    %% Private function passed via fun_ref (&check_environment/3) has fixed arity
+    %% imposed by the callback/hook contract and must not flag ignored params.
+    Forms = [
+        {attribute, 1, module, test_oxbow_capture_param},
+        {attribute, 2, export, [{on_mount, 1}]},
+        {function, 3, on_mount, 1, [
+            {clause, 3, [{var, 3, 'Socket'}], [], [
+                {call, 4, {remote, 4, {atom, 4, 'Elixir.Phoenix.LiveView'}, {atom, 4, attach_hook}}, [
+                    {var, 4, 'Socket'},
+                    {atom, 4, hook_name},
+                    {atom, 4, handle_params},
+                    {'fun', 4, {function, check_environment, 3}}
+                ]}
+            ]}
+        ]},
+        {function, 8, check_environment, 3, [
+            {clause, 8, [{var, 8, 'Params'}, {var, 8, '_Url'}, {var, 8, 'Socket'}], [], [
+                {tuple, 8, [{atom, 8, cont}, {var, 8, 'Socket'}, {var, 8, 'Params'}]}
+            ]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{on_mount, 1}], #module_summary{module = test_oxbow_capture_param}),
+    ?assertEqual([], prisma_oxbow:check_module(Summary)).
+
+macro_plug_call_fixed_arity_param_not_flagged_test() ->
+    %% Private plug function called from a macro-generated pipeline (line 1 / @Elixir.Plug.Builder)
+    %% has fixed arity 2 and must not flag ignored _opts.
+    Forms = [
+        {attribute, 1, module, test_oxbow_plug_param},
+        {attribute, 2, export, [{phoenix_controller_pipeline, 2}]},
+        {function, 1, phoenix_controller_pipeline, 2, [
+            {clause, 1, [{var, 1, 'conn@0@Elixir.Plug.Builder'}, {var, 1, '_action'}], [], [
+                {call, 1, {atom, 1, no_store}, [{var, 1, 'conn@0@Elixir.Plug.Builder'}, {nil, 1}]}
+            ]}
+        ]},
+        {function, 12, no_store, 2, [
+            {clause, 12, [{var, 12, 'Conn'}, {var, 12, '_Opts'}], [], [{var, 12, 'Conn'}]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{phoenix_controller_pipeline, 2}], #module_summary{module = test_oxbow_plug_param}),
+    ?assertEqual([], prisma_oxbow:check_module(Summary)).
