@@ -238,8 +238,8 @@ bind_pattern({atom, _, A}, Expected, Env) ->
     {prisma_type:meet({atom_lit, A}, Expected), Env};
 bind_pattern({nil, _}, Expected, Env) ->
     {prisma_type:meet(nil, Expected), Env};
-bind_pattern({bin, _, _} = Pattern, Expected, Env) ->
-    {prisma_type:meet({binary, 0, 8}, Expected), bind_variables_as_any(Pattern, Env)};
+bind_pattern({bin, _, Elements}, Expected, Env) ->
+    {prisma_type:meet({binary, 0, 8}, Expected), bind_bin_elements(Elements, Env)};
 bind_pattern({string, _, S}, Expected, Env) ->
     StrType = case S of
         [] -> nil;
@@ -299,6 +299,41 @@ bind_pattern(_, Expected, Env) ->
 
 %% A pattern that is not looked into still binds its variables: they are recorded (as `any`), so that a later pattern knows that
 %% they are bound and compares instead of catching everything.
+bind_bin_elements([], Env) ->
+    Env;
+bind_bin_elements([{bin_element, _, {var, _, '_'}, Size, _TSL} | Rest], Env) ->
+    bind_bin_elements(Rest, bind_variables_as_any(Size, Env));
+bind_bin_elements([{bin_element, _, {var, _, Name}, Size, TSL} | Rest], Env) ->
+    Env1 = bind_variables_as_any(Size, Env),
+    Env2 = case maps:is_key(Name, Env1) of
+        true -> Env1;
+        false -> Env1#{Name => bin_elem_var_type(Size, TSL)}
+    end,
+    bind_bin_elements(Rest, Env2);
+bind_bin_elements([Elem | Rest], Env) ->
+    bind_bin_elements(Rest, bind_variables_as_any(Elem, Env)).
+
+bin_elem_var_type(Size, default) ->
+    bin_elem_var_type(Size, []);
+bin_elem_var_type(Size, TSL) when is_list(TSL) ->
+    Has = fun(K) -> lists:member(K, TSL) end,
+    case {Has(binary) orelse Has(bytes), Has(bitstring) orelse Has(bits), Has(float),
+          Has(utf8) orelse Has(utf16) orelse Has(utf32), Has(signed)} of
+        {true, _, _, _, _} -> {binary, 0, 8};
+        {_, true, _, _, _} -> {binary, 0, 1};
+        {_, _, true, _, _} -> float;
+        {_, _, _, true, _} -> {int_range, 0, 16#10ffff};
+        {_, _, _, _, true} -> integer;
+        _ ->
+            case Size of
+                default -> {int_range, 0, 255};
+                {integer, _, S} when S >= 0, S =< 32 -> {int_range, 0, (1 bsl S) - 1};
+                _ -> non_neg_integer
+            end
+    end;
+bin_elem_var_type(_Size, _TSL) ->
+    any.
+
 bind_variables_as_any(Pattern, Env) ->
     lists:foldl(fun(Name, E) -> case maps:is_key(Name, E) of true -> E; false -> E#{Name => any} end end,
                 Env, pattern_variables(Pattern)).
@@ -442,9 +477,18 @@ apply_guard_test_refining({op, _, 'and', L, R}, Env0, Contracts) ->
     apply_guard_test({op, 0, 'andalso', L, R}, Env0, Contracts);
 apply_guard_test_refining({op, _, 'orelse', L, R}, Env0, Contracts) ->
     apply_guard_disjunction([[L], [R]], Env0, Contracts);
-apply_guard_test_refining({op, _, Op, {var, _, V}, {integer, _, 0}}, Env, _Contracts)
-  when Op =:= '>'; Op =:= '>='; Op =:= '<' ->
-    refine_compare_zero(V, Op, Env);
+apply_guard_test_refining({op, _, Op, {var, _, V}, Lit}, Env, _Contracts)
+  when Op =:= '>'; Op =:= '>='; Op =:= '<'; Op =:= '=<' ->
+    case guard_int_lit(Lit) of
+        {ok, N} -> refine_compare_int(V, Op, N, Env);
+        error -> {ok, Env}
+    end;
+apply_guard_test_refining({op, _, Op, Lit, {var, _, V}}, Env, _Contracts)
+  when Op =:= '>'; Op =:= '>='; Op =:= '<'; Op =:= '=<' ->
+    case guard_int_lit(Lit) of
+        {ok, N} -> refine_compare_int(V, flip_cmp_op(Op), N, Env);
+        error -> {ok, Env}
+    end;
 apply_guard_test_refining({op, _, '==', {var, _, V}, {integer, _, I}}, Env, _Contracts) ->
     %% `==` compares numbers by value: X == 0 also holds for 0.0
     refine_var(V, {union, [{int_lit, I}, float]}, Env);
@@ -459,23 +503,38 @@ apply_guard_test_refining({atom, _, false}, _Env, _Contracts) ->
 apply_guard_test_refining(_, Env, _Contracts) ->
     {ok, Env}.
 
-%% `V > 0`, `V >= 0`, `V < 0`. Floats qualify as well as integers, and, in the term order (numbers < atoms < ... <
-%% lists), every non-number is greater than 0: so `>` and `>=` say nothing about V unless it is known to be a number, and
-%% `<` is only true of negative numbers.
-refine_compare_zero(V, Op, Env) ->
+%% `V > N`, `V >= N`, `V < N`, `V =< N`. Floats qualify as well as integers, and in the term order (numbers < atoms < ...),
+%% every non-number is greater than any integer: so `>` and `>=` say nothing about V unless it is known to be a number,
+%% whereas `<` and `=<` are only true of numbers.
+refine_compare_int(V, Op, N, Env) ->
     Prev = maps:get(V, Env, any),
-    KnownNumber = case Prev of
-        any -> false;
-        {var, _} -> false;
-        _ -> prisma_type:consistent_subtype(Prev, number)
+    IsConcrete = Prev =/= any andalso not (is_tuple(Prev) andalso element(1, Prev) =:= var),
+    KnownInt = IsConcrete andalso prisma_type:consistent_subtype(Prev, integer),
+    KnownNum = IsConcrete andalso prisma_type:consistent_subtype(Prev, number),
+    Range = case Op of
+        '>' -> {int_range, N + 1, pos_inf};
+        '>=' -> {int_range, N, pos_inf};
+        '<' -> {int_range, neg_inf, N - 1};
+        '=<' -> {int_range, neg_inf, N}
     end,
-    Type = case Op of
-        '<' -> {union, [neg_integer, float]};
-        '>' when KnownNumber -> {union, [pos_integer, float]};
-        '>=' when KnownNumber -> {union, [non_neg_integer, float]};
-        _ -> any
-    end,
-    refine_var(V, Type, Env).
+    if
+        KnownInt ->
+            refine_var(V, Range, Env);
+        KnownNum orelse Op =:= '<' orelse Op =:= '=<' ->
+            refine_var(V, {union, [Range, float]}, Env);
+        true ->
+            {ok, Env}
+    end.
+
+guard_int_lit({integer, _, N}) -> {ok, N};
+guard_int_lit({char, _, N}) -> {ok, N};
+guard_int_lit({op, _, '-', {integer, _, N}}) -> {ok, -N};
+guard_int_lit(_) -> error.
+
+flip_cmp_op('<') -> '>';
+flip_cmp_op('=<') -> '>=';
+flip_cmp_op('>') -> '<';
+flip_cmp_op('>=') -> '=<'.
 
 apply_guard_bif(GuardName, [{var, _, V}], Env, _Contracts) ->
     case guard_type(GuardName) of

@@ -422,3 +422,9 @@ fixed_binary_subtyping_test_() ->
      ?_assertNot(prisma_type:consistent_subtype({binary, 8, 8}, {binary, 8, 0})),
      ?_assertNot(prisma_type:consistent_subtype({binary, 16, 0}, {binary, 8, 0})),
      ?_assert(prisma_type:consistent_subtype({binary, 8, 0}, {binary, 8, 0}))].
+
+improper_iodata_subtyping_test_() ->
+    Iodata = prisma_type:from_abstract({type, 1, iodata, []}),
+    [?_assert(prisma_type:consistent_subtype({improper_list, any, {binary, 0, 8}}, Iodata)),
+     ?_assert(prisma_type:consistent_subtype({improper_list, {int_range, 0, 255}, {binary, 8, 0}}, Iodata)),
+     ?_assertNot(prisma_type:consistent_subtype({improper_list, any, atom}, Iodata))].

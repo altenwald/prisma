@@ -354,6 +354,11 @@ consistent_subtype({tuple, Elems} = Sub, {union, SuperMembers} = Super) ->
                     lists:all(fun(Combination) -> consistent_subtype({tuple, Combination}, Super) end, Combinations)
             end
     end;
+consistent_subtype({improper_list, _E1, T1} = Sub, {union, SuperMembers} = Super) ->
+    lists:any(fun(M) -> consistent_subtype(Sub, M) end, SuperMembers) orelse
+        (lists:member({list, any}, SuperMembers) andalso
+         lists:member({binary, 0, 8}, SuperMembers) andalso
+         consistent_subtype(T1, Super));
 consistent_subtype(Sub, {union, SuperMembers}) ->
     lists:any(fun(M) -> consistent_subtype(Sub, M) end, SuperMembers);
 consistent_subtype(Sub, Super) ->

@@ -1189,3 +1189,22 @@ leex_and_yecc_ast_type_inference_test() ->
     {ok, Ws} = prisma:analyze_beams([BCaller, BLexer, BParser], #{oxbow => true}),
     ?assertMatch([#prisma_warning{kind = gradual_mismatch, mfa = {mini_caller, run, 1}}], Ws).
 
+guard_range_and_bitstring_narrowing_test() ->
+    Src =
+        "-module(mini_range_test).\n"
+        "-export([ipv6_elem/1, bin_ctrl/1]).\n"
+        "-spec take_u16(0..65535) -> 0..65535.\n"
+        "take_u16(X) -> X.\n"
+        "-spec ipv6_elem(term()) -> 0..65535 | error.\n"
+        "ipv6_elem(X) when is_integer(X), 0 =< X, X =< 65535 -> take_u16(X);\n"
+        "ipv6_elem(_) -> error.\n"
+        "-spec take_byte(0..255) -> 0..255.\n"
+        "take_byte(B) -> B.\n"
+        "-spec bin_ctrl(binary()) -> 0..255 | none_ctrl.\n"
+        "bin_ctrl(<<0:1, C:7, _/binary>>) when C < 32 -> take_byte(C);\n"
+        "bin_ctrl(_) -> none_ctrl.\n",
+    {ok, Toks, _} = erl_scan:string(Src),
+    {ok, mini_range_test, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+    {ok, Ws} = prisma:analyze_beams([Beam], #{}),
+    ?assertEqual([], Ws).
+
