@@ -260,8 +260,11 @@ bind_pattern({cons, _, H, T}, Expected, Env0) ->
                         {none, Env2} -> {none, Env2};
                         {TT, Env2} ->
                             Cell = case proper_tail(TT) of
-                                true -> {nonempty_list, HT};
-                                false -> {improper_list, HT, TT}
+                                true ->
+                                    ElemType = prisma_type:join(HT, extract_list_elem(TT)),
+                                    {nonempty_list, ElemType};
+                                false ->
+                                    {improper_list, HT, TT}
                             end,
                             {prisma_type:meet(Cell, Expected), Env2}
                     end
@@ -378,26 +381,30 @@ literal_or_any({atom, _, A}) -> {atom_lit, A};
 literal_or_any({integer, _, I}) -> {int_lit, I};
 literal_or_any(_) -> any.
 
-extract_list_elem(any) -> any;
 extract_list_elem({list, E}) -> E;
 extract_list_elem({nonempty_list, E}) -> E;
 extract_list_elem({improper_list, E, _}) -> E;
 extract_list_elem({union, Members}) ->
     prisma_type:normalize_union([extract_list_elem(M) || M <- Members]);
-extract_list_elem(_) -> none.
+extract_list_elem(T) ->
+    case unresolved(T) of
+        true -> any;
+        false -> none
+    end.
 
 %% The type of Tail in [H | Tail] when the whole cell has the given type. An unknown cell has an unknown tail (it may
 %% be any term), and a maybe-improper list has either another cell, [] or its improper tail.
-list_tail_type(any) -> any;
 list_tail_type({list, E}) -> {list, E};
 list_tail_type({nonempty_list, E}) -> {list, E};
 list_tail_type({improper_list, _, T} = Improper) -> prisma_type:normalize_union([Improper, T]);
 list_tail_type({union, Members}) -> prisma_type:normalize_union([list_tail_type(M) || M <- Members]);
-list_tail_type(_) -> none.
+list_tail_type(T) ->
+    case unresolved(T) of
+        true -> any;
+        false -> none
+    end.
 
 
-extract_tuple_elems(Arity, any) ->
-    lists:duplicate(Arity, any);
 extract_tuple_elems(Arity, any_tuple) ->
     lists:duplicate(Arity, any);
 extract_tuple_elems(Arity, {tuple, Elems}) when length(Elems) =:= Arity ->
@@ -409,8 +416,11 @@ extract_tuple_elems(Arity, {union, Members}) ->
         [] -> none;
         _ -> join_arg_vectors(Arity, Valid)
     end;
-extract_tuple_elems(_, _) ->
-    none.
+extract_tuple_elems(Arity, T) ->
+    case unresolved(T) of
+        true -> lists:duplicate(Arity, any);
+        false -> none
+    end.
 
 apply_guard_disjunction([], Env, _Contracts) ->
     {ok, Env};
@@ -1389,7 +1399,7 @@ infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0, 
     IsCaseGen = is_generated_function(MFA) orelse is_generated_anno(Anno),
     {BranchRets, BranchEnvs, Warns1, Sites1, _Remaining} = lists:foldl(
         fun({clause, CAnno, Pats, CGuards, CBody}, {RetsAcc, EnvsAcc, WAcc, SAcc, Remaining}) ->
-            IsClauseGen = IsCaseGen orelse is_generated_anno(CAnno) orelse is_generated_guard(CGuards),
+            IsClauseGen = IsCaseGen orelse is_generated_anno(CAnno) orelse is_generated_guard(CGuards) orelse has_elixir_macro_var(Pats),
             PatResult = case Pats of
                 [SinglePat] -> bind_pattern(SinglePat, ScrutType, Env0);
                 [] -> {any, Env0};
@@ -1565,16 +1575,21 @@ infer_call(Mod, CallerMFA, Anno, Target, ArgAsts, ArgTypes, Env0, Contracts, War
             end;
         {ok, CalleeMFA} ->
             Sites1 = [site(Env0, Line, CalleeMFA, ArgTypes) | Sites0],
-            case maps:find('$yecc_local_clauses', Contracts) of
-                {ok, LocalClauses} when is_map_key(CalleeMFA, LocalClauses) ->
-                    case infer_yecc_helper_call(Mod, CalleeMFA, ArgTypes, LocalClauses, Contracts) of
-                        {ok, HelperRet} ->
-                            {HelperRet, Env0, Warns0, Sites1};
-                        error ->
+            case elixir_builtin_signature(CalleeMFA) of
+                {ok, ExpectedArgs, RetType} ->
+                    apply_callee_signature(CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, ExpectedArgs, RetType, Env0, Warns0, Sites1);
+                error ->
+                    case maps:find('$yecc_local_clauses', Contracts) of
+                        {ok, LocalClauses} when is_map_key(CalleeMFA, LocalClauses) ->
+                            case infer_yecc_helper_call(Mod, CalleeMFA, ArgTypes, LocalClauses, Contracts) of
+                                {ok, HelperRet} ->
+                                    {HelperRet, Env0, Warns0, Sites1};
+                                error ->
+                                    infer_contract_call(Mod, CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites1)
+                            end;
+                        _ ->
                             infer_contract_call(Mod, CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites1)
-                    end;
-                _ ->
-                    infer_contract_call(Mod, CallerMFA, Line, CalleeMFA, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites1)
+                    end
             end;
         dynamic ->
             {any, Env0, Warns0, Sites0}
@@ -1945,6 +1960,11 @@ bif_signature(is_record, 3) -> {ok, [any, atom, integer], boolean};
 bif_signature(is_map_key, 2) -> {ok, [any, any_map], boolean};
 bif_signature(_, _) -> error.
 
+elixir_builtin_signature({'Elixir.Enum', '__in__', 2}) -> {ok, [any, any], boolean};
+elixir_builtin_signature({'Elixir.IO', warn, 1}) -> {ok, [any], {atom_lit, ok}};
+elixir_builtin_signature({'Elixir.IO', warn, 2}) -> {ok, [any, any], {atom_lit, ok}};
+elixir_builtin_signature(_) -> error.
+
 make_warning(Kind, MFA, Anno, Msg) ->
     #prisma_warning{
         kind = Kind,
@@ -1984,6 +2004,15 @@ is_generated_ast(Node) when is_tuple(Node), tuple_size(Node) >= 2 ->
     Anno = element(2, Node),
     is_generated_anno(Anno);
 is_generated_ast(_) ->
+    false.
+
+has_elixir_macro_var({var, _, Name}) when is_atom(Name) ->
+    string:find(atom_to_list(Name), "@Elixir.") =/= nomatch;
+has_elixir_macro_var(T) when is_tuple(T) ->
+    has_elixir_macro_var(tuple_to_list(T));
+has_elixir_macro_var(L) when is_list(L) ->
+    lists:any(fun has_elixir_macro_var/1, L);
+has_elixir_macro_var(_) ->
     false.
 
 seed_spec_arg_lists({Mod, _F, _A} = MFA, Arity, AllContracts) ->
@@ -2228,8 +2257,11 @@ update_map_type({map, BaseFields}, NewFields) ->
     {map, lists:usort(KeptBase ++ NewFields)};
 update_map_type({union, Members}, NewFields) ->
     prisma_type:normalize_union([update_map_type(M, NewFields) || M <- Members]);
-update_map_type(_, NewFields) ->
-    {map, lists:usort(NewFields)}.
+update_map_type(Base, NewFields) ->
+    case Base =:= any_map orelse unresolved(Base) of
+        true -> any_map;
+        false -> {map, lists:usort(NewFields)}
+    end.
 
 %% @doc Extracts `{CategoryAtom => TokenType}` from a leex lexer module's `yyaction/5` contract.
 -spec extract_leex_token_map(module(), #{mfa_key() => #func_contract{}}) -> #{atom() => prisma_type:stype()}.

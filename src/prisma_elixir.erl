@@ -118,10 +118,7 @@ is_elixir_generated(Name, Meta) ->
 translate_clause({Meta, Args, Guards, Body}, CurrentFun) when is_list(Args), is_list(Guards) ->
     Anno = meta_anno(Meta),
     PatArgs = [translate_pattern(A) || A <- Args],
-    ErlGuards = case Guards of
-        [] -> [];
-        _ -> [[translate_guard(G) || G <- Guards]]
-    end,
+    ErlGuards = [[translate_guard(G)] || G <- Guards],
     ErlBody = translate_body(Body, CurrentFun),
     {clause, Anno, PatArgs, ErlGuards, ErlBody};
 translate_clause(_, _CurrentFun) ->

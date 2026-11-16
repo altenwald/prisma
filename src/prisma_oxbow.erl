@@ -136,7 +136,8 @@ check_unused_params(Funcs, Reachable, FixedArity) ->
                  sets:is_element(MFA, Reachable) andalso
                  not sets:is_element(MFA, FixedArity) andalso
                  Arity >= 1 andalso
-                 Clauses =/= [] of
+                 Clauses =/= [] andalso
+                 not is_stub_raise_only(Clauses) of
                 true ->
                     Warns = detect_ignored_params(MFA, Line, Arity, Clauses),
                     Warns ++ Acc;
@@ -195,6 +196,27 @@ has_macro_hygiene_var(T) when is_tuple(T) ->
 has_macro_hygiene_var(L) when is_list(L) ->
     lists:any(fun has_macro_hygiene_var/1, L);
 has_macro_hygiene_var(_) ->
+    false.
+
+%% A private function whose every clause unconditionally raises/throws/exits is a stub
+%% (e.g. `doc!(_)` or `not_implemented(_)`), not a refactorable unused parameter.
+is_stub_raise_only(Clauses) ->
+    lists:all(fun is_raise_clause/1, Clauses).
+
+is_raise_clause({clause, _Anno, _Pats, _Guards, Body}) when Body =/= [] ->
+    is_raise_expr(lists:last(Body));
+is_raise_clause(_) ->
+    false.
+
+is_raise_expr({call, _, {remote, _, {atom, _, erlang}, {atom, _, Fun}}, _Args})
+  when Fun =:= error; Fun =:= throw; Fun =:= exit ->
+    true;
+is_raise_expr({call, _, {atom, _, Fun}, _Args})
+  when Fun =:= error; Fun =:= throw; Fun =:= exit ->
+    true;
+is_raise_expr({block, _, Exprs}) when Exprs =/= [] ->
+    is_raise_expr(lists:last(Exprs));
+is_raise_expr(_) ->
     false.
 
 detect_ignored_params({Mod, Fun, Arity} = MFA, Line, Arity, Clauses) ->

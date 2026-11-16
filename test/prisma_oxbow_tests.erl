@@ -185,3 +185,23 @@ macro_plug_call_fixed_arity_param_not_flagged_test() ->
     ],
     Summary = prisma_abstract:parse_abstract_forms(Forms, [{phoenix_controller_pipeline, 2}], #module_summary{module = test_oxbow_plug_param}),
     ?assertEqual([], prisma_oxbow:check_module(Summary)).
+
+stub_raise_only_not_flagged_test() ->
+    %% Private stub functions that unconditionally raise/error (e.g. doc!(_))
+    %% must not warn about ignored parameters.
+    Forms = [
+        {attribute, 1, module, test_oxbow_stub_raise},
+        {attribute, 2, export, [{api_fn, 1}]},
+        {function, 3, api_fn, 1, [
+            {clause, 3, [{var, 3, 'X'}], [], [
+                {call, 3, {atom, 3, doc_bang}, [{var, 3, 'X'}]}
+            ]}
+        ]},
+        {function, 5, doc_bang, 1, [
+            {clause, 5, [{var, 5, '_'}], [], [
+                {call, 5, {remote, 5, {atom, 5, erlang}, {atom, 5, error}}, [{atom, 5, not_implemented}]}
+            ]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{api_fn, 1}], #module_summary{module = test_oxbow_stub_raise}),
+    ?assertEqual([], prisma_oxbow:check_module(Summary)).
