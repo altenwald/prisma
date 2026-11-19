@@ -809,3 +809,33 @@ local_function_shadows_bif_test() ->
     ),
     Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
     ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).
+
+try_after_and_receive_return_contracts_test() ->
+    Mod = 'Elixir.ReproControlFlow',
+    Forms = [
+        {attribute, 2, spec, {{in_try, 0}, [{type, 2, 'fun', [{type, 2, product, []}, {type, 2, integer, []}]}]}},
+        {function, 3, in_try, 0, [
+            {clause, 3, [], [], [
+                {'try', 4, [{atom, 4, wrong}], [], [], [{atom, 4, ok}]}
+            ]}
+        ]},
+        {attribute, 10, spec, {{in_receive, 0}, [{type, 10, 'fun', [{type, 10, product, []}, {type, 10, integer, []}]}]}},
+        {function, 11, in_receive, 0, [
+            {clause, 11, [], [], [
+                {'receive', 12,
+                 [{clause, 13, [{atom, 13, go}], [], [{atom, 13, wrong}]}],
+                 {integer, 15, 0},
+                 [{atom, 15, wrong}]}
+            ]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(
+        Forms,
+        [{in_try, 0}, {in_receive, 0}],
+        #module_summary{module = Mod, language = elixir},
+        #{}
+    ),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    Warnings = prisma_checker:check_module(Summary, Pplt, #{mode => hybrid}),
+    ?assertEqual(2, length(Warnings)),
+    ?assert(lists:all(fun(#prisma_warning{kind = gradual_mismatch}) -> true; (_) -> false end, Warnings)).

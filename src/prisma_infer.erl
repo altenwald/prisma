@@ -852,22 +852,34 @@ infer_expr(Mod, MFA, {'try', _, Body, OfClauses, CatchClauses, After}, Env, Cont
         none -> Env;
         Handled -> tag_env(Env, Handled)
     end,
-    {_, _, Warns1, Sites1} = infer_body(Mod, MFA, Body, BodyEnv, Contracts, Warns0, Sites0),
-    {Warns2, Sites2} = infer_nested_clauses(Mod, MFA, OfClauses, Env, Contracts, Warns1, Sites1),
-    {Warns3, Sites3} = infer_nested_clauses(Mod, MFA, CatchClauses, Env, Contracts, Warns2, Sites2),
+    {BodyType, _, Warns1, Sites1} = infer_body(Mod, MFA, Body, BodyEnv, Contracts, Warns0, Sites0),
+    {SuccessTypes, Warns2, Sites2} = case OfClauses of
+        [] -> {[BodyType], Warns1, Sites1};
+        _ -> infer_nested_clauses_typed(Mod, MFA, OfClauses, Env, Contracts, Warns1, Sites1)
+    end,
+    {CatchTypes, Warns3, Sites3} = infer_nested_clauses_typed(Mod, MFA, CatchClauses, Env, Contracts, Warns2, Sites2),
     {_, _, Warns4, Sites4} = infer_body(Mod, MFA, After, Env, Contracts, Warns3, Sites3),
-    {any, Env, Warns4, Sites4};
+    RetType = case SuccessTypes ++ CatchTypes of
+        [] -> none;
+        Types -> prisma_type:normalize_union(Types)
+    end,
+    {RetType, Env, Warns4, Sites4};
 infer_expr(Mod, MFA, {'catch', _, Expr}, Env, Contracts, Warns0, Sites0) ->
     {_, _, Warns, Sites} = infer_expr(Mod, MFA, Expr, tag_env(Env, any_handled), Contracts, Warns0, Sites0),
     {any, Env, Warns, Sites};
 infer_expr(Mod, MFA, {'receive', _, Clauses}, Env, Contracts, Warns0, Sites0) ->
-    {Warns, Sites} = infer_nested_clauses(Mod, MFA, Clauses, Env, Contracts, Warns0, Sites0),
-    {any, Env, Warns, Sites};
+    {ClauseTypes, Warns, Sites} = infer_nested_clauses_typed(Mod, MFA, Clauses, Env, Contracts, Warns0, Sites0),
+    RetType = case ClauseTypes of
+        [] -> none;
+        _ -> prisma_type:normalize_union(ClauseTypes)
+    end,
+    {RetType, Env, Warns, Sites};
 infer_expr(Mod, MFA, {'receive', _, Clauses, Timeout, AfterBody}, Env, Contracts, Warns0, Sites0) ->
     {Warns1, Sites1} = infer_effects(Mod, MFA, [Timeout], Env, Contracts, Warns0, Sites0),
-    {Warns2, Sites2} = infer_nested_clauses(Mod, MFA, Clauses, Env, Contracts, Warns1, Sites1),
-    {_, _, Warns3, Sites3} = infer_body(Mod, MFA, AfterBody, Env, Contracts, Warns2, Sites2),
-    {any, Env, Warns3, Sites3};
+    {ClauseTypes, Warns2, Sites2} = infer_nested_clauses_typed(Mod, MFA, Clauses, Env, Contracts, Warns1, Sites1),
+    {AfterType, _, Warns3, Sites3} = infer_body(Mod, MFA, AfterBody, Env, Contracts, Warns2, Sites2),
+    RetType = prisma_type:normalize_union([AfterType | ClauseTypes]),
+    {RetType, Env, Warns3, Sites3};
 infer_expr(Mod, MFA, {lc, _, Template, Qualifiers}, Env, Contracts, Warns0, Sites0) ->
     {Warns, Sites} = infer_comprehension(Mod, MFA, Template, Qualifiers, Env, Contracts, Warns0, Sites0),
     {{list, any}, Env, Warns, Sites};
@@ -1069,17 +1081,33 @@ record_field_exprs(Fields) ->
 %% binds its variables to `any`, the guard is applied, the body is inferred; nothing flows out and nothing is reported
 %% about the clauses themselves.
 infer_nested_clauses(Mod, MFA, Clauses, Env0, Contracts, Warns0, Sites0) ->
-    lists:foldl(
-        fun({clause, _, Pats, Guards, Body}, {W, S}) ->
-                Env1 = lists:foldl(fun(Pat, E) -> {_, E1} = bind_pattern(Pat, any, E), E1 end, Env0, Pats),
-                case apply_guard_disjunction(Guards, Env1, Contracts) of
+    {_, Warns, Sites} = infer_nested_clauses_typed(Mod, MFA, Clauses, Env0, Contracts, Warns0, Sites0),
+    {Warns, Sites}.
+
+infer_nested_clauses_typed(Mod, MFA, Clauses, Env0, Contracts, Warns0, Sites0) ->
+    {TypesRev, Warns, Sites} = lists:foldl(
+        fun({clause, _, Pats, Guards, Body}, {Ts, W, S}) ->
+                case lists:foldl(
+                    fun(_Pat, unreachable) -> unreachable;
+                       (Pat, E) ->
+                            case bind_pattern(Pat, any, E) of
+                                unreachable -> unreachable;
+                                {_, E1} -> E1
+                            end
+                    end, Env0, Pats) of
                     unreachable ->
-                        {W, S};
-                    {ok, Env2} ->
-                        {_, _, W1, S1} = infer_body(Mod, MFA, Body, Env2, Contracts, W, S),
-                        {W1, S1}
+                        {Ts, W, S};
+                    Env1 ->
+                        case apply_guard_disjunction(Guards, Env1, Contracts) of
+                            unreachable ->
+                                {Ts, W, S};
+                            {ok, Env2} ->
+                                {BodyType, _, W1, S1} = infer_body(Mod, MFA, Body, Env2, Contracts, W, S),
+                                {[BodyType | Ts], W1, S1}
+                        end
                 end
-        end, {Warns0, Sites0}, Clauses).
+        end, {[], Warns0, Sites0}, Clauses),
+    {lists:reverse(TypesRev), Warns, Sites}.
 
 %% [Template || Qualifiers]: generators bind their pattern to `any`, filters are expressions, the template is inferred last.
 infer_comprehension(Mod, MFA, Template, Qualifiers, Env0, Contracts, Warns0, Sites0) ->
