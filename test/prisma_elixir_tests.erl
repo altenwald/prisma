@@ -746,3 +746,30 @@ elixir_in_and_io_warn_boolean_test() ->
     Summary = prisma_abstract:parse_abstract_forms(Forms, [{check_in, 2}], #module_summary{module = Mod, language = elixir}, #{}),
     Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
     ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).
+
+elixir_if_assignment_narrows_var_test() ->
+    Mod = 'Elixir.MyApp.IfAssign',
+    Forms = [
+        {attribute, 2, spec, {{get_pid, 0}, [{type, 2, 'fun', [{type, 2, product, []}, {type, 2, union, [{type, 2, pid, []}, {atom, 2, nil}]}]}]}},
+        {function, 3, get_pid, 0, [{clause, 3, [], [], [{atom, 3, nil}]}]},
+        {attribute, 5, spec, {{use_pid, 1}, [{type, 5, 'fun', [{type, 5, product, [{type, 5, pid, []}]}, {type, 5, pid, []}]}]}},
+        {function, 6, use_pid, 1, [{clause, 6, [{var, 6, 'p'}], [], [{var, 6, 'p'}]}]},
+        {attribute, 8, spec, {{check, 0}, [{type, 8, 'fun', [{type, 8, product, []}, {type, 8, union, [{type, 8, pid, []}, {atom, 8, down}]}]}]}},
+        {function, 9, check, 0, [
+            {clause, 9, [], [], [
+                {'case', 10, {match, 10, {var, 10, 'pid'}, {call, 10, {atom, 10, get_pid}, []}}, [
+                    {clause, 10, [{var, 10, 'x@1'}],
+                     [[{op, 10, 'orelse',
+                        {op, 10, '=:=', {var, 10, 'x@1'}, {atom, 10, false}},
+                        {op, 10, '=:=', {var, 10, 'x@1'}, {atom, 10, nil}}}]],
+                     [{atom, 10, down}]},
+                    {clause, 10, [{var, 10, '_'}], [], [
+                        {call, 10, {atom, 10, use_pid}, [{var, 10, 'pid'}]}
+                    ]}
+                ]}
+            ]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{get_pid, 0}, {use_pid, 1}, {check, 0}], #module_summary{module = Mod, language = elixir}, #{}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).

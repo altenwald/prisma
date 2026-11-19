@@ -464,10 +464,70 @@ guard_warnings(MFA, Guards, Env, Contracts) ->
 %% A guard test that cannot succeed (a BIF given arguments of the wrong type, say) makes the guard fail, so the clause can
 %% never match: the test is typed as an expression first, and `none` means that it fails.
 apply_guard_test(Test, Env, Contracts) ->
+    case apply_guard_test_typed(Test, Env, Contracts) of
+        unreachable -> unreachable;
+        {ok, _Type, Env1} -> {ok, Env1}
+    end.
+
+apply_guard_test_typed({op, _, 'andalso', L, R}, Env0, Contracts) ->
+    case apply_guard_test_typed(L, Env0, Contracts) of
+        unreachable ->
+            unreachable;
+        {ok, LType, Env1} ->
+            case prisma_type:meet(LType, boolean) of
+                none when LType =/= none -> unreachable;
+                _ ->
+                    case apply_guard_test_typed(R, Env1, Contracts) of
+                        unreachable -> unreachable;
+                        {ok, RType, Env2} -> {ok, short_circuit_type('andalso', LType, RType), Env2}
+                    end
+            end
+    end;
+apply_guard_test_typed({op, _, 'and', L, R}, Env0, Contracts) ->
+    case apply_guard_test_typed(L, Env0, Contracts) of
+        unreachable ->
+            unreachable;
+        {ok, LType, Env1} ->
+            case prisma_type:meet(LType, boolean) of
+                none when LType =/= none -> unreachable;
+                _ ->
+                    case apply_guard_test_typed(R, Env1, Contracts) of
+                        unreachable ->
+                            unreachable;
+                        {ok, RType, Env2} ->
+                            case prisma_type:meet(RType, boolean) of
+                                none when RType =/= none -> unreachable;
+                                _ -> {ok, boolean, Env2}
+                            end
+                    end
+            end
+    end;
+apply_guard_test_typed({op, _, 'orelse', L, R}, Env0, Contracts) ->
+    case {apply_guard_test_typed(L, Env0, Contracts),
+          apply_guard_test_typed(R, Env0, Contracts)} of
+        {unreachable, unreachable} ->
+            unreachable;
+        {{ok, LType, EnvL}, unreachable} ->
+            case prisma_type:meet(LType, boolean) of
+                none when LType =/= none -> unreachable;
+                _ -> {ok, LType, EnvL}
+            end;
+        {unreachable, {ok, RType, EnvR}} ->
+            {ok, RType, EnvR};
+        {{ok, LType, EnvL}, {ok, RType, EnvR}} ->
+            {ok, short_circuit_type('orelse', LType, RType), join_envs([EnvL, EnvR])}
+    end;
+apply_guard_test_typed(Test, Env, Contracts) ->
     case guard_test_type(Test, Env, Contracts) of
-        none -> unreachable;
-        {atom_lit, false} -> unreachable;
-        _ -> apply_guard_test_refining(Test, Env, Contracts)
+        none ->
+            unreachable;
+        {atom_lit, false} ->
+            unreachable;
+        Type ->
+            case apply_guard_test_refining(Test, Env, Contracts) of
+                unreachable -> unreachable;
+                {ok, Env1} -> {ok, Type, Env1}
+            end
     end.
 
 guard_test_type(Test, Env, Contracts) ->
@@ -479,14 +539,20 @@ apply_guard_test_refining({call, _, {remote, _, {atom, _, erlang}, {atom, _, Fun
 apply_guard_test_refining({call, _, {atom, _, Fun}, Args}, Env, Contracts) ->
     apply_guard_bif(Fun, Args, Env, Contracts);
 apply_guard_test_refining({op, _, 'andalso', L, R}, Env0, Contracts) ->
-    case apply_guard_test(L, Env0, Contracts) of
+    case apply_guard_test_refining(L, Env0, Contracts) of
         unreachable -> unreachable;
-        {ok, Env1} -> apply_guard_test(R, Env1, Contracts)
+        {ok, Env1} -> apply_guard_test_refining(R, Env1, Contracts)
     end;
 apply_guard_test_refining({op, _, 'and', L, R}, Env0, Contracts) ->
-    apply_guard_test({op, 0, 'andalso', L, R}, Env0, Contracts);
+    apply_guard_test_refining({op, 0, 'andalso', L, R}, Env0, Contracts);
 apply_guard_test_refining({op, _, 'orelse', L, R}, Env0, Contracts) ->
-    apply_guard_disjunction([[L], [R]], Env0, Contracts);
+    case {apply_guard_test_refining(L, Env0, Contracts),
+          apply_guard_test_refining(R, Env0, Contracts)} of
+        {unreachable, unreachable} -> unreachable;
+        {{ok, EnvL}, unreachable} -> {ok, EnvL};
+        {unreachable, {ok, EnvR}} -> {ok, EnvR};
+        {{ok, EnvL}, {ok, EnvR}} -> {ok, join_envs([EnvL, EnvR])}
+    end;
 apply_guard_test_refining({op, _, Op, {var, _, V}, Lit}, Env, _Contracts)
   when Op =:= '>'; Op =:= '>='; Op =:= '<'; Op =:= '=<' ->
     case guard_int_lit(Lit) of
@@ -706,9 +772,14 @@ infer_expr(Mod, MFA, {op, Anno, Op, L, R}, Env0, Contracts, Warns0, Sites0)
     {LType, Env1, Warns1, Sites1} = infer_expr(Mod, MFA, L, Env0, Contracts, Warns0, Sites0),
     EnvR = case Op of
         'andalso' ->
-            case apply_guard_test(L, Env1, Contracts) of
-                {ok, Narrowed} -> Narrowed;
-                unreachable -> Env1
+            case LType =:= none orelse LType =:= {atom_lit, false} of
+                true ->
+                    Env1;
+                false ->
+                    case apply_guard_test_refining(L, Env1, Contracts) of
+                        {ok, Narrowed} -> Narrowed;
+                        unreachable -> Env1
+                    end
             end;
         'orelse' ->
             negate_guard_test(L, Env1)
@@ -1392,6 +1463,16 @@ constrain_ast_var({var, _, V}, Type, Env) ->
 constrain_ast_var(_, _Type, Env) ->
     Env.
 
+refine_match_scrutinee_vars({match, _, {var, _, V}, Rhs}, Pats, Remaining, Env) ->
+    ClauseType = case Pats of
+        [{var, _, PV}] when PV =/= '_' -> maps:get(PV, Env, Remaining);
+        _ -> Remaining
+    end,
+    Env1 = constrain_ast_var({var, 0, V}, ClauseType, Env),
+    refine_match_scrutinee_vars(Rhs, Pats, Remaining, Env1);
+refine_match_scrutinee_vars(_, _Pats, _Remaining, Env) ->
+    Env.
+
 infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0) ->
     infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0, undefined).
 
@@ -1436,7 +1517,8 @@ infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0, 
                                     end,
                                     {RetsAcc, EnvsAcc, TestWarns ++ GWarns ++ WAcc, SAcc, Remaining1};
                                 {ok, CEnv1} ->
-                                    {CRet, CEnv2, WNext, SNext} = infer_body(Mod, MFA, CBody, CEnv1, Contracts, TestWarns ++ WAcc, SAcc),
+                                    CEnv1Ref = refine_match_scrutinee_vars(Scrutinee, Pats, Remaining, CEnv1),
+                                    {CRet, CEnv2, WNext, SNext} = infer_body(Mod, MFA, CBody, CEnv1Ref, Contracts, TestWarns ++ WAcc, SAcc),
                                     {[CRet | RetsAcc], [CEnv2 | EnvsAcc], WNext, SNext, Remaining1}
                             end
                     end
