@@ -89,7 +89,7 @@ Add Prisma to your `rebar.config` under `project_plugins`:
 
 ```erlang
 {project_plugins, [
-    {prisma, "~> 0.2.0"}
+    {prisma, "~> 0.2.7"}
 ]}.
 ```
 
@@ -153,7 +153,7 @@ Add Prisma to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:prisma, "~> 0.2.0", only: [:dev, :test], runtime: false}
+    {:prisma, "~> 0.2.7", only: [:dev, :test], runtime: false}
   ]
 end
 ```
