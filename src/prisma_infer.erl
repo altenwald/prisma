@@ -1970,6 +1970,12 @@ short_circuit_type(Op, LType, RType) ->
     prisma_type:normalize_union([T || {true, T} <- [{Decides, Deciding}, {RightRuns, RType}]]).
 
 %% Return types that depend on the argument: tl([1 | 2]) is 2, not a list.
+bif_return_type(abs, [ArgType], _Static, _Contracts) ->
+    case {prisma_type:meet(ArgType, float) =/= none, prisma_type:meet(ArgType, integer) =/= none} of
+        {true, false} -> float;
+        {false, true} -> non_neg_integer;
+        _ -> number
+    end;
 bif_return_type(tl, [ArgType], _Static, _Contracts) ->
     case list_tail_type(ArgType) of
         none -> {list, any};

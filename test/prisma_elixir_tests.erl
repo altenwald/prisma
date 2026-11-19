@@ -951,3 +951,28 @@ struct_update_preserves_fields_test() ->
         #{external_types => BoxSummary#module_summary.types}),
     Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{BoxMod => BoxSummary, UpdMod => UpdSummary}},
     ?assertEqual([], prisma_checker:check_module(UpdSummary, Pplt, #{mode => hybrid})).
+
+%% Regression test for #9 (reported by @houllette): float guard retains float() through abs/1 and multiplication.
+float_guard_abs_mul_preserves_float_test() ->
+    FloatMod = 'Elixir.Float',
+    FloatForms = [
+        {attribute, 1, spec, {{round, 2}, [{type, 1, 'fun', [
+            {type, 1, product, [{type, 1, float, []}, {type, 1, non_neg_integer, []}]},
+            {type, 1, float, []}
+        ]}]}}
+    ],
+    FloatSummary = prisma_abstract:parse_abstract_forms(FloatForms, [], #module_summary{module = FloatMod, language = elixir}, #{}),
+    Mod = 'Elixir.ReproFloat',
+    Forms = [
+        {function, 2, percentage, 1, [
+            {clause, 2, [{var, 2, 'value'}],
+             [[{call, 2, {remote, 2, {atom, 2, erlang}, {atom, 2, is_float}}, [{var, 2, 'value'}]}]],
+             [{call, 3, {remote, 3, {atom, 3, FloatMod}, {atom, 3, round}},
+               [{op, 3, '*', {call, 3, {remote, 3, {atom, 3, erlang}, {atom, 3, abs}}, [{var, 3, 'value'}]}, {integer, 3, 100}},
+                {integer, 3, 1}]}]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{percentage, 1}], #module_summary{module = Mod, language = elixir},
+        #{external_specs => #{{FloatMod, round, 2} => (maps:get({FloatMod, round, 2}, FloatSummary#module_summary.functions))#func_contract.declared_specs}}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{FloatMod => FloatSummary, Mod => Summary}},
+    ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).
