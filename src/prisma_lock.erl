@@ -267,12 +267,50 @@ otp_cache_path(CacheDir) ->
 ensure_otp_pplt(OtpApps, Opts) ->
     CacheDir = maps:get(cache_dir, Opts, default_cache_dir()),
     Path = otp_cache_path(CacheDir),
+    Vsn = list_to_binary(erlang:system_info(otp_release)),
     case filelib:is_regular(Path) of
         true ->
-            prisma_pplt:load(Path);
+            case prisma_pplt:load(Path) of
+                {ok, Pplt} ->
+                    case missing_otp_apps(Pplt, OtpApps) of
+                        [] ->
+                            {ok, Pplt};
+                        MissingApps ->
+                            case build_system_pplt(MissingApps, undefined, <<"otp">>, Vsn) of
+                                {ok, Delta} ->
+                                    Merged = prisma_pplt:merge([Pplt, Delta]),
+                                    _ = prisma_pplt:save(Merged, Path),
+                                    {ok, Merged};
+                                Error ->
+                                    Error
+                            end
+                    end;
+                {error, _} ->
+                    build_system_pplt(OtpApps, Path, <<"otp">>, Vsn)
+            end;
         false ->
-            build_system_pplt(OtpApps, Path, <<"otp">>, list_to_binary(erlang:system_info(otp_release)))
+            build_system_pplt(OtpApps, Path, <<"otp">>, Vsn)
     end.
+
+missing_otp_apps(#prisma_pplt{modules = Mods}, OtpApps) ->
+    lists:filter(
+        fun(App) ->
+            case code:lib_dir(App) of
+                {error, _} ->
+                    true;
+                Dir ->
+                    Beams = filelib:wildcard(filename:join([Dir, "ebin", "*.beam"])),
+                    lists:any(
+                        fun(B) ->
+                            Mod = list_to_atom(filename:basename(B, ".beam")),
+                            not maps:is_key(Mod, Mods)
+                        end,
+                        Beams
+                    )
+            end
+        end,
+        OtpApps
+    ).
 
 %% @doc `<dir>/elixir_<version>.pplt`, for the Elixir that is running (none if there is no Elixir).
 -spec elixir_cache_path(file:filename_all()) -> {ok, string()} | error.
@@ -323,10 +361,16 @@ build_system_pplt(Apps, Path, Package, Vsn) ->
     case [App || {App, {error, _}} <- Dirs] of
         [] ->
             Beams = lists:append([filelib:wildcard(filename:join([Dir, "ebin", "*.beam"])) || {_, Dir} <- Dirs]),
-            notice(Path, length(Beams)),
+            case Path of
+                undefined -> ok;
+                _ -> notice(Path, length(Beams))
+            end,
             case prisma_pplt:from_beams(Beams, #{package => Package, package_vsn => Vsn}) of
                 {ok, Pplt} ->
-                    _ = prisma_pplt:save(Pplt, Path),
+                    case Path of
+                        undefined -> ok;
+                        _ -> _ = prisma_pplt:save(Pplt, Path)
+                    end,
                     {ok, Pplt};
                 Error ->
                     Error
@@ -371,8 +415,15 @@ resolve_single_dep(ProjectRoot, CacheDir, #{name := Name, version := Vsn} = Dep,
                 error -> cache_path(CacheDir, Name, Vsn)
             end,
             Result = case filelib:is_regular(Path) of
-                true -> prisma_pplt:load(Path);
-                false -> build_and_cache_local_dep(ProjectRoot, Path, App, Name, Vsn, Opts)
+                true ->
+                    case prisma_pplt:load(Path) of
+                        {ok, _} = Ok ->
+                            Ok;
+                        {error, _Why} ->
+                            build_and_cache_local_dep(ProjectRoot, Path, App, Name, Vsn, Opts)
+                    end;
+                false ->
+                    build_and_cache_local_dep(ProjectRoot, Path, App, Name, Vsn, Opts)
             end,
             [P || {ok, P} <- [Result]]
     end.

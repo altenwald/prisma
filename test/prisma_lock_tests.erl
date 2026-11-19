@@ -452,3 +452,35 @@ mix_env_isolates_dep_pplt_and_cache_test() ->
     ?assertMatch([{fun_type, [], integer}], DevSpecs),
     ?assertMatch([{fun_type, [], atom}], TestSpecs),
     os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache).
+
+%% Regression test for #11 (reported by @houllette): unreadable cached dependency PPLT is rebuilt instead of silently ignored.
+corrupt_cached_dep_pplt_is_rebuilt_test() ->
+    TmpProj = "/tmp/prisma_dev/tmp_corrupt_proj",
+    TmpCache = "/tmp/prisma_dev/tmp_corrupt_cache",
+    os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache),
+    DepEbin = filename:join([TmpProj, "_build", "test", "lib", "demo_dep", "ebin"]),
+    ok = filelib:ensure_dir(filename:join(DepEbin, "dummy")),
+    ok = filelib:ensure_dir(filename:join(TmpCache, "dummy")),
+    Lock = <<"%{\n  \"demo_dep\": {:hex, :demo_dep, \"1.0.0\", \"checksum\", [:mix], [], \"hexpm\", \"checksum\"},\n}\n">>,
+    ok = file:write_file(filename:join(TmpProj, "mix.lock"), Lock),
+    ok = file:write_file(filename:join(DepEbin, "dep_lib.beam"), dep_lib_beam()),
+    CorruptPath = prisma_lock:cache_path(TmpCache, <<"demo_dep">>, <<"1.0.0">>, "test"),
+    ok = file:write_file(CorruptPath, <<"not a valid pplt">>),
+    {ok, Pplt} = prisma_lock:resolve_project_pplts(TmpProj, #{cache_dir => TmpCache, env => "test", elixir => false}),
+    ?assert(lists:member(dep_lib, prisma_pplt:modules(Pplt))),
+    {ok, Reloaded} = prisma_pplt:load(CorruptPath),
+    ?assert(lists:member(dep_lib, prisma_pplt:modules(Reloaded))),
+    os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache).
+
+%% Regression test for #12 (reported by @houllette): cached OTP PPLT expands when requested application set grows.
+cached_otp_pplt_expands_for_new_apps_test() ->
+    TmpCache = "/tmp/prisma_dev/tmp_otp_expand_cache",
+    os:cmd("rm -rf " ++ TmpCache),
+    ok = filelib:ensure_dir(filename:join(TmpCache, "dummy")),
+    {ok, Small} = prisma_lock:ensure_otp_pplt([parsetools], #{cache_dir => TmpCache}),
+    ?assert(lists:member(yecc, prisma_pplt:modules(Small))),
+    ?assertNot(lists:member(eunit, prisma_pplt:modules(Small))),
+    {ok, Expanded} = prisma_lock:ensure_otp_pplt([parsetools, eunit], #{cache_dir => TmpCache}),
+    ?assert(lists:member(yecc, prisma_pplt:modules(Expanded))),
+    ?assert(lists:member(eunit, prisma_pplt:modules(Expanded))),
+    os:cmd("rm -rf " ++ TmpCache).
