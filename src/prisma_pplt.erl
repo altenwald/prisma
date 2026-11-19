@@ -85,23 +85,141 @@ from_beams(Beams, Opts0) ->
         false -> lists:reverse(LeexRev) ++ lists:reverse(YeccRev) ++ lists:reverse(OtherRev)
     end,
     Opts = Opts0#{external_specs => Specs, external_types => Types},
-    {Result, _} = lists:foldl(
+    {Result, FinalOpts, BeamByMod} = lists:foldl(
         fun
-            (Beam, {{ok, #prisma_pplt{modules = Mods} = Pplt}, CurOpts}) ->
+            (Beam, {{ok, #prisma_pplt{modules = Mods} = Pplt}, CurOpts, BMap}) ->
                 case prisma_abstract:extract_beam(Beam, CurOpts) of
                     {ok, #module_summary{module = Mod, functions = Funcs} = Summary} ->
                         NextOpts = update_generator_opts(Mod, Funcs, Specs, CurOpts),
-                        {{ok, Pplt#prisma_pplt{modules = Mods#{Mod => Summary}}}, NextOpts};
+                        {{ok, Pplt#prisma_pplt{modules = Mods#{Mod => Summary}}}, NextOpts, BMap#{Mod => Beam}};
                     {error, Reason} ->
-                        {{error, {beam_extract_failed, Beam, Reason}}, CurOpts}
+                        {{error, {beam_extract_failed, Beam, Reason}}, CurOpts, BMap}
                 end;
-            (_Beam, {{error, _} = Err, CurOpts}) ->
-                {Err, CurOpts}
+            (_Beam, {{error, _} = Err, CurOpts, BMap}) ->
+                {Err, CurOpts, BMap}
         end,
-        {{ok, BasePplt}, Opts},
+        {{ok, BasePplt}, Opts, #{}},
         OrderedBeams
     ),
-    Result.
+    case Result of
+        {ok, BuiltPplt} ->
+            {ok, propagate_cross_module_inferred(BuiltPplt, BeamByMod, Specs, FinalOpts, 1)};
+        Error ->
+            Error
+    end.
+
+propagate_cross_module_inferred(Pplt, _BeamByMod, _Specs, _Opts, Pass) when Pass > 3 ->
+    Pplt;
+propagate_cross_module_inferred(#prisma_pplt{modules = Mods} = Pplt, BeamByMod, Specs, Opts, Pass) ->
+    InferredExt = maps:fold(
+        fun(_Mod, #module_summary{functions = Funcs}, Acc) ->
+            maps:fold(
+                fun(MFA, #func_contract{declared_specs = [], inferred_type = {fun_type, _, Ret} = InfType}, A)
+                  when Ret =/= any ->
+                    case maps:is_key(MFA, Specs) of
+                        true -> A;
+                        false -> A#{MFA => [InfType]}
+                    end;
+                   (_, _, A) ->
+                    A
+                end,
+                Acc,
+                Funcs
+            )
+        end,
+        #{},
+        Mods
+    ),
+    case map_size(InferredExt) of
+        0 ->
+            Pplt;
+        _ ->
+            DirtyMods = [
+                Mod
+                || {Mod, #module_summary{functions = Funcs}} <- maps:to_list(Mods),
+                   maps:is_key(Mod, BeamByMod),
+                   has_unspecced_external_call(Mod, Funcs, InferredExt)
+            ],
+            case DirtyMods of
+                [] ->
+                    Pplt;
+                _ ->
+                    CurExt = maps:get(external_specs, Opts, #{}),
+                    ExtOpts = Opts#{external_specs => maps:merge(InferredExt, CurExt)},
+                    {NextMods, Changed} = lists:foldl(
+                        fun(Mod, {MAcc, Ch}) ->
+                            Beam = maps:get(Mod, BeamByMod),
+                            OldSummary = maps:get(Mod, MAcc),
+                            case prisma_abstract:extract_beam(Beam, ExtOpts) of
+                                {ok, NewSummary0} ->
+                                    PreservedFuncs = preserve_local_warnings(
+                                        OldSummary#module_summary.functions,
+                                        NewSummary0#module_summary.functions
+                                    ),
+                                    NewSummary = NewSummary0#module_summary{functions = PreservedFuncs},
+                                    ModChanged = inferred_returns_changed(
+                                        OldSummary#module_summary.functions,
+                                        PreservedFuncs
+                                    ),
+                                    {MAcc#{Mod => NewSummary}, Ch orelse ModChanged};
+                                _ ->
+                                    {MAcc, Ch}
+                            end
+                        end,
+                        {Mods, false},
+                        DirtyMods
+                    ),
+                    NextPplt = Pplt#prisma_pplt{modules = NextMods},
+                    case Changed of
+                        true -> propagate_cross_module_inferred(NextPplt, BeamByMod, Specs, Opts, Pass + 1);
+                        false -> NextPplt
+                    end
+            end
+    end.
+
+has_unspecced_external_call(Mod, Funcs, InferredExt) ->
+    maps:fold(
+        fun(_MFA, #func_contract{calls = Calls}, Found) ->
+            Found orelse lists:any(
+                fun({CMod, _, _} = CMFA) ->
+                    CMod =/= Mod andalso maps:is_key(CMFA, InferredExt)
+                end,
+                Calls
+            )
+        end,
+        false,
+        Funcs
+    ).
+
+preserve_local_warnings(OldFuncs, NewFuncs) ->
+    maps:map(
+        fun(MFA, #func_contract{} = NewFC) ->
+            case maps:find(MFA, OldFuncs) of
+                {ok, #func_contract{local_warnings = OldWarns}} ->
+                    NewFC#func_contract{local_warnings = OldWarns};
+                error ->
+                    NewFC
+            end
+        end,
+        NewFuncs
+    ).
+
+inferred_returns_changed(OldFuncs, NewFuncs) ->
+    maps:fold(
+        fun(MFA, #func_contract{inferred_type = NewType}, Changed) ->
+            case Changed of
+                true ->
+                    true;
+                false ->
+                    case maps:find(MFA, OldFuncs) of
+                        {ok, #func_contract{inferred_type = OldType}} -> OldType =/= NewType;
+                        _ -> true
+                    end
+            end
+        end,
+        false,
+        NewFuncs
+    ).
 
 update_generator_opts(Mod, Funcs, Specs, CurOpts) ->
     case maps:find({'$beam_kind', Mod}, Specs) of

@@ -855,3 +855,39 @@ behaviour_callback_return_mismatch_test() ->
     Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{BehMod => BehSummary, ImplMod => ImplSummary}},
     Warnings = prisma_checker:check_module(ImplSummary, Pplt, #{mode => hybrid}),
     ?assertMatch([#prisma_warning{kind = gradual_mismatch, mfa = {ImplMod, process, 1}}], Warnings).
+
+cross_module_inferred_return_order_independent_test() ->
+    CallerMod = 'Elixir.ReproAlphaCallerOrder',
+    SourceMod = 'Elixir.ReproOmegaSourceOrder',
+    CallerForms = [
+        {attribute, 1, file, {"caller.ex", 1}},
+        {attribute, 1, module, CallerMod},
+        {attribute, 1, export, [{value, 0}]},
+        {attribute, 2, spec, {{value, 0}, [{type, 2, 'fun', [{type, 2, product, []}, {type, 2, integer, []}]}]}},
+        {function, 3, value, 0, [{clause, 3, [], [], [{call, 3, {remote, 3, {atom, 3, SourceMod}, {atom, 3, value}}, []}]}]}
+    ],
+    SourceForms = [
+        {attribute, 1, file, {"source.ex", 1}},
+        {attribute, 1, module, SourceMod},
+        {attribute, 1, export, [{value, 0}]},
+        {function, 2, value, 0, [{clause, 2, [], [], [{atom, 2, wrong}]}]}
+    ],
+    {ok, CallerMod, CallerBin} = compile:forms(CallerForms, [binary, debug_info]),
+    {ok, SourceMod, SourceBin} = compile:forms(SourceForms, [binary, debug_info]),
+    TmpDir = "/tmp/prisma_order_test_" ++ integer_to_list(erlang:unique_integer([positive])),
+    ok = filelib:ensure_dir(filename:join(TmpDir, "x")),
+    CallerBeam = filename:join(TmpDir, atom_to_list(CallerMod) ++ ".beam"),
+    SourceBeam = filename:join(TmpDir, atom_to_list(SourceMod) ++ ".beam"),
+    ok = file:write_file(CallerBeam, CallerBin),
+    ok = file:write_file(SourceBeam, SourceBin),
+    try
+        Opts = #{mode => hybrid, oxbow => false},
+        {ok, Res1} = prisma:analyze_beams([CallerBeam, SourceBeam], Opts),
+        {ok, Res2} = prisma:analyze_beams([SourceBeam, CallerBeam], Opts),
+        ?assertMatch([#prisma_warning{kind = gradual_mismatch, mfa = {CallerMod, value, 0}}], Res1),
+        ?assertMatch([#prisma_warning{kind = gradual_mismatch, mfa = {CallerMod, value, 0}}], Res2)
+    after
+        _ = file:delete(CallerBeam),
+        _ = file:delete(SourceBeam),
+        _ = file:del_dir(TmpDir)
+    end.
