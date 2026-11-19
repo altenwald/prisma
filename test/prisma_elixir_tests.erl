@@ -891,3 +891,63 @@ cross_module_inferred_return_order_independent_test() ->
         _ = file:delete(SourceBeam),
         _ = file:del_dir(TmpDir)
     end.
+
+%% Regression test for #1 (reported by @houllette): exhaustive cond does not emit dead_code.
+exhaustive_cond_no_dead_code_test() ->
+    Mod = 'Elixir.ReproConditional',
+    Forms = [
+        {attribute, 2, spec, {{classify, 1}, [{type, 2, 'fun', [{type, 2, product, [{type, 2, integer, []}]},
+            {type, 2, union, [{atom, 2, zero}, {atom, 2, one}, {atom, 2, other}]}]}]}},
+        {function, 3, classify, 1, [
+            {clause, 3, [{var, 3, 'value'}], [], [
+                {'case', 4, {op, 5, '==', {var, 5, 'value'}, {integer, 5, 0}}, [
+                    {clause, 5, [{atom, 5, false}], [], [
+                        {'case', 6, {op, 6, '==', {var, 6, 'value'}, {integer, 6, 1}}, [
+                            {clause, 6, [{atom, 6, false}], [], [
+                                {'case', erl_anno:set_generated(true, 7), {atom, 7, true}, [
+                                    {clause, 7, [{atom, 7, false}], [], [{atom, 7, nil}]},
+                                    {clause, 7, [{atom, 7, true}], [], [{atom, 7, other}]}
+                                ]}
+                            ]},
+                            {clause, 6, [{atom, 6, true}], [], [{atom, 6, one}]}
+                        ]}
+                    ]},
+                    {clause, 5, [{atom, 5, true}], [], [{atom, 5, zero}]}
+                ]}
+            ]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{classify, 1}], #module_summary{module = Mod, language = elixir}, #{}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).
+
+%% Regression test for #2 (reported by @houllette): struct update preserves unchanged fields.
+struct_update_preserves_fields_test() ->
+    BoxMod = 'Elixir.ReproBox',
+    BoxForms = [
+        {attribute, 3, type, {t, {type, 3, map, [
+            {type, 3, map_field_exact, {atom, 3, '__struct__'}, {atom, 3, BoxMod}},
+            {type, 3, map_field_exact, {atom, 3, amount}, {type, 3, integer, []}},
+            {type, 3, map_field_exact, {atom, 3, unit}, {type, 3, atom, []}}
+        ]}, []}},
+        {attribute, 3, export_type, [{t, 0}]}
+    ],
+    BoxSummary = prisma_abstract:parse_abstract_forms(BoxForms, [], #module_summary{module = BoxMod, language = elixir}, #{}),
+    UpdMod = 'Elixir.ReproUpdate',
+    UpdForms = [
+        {attribute, 6, spec, {{set, 2}, [{type, 6, 'fun', [
+            {type, 6, product, [{remote_type, 6, [{atom, 6, BoxMod}, {atom, 6, t}, []]}, {type, 6, integer, []}]},
+            {remote_type, 6, [{atom, 6, BoxMod}, {atom, 6, t}, []]}
+        ]}]}},
+        {function, 7, set, 2, [
+            {clause, 7, [{map, 7, [{map_field_exact, 7, {atom, 7, '__struct__'}, {atom, 7, BoxMod}}]}, {var, 7, 'amount'}], [], [
+                {map, 7, {map, 7, [{map_field_exact, 7, {atom, 7, '__struct__'}, {atom, 7, BoxMod}}]}, [
+                    {map_field_exact, 7, {atom, 7, amount}, {var, 7, 'amount'}}
+                ]}
+            ]}
+        ]}
+    ],
+    UpdSummary = prisma_abstract:parse_abstract_forms(UpdForms, [{set, 2}], #module_summary{module = UpdMod, language = elixir},
+        #{external_types => BoxSummary#module_summary.types}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{BoxMod => BoxSummary, UpdMod => UpdSummary}},
+    ?assertEqual([], prisma_checker:check_module(UpdSummary, Pplt, #{mode => hybrid})).
