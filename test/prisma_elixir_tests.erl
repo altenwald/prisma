@@ -1006,3 +1006,44 @@ opaque_deconstruction_outside_module_test() ->
     Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{BoxMod => BoxSummary, ConsMod => ConsSummary}},
     Warnings = prisma_checker:check_module(ConsSummary, Pplt, #{mode => hybrid}),
     ?assertMatch([#prisma_warning{kind = opacity_violation, mfa = {ConsMod, value, 0}}], Warnings).
+
+%% Regression test for #13 (reported by @nikolauska): compiler-generated string interpolation clause does not emit dead_code.
+string_interpolation_no_dead_code_test() ->
+    Mod = 'Elixir.ReproInterpolation',
+    GenAnno = erl_anno:set_generated(true, 3),
+    Forms = [
+        {attribute, 2, spec, {{label, 1}, [{type, 2, 'fun', [{type, 2, product, [{type, 2, integer, []}]}, {type, 2, binary, []}]}]}},
+        {function, 3, label, 1, [
+            {clause, 3, [{var, 3, 'size'}],
+             [[{call, 3, {remote, 3, {atom, 3, erlang}, {atom, 3, is_integer}}, [{var, 3, 'size'}]}]],
+             [{'case', GenAnno, {var, 3, 'size'}, [
+                 {clause, GenAnno, [{var, 3, 'x'}],
+                  [[{call, GenAnno, {remote, GenAnno, {atom, GenAnno, erlang}, {atom, GenAnno, is_binary}}, [{var, 3, 'x'}]}]],
+                  [{var, 3, 'x'}]},
+                 {clause, GenAnno, [{var, 3, 'x'}], [],
+                  [{call, 3, {remote, 3, {atom, 3, 'Elixir.String.Chars'}, {atom, 3, to_string}}, [{var, 3, 'x'}]}]}
+             ]}]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{label, 1}], #module_summary{module = Mod, language = elixir}, #{}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).
+
+%% Regression test for #14 (reported by @nikolauska): repeated-variable pattern across arguments is not unused.
+oxbow_repeated_variable_pattern_test() ->
+    Mod = 'Elixir.ReproSameArg',
+    Forms = [
+        {function, 3, changed, 2, [
+            {clause, 3, [{var, 3, 'old'}, {var, 3, 'new'}], [], [
+                {call, 3, {atom, 3, compare}, [{var, 3, 'old'}, {var, 3, 'new'}]}
+            ]}
+        ]},
+        {function, 5, compare, 2, [
+            {clause, 5, [{atom, 5, nil}, {var, 5, '_new'}], [], [{atom, 5, false}]},
+            {clause, 6, [{var, 6, '_same@1'}, {var, 6, '_same@1'}], [], [{atom, 6, false}]},
+            {clause, 7, [{var, 7, '_old'}, {var, 7, '_new'}], [], [{atom, 7, true}]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{changed, 2}], #module_summary{module = Mod, language = elixir}, #{}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid, oxbow => true})).

@@ -250,23 +250,26 @@ is_param_ignored_all_clauses(Idx, Clauses) ->
         fun
             ({clause, _Anno, Patterns, Guards, Body}) when length(Patterns) >= Idx ->
                 Pattern = lists:nth(Idx, Patterns),
-                is_ignored_clause_pattern(Pattern, Guards, Body);
+                OtherPatterns = [P || {Pos, P} <- lists:zip(lists:seq(1, length(Patterns)), Patterns), Pos =/= Idx],
+                is_ignored_clause_pattern(Pattern, OtherPatterns, Guards, Body);
             (_) ->
                 false
         end,
         Clauses
     ).
 
-is_ignored_clause_pattern({var, _Anno, '_'}, _Guards, _Body) ->
+is_ignored_clause_pattern({var, _Anno, '_'}, _OtherPatterns, _Guards, _Body) ->
     true;
-is_ignored_clause_pattern({var, _Anno, VarName}, Guards, Body) when is_atom(VarName) ->
+is_ignored_clause_pattern({var, _Anno, VarName}, OtherPatterns, Guards, Body) when is_atom(VarName) ->
     case atom_to_list(VarName) of
         "_" ++ _ ->
-            not is_var_referenced(VarName, Guards) andalso not is_var_referenced(VarName, Body);
+            not is_var_referenced(VarName, OtherPatterns) andalso
+                not is_var_referenced(VarName, Guards) andalso
+                not is_var_referenced(VarName, Body);
         _ ->
             false
     end;
-is_ignored_clause_pattern(_OtherPattern, _Guards, _Body) ->
+is_ignored_clause_pattern(_OtherPattern, _OtherPatterns, _Guards, _Body) ->
     false.
 
 is_var_referenced(VarName, {var, _Anno, VarName}) ->
