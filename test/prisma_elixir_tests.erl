@@ -976,3 +976,33 @@ float_guard_abs_mul_preserves_float_test() ->
         #{external_specs => #{{FloatMod, round, 2} => (maps:get({FloatMod, round, 2}, FloatSummary#module_summary.functions))#func_contract.declared_specs}}),
     Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{FloatMod => FloatSummary, Mod => Summary}},
     ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).
+
+%% Regression test for #10 (reported by @houllette): deconstructing an external opaque type reports opacity_violation.
+opaque_deconstruction_outside_module_test() ->
+    BoxMod = 'Elixir.ReproOpaqueBox',
+    BoxForms = [
+        {attribute, 2, opaque, {t, {type, 2, tuple, [{atom, 2, box}, {type, 2, integer, []}]}, []}},
+        {attribute, 2, export_type, [{t, 0}]},
+        {attribute, 3, spec, {{new, 1}, [{type, 3, 'fun', [
+            {type, 3, product, [{type, 3, integer, []}]},
+            {user_type, 3, t, []}
+        ]}]}}
+    ],
+    BoxSummary = prisma_abstract:parse_abstract_forms(BoxForms, [{new, 1}], #module_summary{module = BoxMod, language = elixir}, #{}),
+    ConsMod = 'Elixir.ReproOpaqueConsumer',
+    NewSpec = (maps:get({BoxMod, new, 1}, BoxSummary#module_summary.functions))#func_contract.declared_specs,
+    ConsForms = [
+        {attribute, 6, spec, {{value, 0}, [{type, 6, 'fun', [{type, 6, product, []}, {type, 6, integer, []}]}]}},
+        {function, 7, value, 0, [
+            {clause, 7, [], [], [
+                {match, 8, {tuple, 8, [{atom, 8, box}, {var, 8, 'val'}]},
+                 {call, 8, {remote, 8, {atom, 8, BoxMod}, {atom, 8, new}}, [{integer, 8, 1}]}},
+                {var, 9, 'val'}
+            ]}
+        ]}
+    ],
+    ConsSummary = prisma_abstract:parse_abstract_forms(ConsForms, [{value, 0}], #module_summary{module = ConsMod, language = elixir},
+        #{external_specs => #{{BoxMod, new, 1} => NewSpec}, external_types => BoxSummary#module_summary.types}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{BoxMod => BoxSummary, ConsMod => ConsSummary}},
+    Warnings = prisma_checker:check_module(ConsSummary, Pplt, #{mode => hybrid}),
+    ?assertMatch([#prisma_warning{kind = opacity_violation, mfa = {ConsMod, value, 0}}], Warnings).

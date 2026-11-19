@@ -13,6 +13,7 @@
     declared_return/2,
     declared_return/3,
     declared_return/5,
+    declared_return/6,
     extract_leex_token_map/2
 ]).
 
@@ -759,13 +760,14 @@ infer_expr(Mod, MFA, {map, Anno, Base, Fields}, Env0, Contracts, Warns0, Sites0)
     end;
 infer_expr(Mod, MFA, {match, Anno, Pat, Rhs}, Env0, Contracts, Warns0, Sites0) ->
     {RhsType, Env1, Warns1, Sites1} = infer_expr(Mod, MFA, Rhs, Env0, Contracts, Warns0, Sites0),
+    OpaqueWarns = opaque_deconstruction_warnings(Mod, MFA, Anno, Pat, RhsType),
     case bind_pattern(Pat, RhsType, Env1) of
         {none, Env2} when RhsType =/= none ->
             Msg = iolist_to_binary(io_lib:format("Pattern match can never succeed against ~p", [RhsType])),
             W = make_warning(discrepancy, MFA, Anno, Msg),
-            {none, Env2, [W | Warns1], Sites1};
+            {none, Env2, OpaqueWarns ++ [W | Warns1], Sites1};
         {MatchedType, Env2} ->
-            {MatchedType, Env2, Warns1, Sites1}
+            {MatchedType, Env2, OpaqueWarns ++ Warns1, Sites1}
     end;
 infer_expr(Mod, MFA, {op, Anno, Op, L, R}, Env0, Contracts, Warns0, Sites0)
   when Op =:= 'andalso'; Op =:= 'orelse' ->
@@ -1501,6 +1503,64 @@ refine_match_scrutinee_vars({match, _, {var, _, V}, Rhs}, Pats, Remaining, Env) 
 refine_match_scrutinee_vars(_, _Pats, _Remaining, Env) ->
     Env.
 
+opaque_deconstruction_warnings(Mod, MFA, Anno, Pat, Type) ->
+    case find_opaque_deconstruction(Mod, Pat, Type) of
+        {ok, DefMod, Name} ->
+            Msg = iolist_to_binary(io_lib:format("Pattern match deconstructs opaque type ~s:~s", [DefMod, Name])),
+            [make_warning(opacity_violation, MFA, Anno, Msg)];
+        none ->
+            []
+    end.
+
+find_opaque_deconstruction(_Mod, {var, _, _}, _Type) ->
+    none;
+find_opaque_deconstruction(Mod, {match, _, P1, P2}, Type) ->
+    case find_opaque_deconstruction(Mod, P1, Type) of
+        none -> find_opaque_deconstruction(Mod, P2, Type);
+        Found -> Found
+    end;
+find_opaque_deconstruction(Mod, Pat, {opaque, DefMod, Name, _Args, _Underlying})
+  when DefMod =/= Mod, is_atom(Mod) ->
+    case is_structural_pattern(Pat) of
+        true -> {ok, DefMod, Name};
+        false -> none
+    end;
+find_opaque_deconstruction(Mod, {tuple, _, Pats}, {tuple, Types}) when length(Pats) =:= length(Types) ->
+    find_opaque_in_pairs(Mod, Pats, Types);
+find_opaque_deconstruction(Mod, {cons, _, HPat, TPat}, {list, Elem}) ->
+    case find_opaque_deconstruction(Mod, HPat, Elem) of
+        none -> find_opaque_deconstruction(Mod, TPat, {list, Elem});
+        Found -> Found
+    end;
+find_opaque_deconstruction(Mod, {cons, _, HPat, TPat}, {nonempty_list, Elem}) ->
+    case find_opaque_deconstruction(Mod, HPat, Elem) of
+        none -> find_opaque_deconstruction(Mod, TPat, {list, Elem});
+        Found -> Found
+    end;
+find_opaque_deconstruction(_Mod, _Pat, _Type) ->
+    none.
+
+find_opaque_in_pairs(_Mod, [], []) ->
+    none;
+find_opaque_in_pairs(Mod, [P | Ps], [T | Ts]) ->
+    case find_opaque_deconstruction(Mod, P, T) of
+        none -> find_opaque_in_pairs(Mod, Ps, Ts);
+        Found -> Found
+    end.
+
+is_structural_pattern({tuple, _, _}) -> true;
+is_structural_pattern({cons, _, _, _}) -> true;
+is_structural_pattern({nil, _}) -> true;
+is_structural_pattern({map, _, _}) -> true;
+is_structural_pattern({bin, _, _}) -> true;
+is_structural_pattern({record, _, _, _}) -> true;
+is_structural_pattern({atom, _, _}) -> true;
+is_structural_pattern({integer, _, _}) -> true;
+is_structural_pattern({float, _, _}) -> true;
+is_structural_pattern({string, _, _}) -> true;
+is_structural_pattern({char, _, _}) -> true;
+is_structural_pattern(_) -> false.
+
 infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0) ->
     infer_case(Mod, MFA, Anno, ScrutType, Clauses, Env0, Contracts, Warns0, Sites0, undefined).
 
@@ -1713,7 +1773,8 @@ infer_contract_call(Mod, CallerMFA, Line, {CalleeMod, _, _} = CalleeMFA, ArgAsts
             %% warning belongs to the callee, and its callers are not named for it
             AllTypes = maps:get({type_defs, all}, Contracts, maps:get({type_defs, CalleeMod}, Contracts, #{})),
             LookupFun = fun(Key) -> maps:find(Key, AllTypes) end,
-            RetType = case declared_return(Specs, length(ExpectedArgs), ArgTypes, CalleeMod, LookupFun) of
+            {CallerMod, _, _} = CallerMFA,
+            RetType = case declared_return(Specs, length(ExpectedArgs), ArgTypes, CallerMod, CalleeMod, LookupFun) of
                 any when Specs =:= [], CalleeMod =:= Mod, Exported =:= false,
                          length(Clauses) >= 2, length(Clauses) =< 8 ->
                     case should_specialize_local(CalleeMFA, ArgTypes, Inferred, Contracts) of
@@ -1811,6 +1872,10 @@ declared_return(Specs, Arity, ArgTypes) ->
 
 -spec declared_return([prisma_type:stype()], non_neg_integer(), [prisma_type:stype()], module() | undefined, prisma_type:type_lookup_fun() | undefined) -> prisma_type:stype().
 declared_return(Specs, Arity, ArgTypes, CalleeMod, LookupFun) ->
+    declared_return(Specs, Arity, ArgTypes, CalleeMod, CalleeMod, LookupFun).
+
+-spec declared_return([prisma_type:stype()], non_neg_integer(), [prisma_type:stype()], module() | undefined, module() | undefined, prisma_type:type_lookup_fun() | undefined) -> prisma_type:stype().
+declared_return(Specs, Arity, ArgTypes, CallerMod, CalleeMod, LookupFun) ->
     Clauses = [
         {Args, Ret}
      || Spec <- Specs,
@@ -1845,7 +1910,7 @@ declared_return(Specs, Arity, ArgTypes, CalleeMod, LookupFun) ->
             UnionRet = prisma_type:normalize_union(Matching),
             ExpandedRet = case LookupFun of
                 _ when is_function(LookupFun, 1) ->
-                    case prisma_type:expand(CalleeMod, CalleeMod, UnionRet, LookupFun) of
+                    case prisma_type:expand(CallerMod, CalleeMod, UnionRet, LookupFun) of
                         {ok, Expanded} -> Expanded;
                         {error, _} -> UnionRet
                     end;
@@ -1857,7 +1922,8 @@ declared_return(Specs, Arity, ArgTypes, CalleeMod, LookupFun) ->
 
 erase_unresolved({local_type, _, _}) -> any;
 erase_unresolved({remote_type, _, _, _}) -> any;
-erase_unresolved({opaque, _, _, _, _}) -> any;
+erase_unresolved({opaque, Mod, Name, Args, Body}) ->
+    {opaque, Mod, Name, [erase_unresolved(A) || A <- Args], erase_unresolved(Body)};
 erase_unresolved({recursive_ref, _, _}) -> any;
 erase_unresolved({var, _}) -> any;
 erase_unresolved({union, Members}) -> prisma_type:normalize_union([erase_unresolved(M) || M <- Members]);

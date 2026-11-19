@@ -192,7 +192,7 @@ external_contracts(Mod, InitialFuncs, ExternalSpecs, AllTypes) ->
                     {ok, #func_contract{} = C} ->
                         Acc#{Key => C};
                     {ok, Specs} when is_list(Specs) ->
-                        case prisma_infer:declared_return(Specs, A, [], M, LookupFun) of
+                        case prisma_infer:declared_return(Specs, A, [], Mod, M, LookupFun) of
                             any -> Acc;
                             Ret -> Acc#{Key => #func_contract{mfa = Key, declared_specs = Specs,
                                                               inferred_type = {fun_type, lists:duplicate(A, any), Ret}}}
