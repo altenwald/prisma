@@ -170,7 +170,21 @@ check_contract(Contract, Behaviours, Pplt, Mode) ->
                 CallWarnings = verify_gradual_calls(Contract, Pplt),
                 SpecBodyWarnings ++ CallWarnings
         end,
-    lists:usort(DiscrepancyWarnings ++ GradualWarnings).
+    DiscrepancyCallKeys = maps:from_list([
+        {{W#prisma_warning.mfa, W#prisma_warning.line, W#prisma_warning.callee, W#prisma_warning.arg_idx}, true}
+        || W <- DiscrepancyWarnings,
+           W#prisma_warning.callee =/= undefined,
+           W#prisma_warning.arg_idx =/= undefined
+    ]),
+    FilteredGradual = [
+        W || W <- GradualWarnings,
+        W#prisma_warning.kind =/= gradual_mismatch orelse
+            not maps:is_key(
+                {W#prisma_warning.mfa, W#prisma_warning.line, W#prisma_warning.callee, W#prisma_warning.arg_idx},
+                DiscrepancyCallKeys
+            )
+    ],
+    lists:usort(DiscrepancyWarnings ++ FilteredGradual).
 
 callback_specs_for({_Mod, F, A}, Behaviours, #prisma_pplt{modules = Mods}) ->
     lists:filtermap(

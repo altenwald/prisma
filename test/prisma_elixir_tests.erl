@@ -99,7 +99,8 @@ elixir_v1_dbgi_struct_and_ast_extraction_test() ->
     Warnings = prisma_checker:check_module(Summary, Pplt, #{mode => hybrid}),
     WarnMFAs = [{W#prisma_warning.kind, W#prisma_warning.mfa} || W <- Warnings],
     ?assert(lists:member({gradual_mismatch, {Mod, broken_id, 1}}, WarnMFAs)),
-    ?assert(lists:member({gradual_mismatch, {Mod, bad_call, 0}}, WarnMFAs)).
+    ?assert(lists:member({discrepancy, {Mod, bad_call, 0}}, WarnMFAs)),
+    ?assertNot(lists:member({gradual_mismatch, {Mod, bad_call, 0}}, WarnMFAs)).
 
 mix_task_ebin_resolution_test() ->
     TmpRoot = "/tmp/prisma_dev/fake_mix_proj",
@@ -1047,3 +1048,60 @@ oxbow_repeated_variable_pattern_test() ->
     Summary = prisma_abstract:parse_abstract_forms(Forms, [{changed, 2}], #module_summary{module = Mod, language = elixir}, #{}),
     Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
     ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid, oxbow => true})).
+
+%% Regression test for #15 (reported by @nikolauska): tuple shape guard retains exact tuple type from spec.
+tuple_shape_guard_preserves_spec_test() ->
+    Mod = 'Elixir.ReproTupleGuard',
+    SourceT = {type, 2, union, [
+        {atom, 2, local},
+        {type, 2, tuple, [{atom, 2, remote}, {type, 2, binary, []}]}
+    ]},
+    Forms = [
+        {attribute, 2, type, {source, SourceT, []}},
+        {attribute, 8, spec, {{path, 1}, [{type, 8, 'fun', [{type, 8, product, [{user_type, 8, source, []}]}, {type, 8, binary, []}]}]}},
+        {function, 9, path, 1, [
+            {clause, 9, [{var, 9, 'source'}],
+             [[{op, 9, 'orelse',
+                {op, 9, '==', {var, 9, 'source'}, {atom, 9, local}},
+                {op, 9, 'andalso',
+                 {call, 9, {remote, 9, {atom, 9, erlang}, {atom, 9, is_tuple}}, [{var, 9, 'source'}]},
+                 {op, 9, 'andalso',
+                  {op, 9, '==', {call, 9, {remote, 9, {atom, 9, erlang}, {atom, 9, tuple_size}}, [{var, 9, 'source'}]}, {integer, 9, 2}},
+                  {op, 9, 'andalso',
+                   {op, 9, '==', {call, 9, {remote, 9, {atom, 9, erlang}, {atom, 9, element}}, [{integer, 9, 1}, {var, 9, 'source'}]}, {atom, 9, remote}},
+                   {call, 9, {remote, 9, {atom, 9, erlang}, {atom, 9, is_binary}},
+                    [{call, 9, {remote, 9, {atom, 9, erlang}, {atom, 9, element}}, [{integer, 9, 2}, {var, 9, 'source'}]}]}}}}}
+             ]],
+             [{call, 9, {atom, 9, prefix}, [{var, 9, 'source'}]}]}
+        ]},
+        {attribute, 11, spec, {{prefix, 1}, [{type, 11, 'fun', [{type, 11, product, [{user_type, 11, source, []}]}, {type, 11, binary, []}]}]}},
+        {function, 12, prefix, 1, [
+            {clause, 12, [{atom, 12, local}], [], [{bin, 12, []}]},
+            {clause, 13, [{tuple, 13, [{atom, 13, remote}, {var, 13, 'host'}]}], [], [{var, 13, 'host'}]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{path, 1}, {prefix, 1}], #module_summary{module = Mod, language = elixir}, #{}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).
+
+%% Regression test for #16 (reported by @nikolauska): hybrid mode does not duplicate discrepancy + gradual_mismatch for the same call arg.
+hybrid_dedup_discrepancy_and_gradual_test() ->
+    Mod = 'Elixir.ReproDuplicate',
+    Forms = [
+        {attribute, 2, spec, {{only_binary, 1}, [{type, 2, 'fun', [{type, 2, product, [{type, 2, binary, []}]}, {atom, 2, ok}]}]}},
+        {function, 3, only_binary, 1, [
+            {clause, 3, [{var, 3, 'value'}],
+             [[{call, 3, {remote, 3, {atom, 3, erlang}, {atom, 3, is_binary}}, [{var, 3, 'value'}]}]],
+             [{atom, 3, ok}]}
+        ]},
+        {attribute, 5, spec, {{call, 1}, [{type, 5, 'fun', [{type, 5, product, [{type, 5, map, any}]}, {atom, 5, ok}]}]}},
+        {function, 6, call, 1, [
+            {clause, 6, [{map, 6, []}], [], [
+                {call, 6, {atom, 6, only_binary}, [{map, 6, []}]}
+            ]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{only_binary, 1}, {call, 1}], #module_summary{module = Mod, language = elixir}, #{}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    Warnings = prisma_checker:check_module(Summary, Pplt, #{mode => hybrid}),
+    ?assertMatch([#prisma_warning{kind = discrepancy, mfa = {Mod, call, 1}, callee = {Mod, only_binary, 1}, arg_idx = 1}], Warnings).
