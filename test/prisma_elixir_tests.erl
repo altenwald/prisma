@@ -773,3 +773,39 @@ elixir_if_assignment_narrows_var_test() ->
     Summary = prisma_abstract:parse_abstract_forms(Forms, [{get_pid, 0}, {use_pid, 1}, {check, 0}], #module_summary{module = Mod, language = elixir}, #{}),
     Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
     ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).
+
+local_function_shadows_bif_test() ->
+    Mod = 'Elixir.ReproLocalFunctions',
+    Forms = [
+        {function, 2, element, 2, [
+            {clause, 2, [{var, 2, 'text'}, {var, 2, '_suffix'}],
+             [[{call, 2, {remote, 2, {atom, 2, erlang}, {atom, 2, is_binary}}, [{var, 2, 'text'}]}]],
+             [{tuple, 2, [{atom, 2, ok}, {var, 2, 'text'}]}]}
+        ]},
+        {function, 3, size, 1, [
+            {clause, 3, [{var, 3, '_value'}], [], [{tuple, 3, [{integer, 3, 1}, {integer, 3, 2}]}]}
+        ]},
+        {function, 5, element_result, 0, [
+            {clause, 5, [], [], [
+                {match, 6, {tuple, 6, [{atom, 6, ok}, {var, 6, 'text'}]},
+                 {call, 6, {atom, 6, element}, [{bin, 6, [{bin_element, 6, {string, 6, "ok"}, default, default}]},
+                                                {bin, 6, []}]}},
+                {var, 7, 'text'}
+            ]}
+        ]},
+        {function, 10, size_result, 0, [
+            {clause, 10, [], [], [
+                {match, 11, {tuple, 11, [{var, 11, 'first'}, {var, 11, 'second'}]},
+                 {call, 11, {atom, 11, size}, [{atom, 11, input}]}},
+                {op, 12, '+', {var, 12, 'first'}, {var, 12, 'second'}}
+            ]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(
+        Forms,
+        [{element, 2}, {size, 1}, {element_result, 0}, {size_result, 0}],
+        #module_summary{module = Mod, language = elixir},
+        #{}
+    ),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).

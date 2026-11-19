@@ -1639,7 +1639,7 @@ has_unknown(_) -> false.
 
 infer_call(Mod, CallerMFA, Anno, Target, ArgAsts, ArgTypes, Env0, Contracts, Warns0, Sites0) ->
     Line = erl_anno:line(Anno),
-    case resolve_call_target(Mod, Target, length(ArgTypes)) of
+    case resolve_call_target(Mod, Target, length(ArgTypes), Contracts) of
         {ok, {erlang, ExitFn, Arity} = CalleeMFA}
           when (ExitFn =:= error andalso (Arity =:= 1 orelse Arity =:= 2 orelse Arity =:= 3));
                (ExitFn =:= exit andalso Arity =:= 1);
@@ -1848,14 +1848,20 @@ erase_unresolved({record, Name, Fields}) -> {record, Name, [{F, erase_unresolved
 erase_unresolved({fun_type, Args, Ret}) -> {fun_type, [erase_unresolved(A) || A <- Args], erase_unresolved(Ret)};
 erase_unresolved(Other) -> Other.
 
-resolve_call_target(_Mod, {remote, _, {atom, _, M}, {atom, _, F}}, Arity) ->
+resolve_call_target(_Mod, {remote, _, {atom, _, M}, {atom, _, F}}, Arity, _Contracts) ->
     {ok, {M, F, Arity}};
-resolve_call_target(Mod, {atom, _, F}, Arity) ->
-    case erl_internal:bif(F, Arity) of
-        true -> {ok, {erlang, F, Arity}};
-        false -> {ok, {Mod, F, Arity}}
+resolve_call_target(Mod, {atom, _, F}, Arity, Contracts) ->
+    LocalMFA = {Mod, F, Arity},
+    case maps:is_key(LocalMFA, Contracts) of
+        true ->
+            {ok, LocalMFA};
+        false ->
+            case erl_internal:bif(F, Arity) of
+                true -> {ok, {erlang, F, Arity}};
+                false -> {ok, LocalMFA}
+            end
     end;
-resolve_call_target(_Mod, _Dynamic, _Arity) ->
+resolve_call_target(_Mod, _Dynamic, _Arity, _Contracts) ->
     dynamic.
 
 apply_callee_signature(CallerMFA, Line, CalleeMFA, ArgAsts, ActualArgs, ExpectedArgs, RetType, Env0, Warns0, Sites) ->
