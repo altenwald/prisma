@@ -41,6 +41,12 @@ spec_and_type_forms(Mod, {Map, SpecsForms}) ->
 %% @doc Converts an Elixir `elixir_v1` metadata map and specs list into Erlang Abstract Format forms.
 -spec to_abstract_forms(module(), map(), [term()]) -> [term()].
 to_abstract_forms(Mod, Map, SpecsForms) ->
+    AttrForms = [
+        {attribute, 0, behaviour, BMod}
+        || {K, BMod} <- maps:get(attributes, Map, []),
+           K =:= behaviour orelse K =:= behavior,
+           is_atom(BMod)
+    ],
     StructForms = extract_struct_forms(Mod, maps:get(struct, Map, nil), SpecsForms),
     Defs = maps:get(definitions, Map, []),
     FunForms = lists:append([
@@ -48,7 +54,7 @@ to_abstract_forms(Mod, Map, SpecsForms) ->
         || {{_F, _A}, Kind, _Meta, _Clauses} = Def <- Defs,
            Kind =:= def orelse Kind =:= defp orelse Kind =:= defmacro orelse Kind =:= defmacrop
     ]),
-    SpecsForms ++ StructForms ++ FunForms.
+    AttrForms ++ SpecsForms ++ StructForms ++ FunForms.
 
 extract_struct_forms(Mod, StructFields, SpecsForms) when is_list(StructFields) ->
     HasExplicitT = lists:any(

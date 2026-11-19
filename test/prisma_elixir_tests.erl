@@ -839,3 +839,19 @@ try_after_and_receive_return_contracts_test() ->
     Warnings = prisma_checker:check_module(Summary, Pplt, #{mode => hybrid}),
     ?assertEqual(2, length(Warnings)),
     ?assert(lists:all(fun(#prisma_warning{kind = gradual_mismatch}) -> true; (_) -> false end, Warnings)).
+
+behaviour_callback_return_mismatch_test() ->
+    BehMod = 'Elixir.ReproBehaviour',
+    BehForms = [
+        {attribute, 2, callback, {{process, 1}, [{type, 2, 'fun', [{type, 2, product, [{type, 2, integer, []}]}, {type, 2, integer, []}]}]}}
+    ],
+    BehSummary = prisma_abstract:parse_abstract_forms(BehForms, [], #module_summary{module = BehMod, language = elixir}, #{}),
+    ImplMod = 'Elixir.ReproImplementation',
+    ImplForms = [
+        {attribute, 5, behaviour, BehMod},
+        {function, 7, process, 1, [{clause, 7, [{var, 7, '_value'}], [], [{atom, 7, wrong}]}]}
+    ],
+    ImplSummary = prisma_abstract:parse_abstract_forms(ImplForms, [{process, 1}], #module_summary{module = ImplMod, language = elixir}, #{}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{BehMod => BehSummary, ImplMod => ImplSummary}},
+    Warnings = prisma_checker:check_module(ImplSummary, Pplt, #{mode => hybrid}),
+    ?assertMatch([#prisma_warning{kind = gradual_mismatch, mfa = {ImplMod, process, 1}}], Warnings).

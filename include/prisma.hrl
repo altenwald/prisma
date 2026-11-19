@@ -59,7 +59,9 @@
     export_types = [] :: [{atom(), arity()}],
     types = #{} :: #{type_key() => #type_decl{}},
     functions = #{} :: #{mfa_key() => #func_contract{}},
-    file = undefined :: undefined | string()
+    file = undefined :: undefined | string(),
+    behaviours = [] :: [module()],
+    callbacks = #{} :: #{{atom(), arity()} => [prisma_type:stype()]}
 }).
 
 -record(prisma_pplt, {

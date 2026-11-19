@@ -185,6 +185,18 @@ upgrade_pplt(#prisma_pplt{modules = Mods} = Pplt) ->
 
 upgrade_module_summary(#module_summary{} = MS) ->
     MS;
+upgrade_module_summary({module_summary, Mod, Lang, Vsn, Md5, Exports, ExpTypes, Types, Funcs, File}) ->
+    #module_summary{
+        module = Mod,
+        language = Lang,
+        vsn = Vsn,
+        beam_md5 = Md5,
+        exports = Exports,
+        export_types = ExpTypes,
+        types = Types,
+        functions = Funcs,
+        file = File
+    };
 upgrade_module_summary({module_summary, Mod, Lang, Vsn, Md5, Exports, ExpTypes, Types, Funcs}) ->
     #module_summary{
         module = Mod,

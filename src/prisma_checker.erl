@@ -109,11 +109,11 @@ check_module(Summary, Pplt) ->
 
 %% @doc Analyzes a `#module_summary{}` using the configured mode (`hybrid`, `gradual`, `discrepancy`).
 -spec check_module(#module_summary{}, #prisma_pplt{}, map()) -> [#prisma_warning{}].
-check_module(#module_summary{file = File, functions = Funcs} = Summary, Pplt, Opts) ->
+check_module(#module_summary{file = File, functions = Funcs, behaviours = Behaviours} = Summary, Pplt, Opts) ->
     Mode = maps:get(mode, Opts, hybrid),
     ContractWarnings = lists:flatmap(
         fun({_MFA, Contract}) ->
-            check_contract(Contract, Pplt, Mode)
+            check_contract(Contract, Behaviours, Pplt, Mode)
         end,
         lists:sort(maps:to_list(Funcs))
     ),
@@ -132,7 +132,7 @@ attach_file_to_warnings(Warns, File) ->
         _ -> W
      end || W <- Warns].
 
-check_contract(Contract, Pplt, Mode) ->
+check_contract(Contract, Behaviours, Pplt, Mode) ->
     DiscrepancyWarnings =
         case Mode of
             gradual -> [];
@@ -143,17 +143,50 @@ check_contract(Contract, Pplt, Mode) ->
             discrepancy ->
                 [];
             _ ->
-                SpecBodyWarnings = verify_gradual_spec(
-                    Contract#func_contract.mfa,
-                    Contract#func_contract.declared_specs,
-                    Contract#func_contract.inferred_type,
-                    Contract#func_contract.line,
-                    Pplt
-                ),
+                SpecBodyWarnings = case Contract#func_contract.declared_specs of
+                    [] ->
+                        lists:flatmap(
+                            fun({BMod, CBSpecs}) ->
+                                verify_gradual_spec(
+                                    Contract#func_contract.mfa,
+                                    BMod,
+                                    CBSpecs,
+                                    Contract#func_contract.inferred_type,
+                                    Contract#func_contract.line,
+                                    Pplt
+                                )
+                            end,
+                            callback_specs_for(Contract#func_contract.mfa, Behaviours, Pplt)
+                        );
+                    DeclaredSpecs ->
+                        verify_gradual_spec(
+                            Contract#func_contract.mfa,
+                            DeclaredSpecs,
+                            Contract#func_contract.inferred_type,
+                            Contract#func_contract.line,
+                            Pplt
+                        )
+                end,
                 CallWarnings = verify_gradual_calls(Contract, Pplt),
                 SpecBodyWarnings ++ CallWarnings
         end,
     lists:usort(DiscrepancyWarnings ++ GradualWarnings).
+
+callback_specs_for({_Mod, F, A}, Behaviours, #prisma_pplt{modules = Mods}) ->
+    lists:filtermap(
+        fun(BMod) ->
+            case maps:find(BMod, Mods) of
+                {ok, #module_summary{callbacks = CBs}} ->
+                    case maps:find({F, A}, CBs) of
+                        {ok, [_ | _] = Specs} -> {true, {BMod, Specs}};
+                        _ -> false
+                    end;
+                _ ->
+                    false
+            end
+        end,
+        Behaviours
+    ).
 
 collect_discrepancies(#func_contract{mfa = {CallerMod, _, _} = CallerMFA, local_warnings = LocalWarns, call_sites = Sites}, Pplt) ->
     InterModWarns = lists:flatmap(
@@ -357,12 +390,15 @@ check_vectors(Vectors, ActualArgs, Check) ->
             end
     end.
 
-verify_gradual_spec(_MFA, [], _Inferred, _Line, _Pplt) ->
+verify_gradual_spec({Mod, _, _} = MFA, SpecClauses, Inferred, Line, Pplt) ->
+    verify_gradual_spec(MFA, Mod, SpecClauses, Inferred, Line, Pplt).
+
+verify_gradual_spec(_MFA, _SpecMod, [], _Inferred, _Line, _Pplt) ->
     [];
-verify_gradual_spec({Mod, _, _} = MFA, [_ | _] = SpecClauses, {fun_type, _InferredArgs, InferredRet}, Line, Pplt) ->
+verify_gradual_spec(MFA, SpecMod, [_ | _] = SpecClauses, {fun_type, _InferredArgs, InferredRet}, Line, Pplt) ->
     DeclaredReturns = lists:filtermap(
         fun(Clause) ->
-            case extract_spec_return(Mod, Clause, Pplt) of
+            case extract_spec_return(SpecMod, Clause, Pplt) of
                 {ok, Ret} -> {true, Ret};
                 error -> false
             end
@@ -395,7 +431,7 @@ verify_gradual_spec({Mod, _, _} = MFA, [_ | _] = SpecClauses, {fun_type, _Inferr
                     }]
             end
     end;
-verify_gradual_spec(_MFA, _Specs, _Inferred, _Line, _Pplt) ->
+verify_gradual_spec(_MFA, _SpecMod, _Specs, _Inferred, _Line, _Pplt) ->
     [].
 
 extract_spec_return(Mod, SpecClause, Pplt) ->

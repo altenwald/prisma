@@ -216,32 +216,38 @@ parse_abstract_forms(Forms, Exports, Summary) ->
     #module_summary{}.
 parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types = AttrExpTypes} = Summary, Opts) ->
     ExportSet = maps:from_list([{FA, true} || FA <- Exports]),
-    {RawTypes, FormExpTypes, Specs, InitialFuncs, ClausesByMFA, _GenSet, RecDefs} = lists:foldl(
-        fun(Form, {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc}) ->
+    {RawTypes, FormExpTypes, Specs, InitialFuncs, ClausesByMFA, _GenSet, RecDefs, Behaviours, Callbacks} = lists:foldl(
+        fun(Form, {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc, BAcc, CBAcc}) ->
             case Form of
                 {attribute, _Anno, compiler_generated, {F, A}} ->
-                    {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc#{{Mod, F, A} => true}, RAcc};
+                    {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc#{{Mod, F, A} => true}, RAcc, BAcc, CBAcc};
                 {attribute, _Anno, AttrName, AttrVal}
                   when AttrName =:= compile; AttrName =:= dialyzer ->
-                    {TAcc, ETAcc, SAcc, FAcc, CAcc, add_suppressed_funcs(Mod, AttrVal, GAcc), RAcc};
+                    {TAcc, ETAcc, SAcc, FAcc, CAcc, add_suppressed_funcs(Mod, AttrVal, GAcc), RAcc, BAcc, CBAcc};
                 {attribute, _Anno, export_type, ExpList} when is_list(ExpList) ->
-                    {TAcc, ExpList ++ ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc};
+                    {TAcc, ExpList ++ ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc, BAcc, CBAcc};
+                {attribute, _Anno, Attr, BMod}
+                  when (Attr =:= behaviour orelse Attr =:= behavior), is_atom(BMod) ->
+                    {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc, [BMod | BAcc], CBAcc};
                 {attribute, _Anno, Kind, {_TypeName, _TypeDef, _TypeArgs} = TypeAttr}
                   when Kind =:= type; Kind =:= opaque; Kind =:= nominal ->
                     Decl = prisma_type:from_type_attr(Mod, Kind, TypeAttr),
                     Key = Decl#type_decl.key,
-                    {TAcc#{Key => Decl}, ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc};
+                    {TAcc#{Key => Decl}, ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc, BAcc, CBAcc};
                 {attribute, _Anno, record, {RecName, FieldList}} ->
                     RecSize = 1 + length(FieldList),
-                    {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc#{RecName => RecSize}};
+                    {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc#{RecName => RecSize}, BAcc, CBAcc};
+                {attribute, _Anno, callback, {{F, A}, SpecClauses}} ->
+                    NormCallbacks = [prisma_type:from_abstract(S) || S <- SpecClauses],
+                    {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc, BAcc, CBAcc#{{F, A} => NormCallbacks}};
                 {attribute, _Anno, spec, {{F, A}, SpecClauses}} ->
                     Key = {Mod, F, A},
                     NormSpecs = [prisma_type:from_abstract(S) || S <- SpecClauses],
-                    {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc, CAcc, GAcc, RAcc};
+                    {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc, CAcc, GAcc, RAcc, BAcc, CBAcc};
                 {attribute, _Anno, spec, {{M, F, A}, SpecClauses}} ->
                     Key = {M, F, A},
                     NormSpecs = [prisma_type:from_abstract(S) || S <- SpecClauses],
-                    {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc, CAcc, GAcc, RAcc};
+                    {TAcc, ETAcc, SAcc#{Key => NormSpecs}, FAcc, CAcc, GAcc, RAcc, BAcc, CBAcc};
                 {function, Anno, F, A, Clauses} ->
                     Key = {Mod, F, A},
                     Line = erl_anno:line(Anno),
@@ -259,12 +265,12 @@ parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types 
                         compiler_generated = IsGen,
                         line = Line
                     },
-                    {TAcc, ETAcc, SAcc, FAcc#{Key => Contract}, CAcc#{Key => {Line, Clauses}}, GAcc, RAcc};
+                    {TAcc, ETAcc, SAcc, FAcc#{Key => Contract}, CAcc#{Key => {Line, Clauses}}, GAcc, RAcc, BAcc, CBAcc};
                 _ ->
-                    {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc}
+                    {TAcc, ETAcc, SAcc, FAcc, CAcc, GAcc, RAcc, BAcc, CBAcc}
             end
         end,
-        {#{}, AttrExpTypes, #{}, #{}, #{}, #{}, #{}},
+        {#{}, AttrExpTypes, #{}, #{}, #{}, #{}, #{}, [], #{}},
         Forms
     ),
     AllExpTypes = lists:usort(FormExpTypes),
@@ -296,7 +302,9 @@ parse_abstract_forms(Forms, Exports, #module_summary{module = Mod, export_types 
         export_types = AllExpTypes,
         types = MarkedTypes,
         functions = InferredFuncs,
-        file = ResolvedFile
+        file = ResolvedFile,
+        behaviours = lists:usort(Behaviours),
+        callbacks = Callbacks
     }.
 
 merge_specs_into_funcs(Mod, ExportSet, Specs, Funcs) ->
