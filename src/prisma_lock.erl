@@ -21,6 +21,7 @@
     building_notice/2,
     usable/3,
     cache_path/3,
+    cache_path/4,
     otp_cache_path/1,
     ensure_otp_pplt/2,
     elixir_cache_path/1,
@@ -33,6 +34,7 @@
 
 -type dep_entry() :: #{
     name := binary(),
+    app => binary(),
     version := binary(),
     source := hex | git
 }.
@@ -113,8 +115,10 @@ parse_mix_line(Line) ->
     HexPattern = "^\\s*\"([^\"]+)\"\\s*:\\s*\\{:hex,\\s*:([a-zA-Z0-9_]+),\\s*\"([^\"]+)\"",
     GitPattern = "^\\s*\"([^\"]+)\"\\s*:\\s*\\{:git,\\s*\"[^\"]+\",\\s*\"([^\"]+)\"",
     case re:run(Line, HexPattern, [{capture, [1, 2, 3], binary}]) of
-        {match, [_Key, Pkg, Vsn]} ->
-            {true, #{name => Pkg, version => Vsn, source => hex}};
+        {match, [Key, Key, Vsn]} ->
+            {true, #{name => Key, version => Vsn, source => hex}};
+        {match, [Key, Pkg, Vsn]} ->
+            {true, #{name => Pkg, app => Key, version => Vsn, source => hex}};
         nomatch ->
             case re:run(Line, GitPattern, [{capture, [1, 2], binary}]) of
                 {match, [Name, Ref]} ->
@@ -162,6 +166,13 @@ default_cache_dir() ->
 -spec cache_path(file:filename_all(), binary(), binary()) -> string().
 cache_path(CacheDir, Name, Version) ->
     FileName = binary_to_list(<<Name/binary, "_", Version/binary, ".pplt">>),
+    filename:join(unicode:characters_to_list(CacheDir), FileName).
+
+%% @doc Environment-scoped cache path: `<dir>/<name>_<version>_<env>.pplt`.
+-spec cache_path(file:filename_all(), binary(), binary(), file:filename_all()) -> string().
+cache_path(CacheDir, Name, Version, Env) ->
+    EnvBin = unicode:characters_to_binary(Env),
+    FileName = binary_to_list(<<Name/binary, "_", Version/binary, "_", EnvBin/binary, ".pplt">>),
     filename:join(unicode:characters_to_list(CacheDir), FileName).
 
 %% @doc Where what Prisma builds is kept: the `_build` directory of the project, next to `rebar.lock` / `mix.lock`.
@@ -345,19 +356,23 @@ resolve_project_pplts(ProjectRoot, Opts) ->
         false -> []
     end,
     DepPplts = lists:append(
-        [resolve_single_dep(ProjectRoot, CacheDir, Name, Vsn) || #{name := Name, version := Vsn} <- Deps]
+        [resolve_single_dep(ProjectRoot, CacheDir, Dep, Opts) || Dep <- Deps]
     ),
     {ok, prisma_pplt:merge(Otp ++ Elixir ++ DepPplts)}.
 
-resolve_single_dep(ProjectRoot, CacheDir, Name, Vsn) ->
-    case usable_shipped(ProjectRoot, Name) of
+resolve_single_dep(ProjectRoot, CacheDir, #{name := Name, version := Vsn} = Dep, Opts) ->
+    App = maps:get(app, Dep, Name),
+    case usable_shipped(ProjectRoot, App) of
         [_ | _] = Shipped ->
             Shipped;
         [] ->
-            Path = cache_path(CacheDir, Name, Vsn),
+            Path = case maps:find(env, Opts) of
+                {ok, Env} -> cache_path(CacheDir, Name, Vsn, Env);
+                error -> cache_path(CacheDir, Name, Vsn)
+            end,
             Result = case filelib:is_regular(Path) of
                 true -> prisma_pplt:load(Path);
-                false -> build_and_cache_local_dep(ProjectRoot, Path, Name, Vsn)
+                false -> build_and_cache_local_dep(ProjectRoot, Path, App, Name, Vsn, Opts)
             end,
             [P || {ok, P} <- [Result]]
     end.
@@ -387,14 +402,20 @@ why(stale) -> "it does not match the sources of the dependency (it is out of dat
 why({otp_release, Made, Running}) ->
     io_lib:format("it was made with OTP ~s and this is OTP ~s (only the same release or the two before are used)", [Made, Running]).
 
-build_and_cache_local_dep(ProjectRoot, CachePath, Name, Vsn) ->
+build_and_cache_local_dep(ProjectRoot, CachePath, App, Name, Vsn, Opts) ->
     Root = unicode:characters_to_list(ProjectRoot),
-    NameStr = binary_to_list(Name),
-    Pattern = filename:join([Root, "_build", "*", "lib", NameStr, "ebin", "*.beam"]),
-    case filelib:wildcard(Pattern) of
+    AppStr = binary_to_list(App),
+    Beams = case maps:find(env, Opts) of
+        {ok, Env} ->
+            EnvStr = unicode:characters_to_list(Env),
+            filelib:wildcard(filename:join([Root, "_build", EnvStr, "lib", AppStr, "ebin", "*.beam"]));
+        error ->
+            filelib:wildcard(filename:join([Root, "_build", "*", "lib", AppStr, "ebin", "*.beam"]))
+    end,
+    case Beams of
         [] ->
             error;
-        Beams ->
+        _ ->
             notice(CachePath, length(Beams)),
             case prisma_pplt:from_beams(Beams, #{package => Name, package_vsn => Vsn}) of
                 {ok, Pplt} ->
@@ -428,7 +449,13 @@ sort_deps(Deps) ->
 discover_project_ebins(ProjectRoot, Opts) ->
     Root = unicode:characters_to_list(ProjectRoot),
     Deps = discover_deps(Root),
-    LockDepNames = maps:from_list([{binary_to_list(Name), true} || #{name := Name} <- Deps]),
+    LockDepNames = maps:from_list(lists:append([
+        case Dep of
+            #{name := Name, app := App} -> [{binary_to_list(Name), true}, {binary_to_list(App), true}];
+            #{name := Name} -> [{binary_to_list(Name), true}]
+        end
+        || Dep <- Deps
+    ])),
     DirDepNames = maps:from_list([{filename:basename(D), true} || D <- filelib:wildcard(filename:join([Root, "deps", "*"]))]),
     DepNames = maps:merge(LockDepNames, DirDepNames),
     CandidateEbins = candidate_build_ebins(Root, Opts),

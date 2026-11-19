@@ -399,3 +399,56 @@ building_notice_is_one_plain_line_test() ->
 
 rebar3_message_counts_errors_and_warnings_test() ->
     ?assertEqual("Prisma found 3 error(s) and 2 warning(s)", lists:flatten(prisma_prv:format_error({problems_found, 3, 2}))).
+
+%% Regression test for #6 (reported by @houllette): aliased mix.lock apps locate _build/<env>/lib/<app>.
+mix_lock_app_alias_resolves_ebin_test() ->
+    Lock = <<"%{\n  \"demo_app\": {:hex, :demo_package, \"1.0.0\", \"checksum\", [:mix], [], \"hexpm\", \"checksum\"},\n}\n">>,
+    ?assertEqual(
+        {ok, [#{name => <<"demo_package">>, app => <<"demo_app">>, version => <<"1.0.0">>, source => hex}]},
+        prisma_lock:parse_mix_lock(Lock)
+    ),
+    TmpProj = "/tmp/prisma_dev/tmp_alias_proj",
+    TmpCache = "/tmp/prisma_dev/tmp_alias_cache",
+    os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache),
+    DepEbin = filename:join([TmpProj, "_build", "dev", "lib", "demo_app", "ebin"]),
+    ok = filelib:ensure_dir(filename:join(DepEbin, "dummy")),
+    ok = filelib:ensure_dir(filename:join(TmpCache, "dummy")),
+    ok = file:write_file(filename:join(TmpProj, "mix.lock"), Lock),
+    ok = file:write_file(filename:join(DepEbin, "dep_lib.beam"), dep_lib_beam()),
+    {ok, Pplt} = prisma_lock:resolve_project_pplts(TmpProj, #{cache_dir => TmpCache, env => "dev", elixir => false}),
+    ?assert(lists:member(dep_lib, prisma_pplt:modules(Pplt))),
+    os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache).
+
+%% Regression test for #7 (reported by @houllette): dependency BEAMs and caches are isolated per Mix env.
+mix_env_isolates_dep_pplt_and_cache_test() ->
+    TmpProj = "/tmp/prisma_dev/tmp_env_proj",
+    TmpCache = "/tmp/prisma_dev/tmp_env_cache",
+    os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache),
+    DevEbin = filename:join([TmpProj, "_build", "dev", "lib", "demo_app", "ebin"]),
+    TestEbin = filename:join([TmpProj, "_build", "test", "lib", "demo_app", "ebin"]),
+    ok = filelib:ensure_dir(filename:join(DevEbin, "dummy")),
+    ok = filelib:ensure_dir(filename:join(TestEbin, "dummy")),
+    ok = filelib:ensure_dir(filename:join(TmpCache, "dummy")),
+    Lock = <<"%{\n  \"demo_app\": {:hex, :demo_app, \"1.0.0\", \"checksum\", [:mix], [], \"hexpm\", \"checksum\"},\n}\n">>,
+    ok = file:write_file(filename:join(TmpProj, "mix.lock"), Lock),
+    {ok, dep_env_mod, DevBin} = compile:forms([
+        {attribute, 1, module, dep_env_mod},
+        {attribute, 1, export, [{val, 0}]},
+        {attribute, 2, spec, {{val, 0}, [{type, 2, 'fun', [{type, 2, product, []}, {type, 2, integer, []}]}]}},
+        {function, 2, val, 0, [{clause, 2, [], [], [{integer, 2, 1}]}]}
+    ], [binary, debug_info]),
+    {ok, dep_env_mod, TestBin} = compile:forms([
+        {attribute, 1, module, dep_env_mod},
+        {attribute, 1, export, [{val, 0}]},
+        {attribute, 2, spec, {{val, 0}, [{type, 2, 'fun', [{type, 2, product, []}, {type, 2, atom, []}]}]}},
+        {function, 2, val, 0, [{clause, 2, [], [], [{atom, 2, changed}]}]}
+    ], [binary, debug_info]),
+    ok = file:write_file(filename:join(DevEbin, "dep_env_mod.beam"), DevBin),
+    ok = file:write_file(filename:join(TestEbin, "dep_env_mod.beam"), TestBin),
+    {ok, PpltDev} = prisma_lock:resolve_project_pplts(TmpProj, #{cache_dir => TmpCache, env => "dev", elixir => false}),
+    {ok, PpltTest} = prisma_lock:resolve_project_pplts(TmpProj, #{cache_dir => TmpCache, env => "test", elixir => false}),
+    #func_contract{declared_specs = DevSpecs} = maps:get({dep_env_mod, val, 0}, (maps:get(dep_env_mod, PpltDev#prisma_pplt.modules))#module_summary.functions),
+    #func_contract{declared_specs = TestSpecs} = maps:get({dep_env_mod, val, 0}, (maps:get(dep_env_mod, PpltTest#prisma_pplt.modules))#module_summary.functions),
+    ?assertMatch([{fun_type, [], integer}], DevSpecs),
+    ?assertMatch([{fun_type, [], atom}], TestSpecs),
+    os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache).
