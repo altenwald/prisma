@@ -318,6 +318,10 @@ unproven_gap({binary, _, _} = Actual, {binary, _, _} = Expected) ->
     prisma_type:meet(Actual, Expected) =/= none;
 unproven_gap({list, Elem}, {nonempty_list, ExpectedElem}) ->
     prisma_type:consistent_subtype(Elem, ExpectedElem);
+unproven_gap({map, ActualFields} = Actual, {map, _} = Expected) ->
+    lists:any(fun({assoc, _, _}) -> true; (_) -> false end, ActualFields) andalso
+        prisma_type:consistent_subtype(Expected, Actual) andalso
+        prisma_type:meet(Actual, Expected) =/= none;
 unproven_gap(_, _) ->
     false.
 

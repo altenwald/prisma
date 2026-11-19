@@ -1105,3 +1105,37 @@ hybrid_dedup_discrepancy_and_gradual_test() ->
     Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
     Warnings = prisma_checker:check_module(Summary, Pplt, #{mode => hybrid}),
     ?assertMatch([#prisma_warning{kind = discrepancy, mfa = {Mod, call, 1}, callee = {Mod, only_binary, 1}, arg_idx = 1}], Warnings).
+
+open_map_struct_supertype_unproven_gap_test() ->
+    %% Ecto.Schema.t()-style open map `%{atom() => term(), __struct__: atom()}` returned against `%MyStruct{}`
+    EctoMod = 'Elixir.FakeChangeset',
+    EctoForms = [
+        {attribute, 1, spec, {{apply_action, 1}, [{type, 1, 'fun', [
+            {type, 1, product, [{type, 1, any, []}]},
+            {type, 1, map, [
+                {type, 1, map_field_exact, {atom, 1, '__struct__'}, {type, 1, atom, []}},
+                {type, 1, map_field_assoc, {type, 1, atom, []}, {type, 1, any, []}}
+            ]}
+        ]}]}}
+    ],
+    EctoSummary = prisma_abstract:parse_abstract_forms(EctoForms, [], #module_summary{module = EctoMod, language = elixir}, #{}),
+    ApplySpec = (maps:get({EctoMod, apply_action, 1}, EctoSummary#module_summary.functions))#func_contract.declared_specs,
+    Mod = 'Elixir.MyHostConfig',
+    Forms = [
+        {attribute, 2, spec, {{make, 1}, [{type, 2, 'fun', [
+            {type, 2, product, [{type, 2, any, []}]},
+            {type, 2, map, [
+                {type, 2, map_field_exact, {atom, 2, '__struct__'}, {atom, 2, Mod}},
+                {type, 2, map_field_exact, {atom, 2, name}, {type, 2, binary, []}}
+            ]}
+        ]}]}},
+        {function, 3, make, 1, [
+            {clause, 3, [{var, 3, 'cs'}], [], [
+                {call, 3, {remote, 3, {atom, 3, EctoMod}, {atom, 3, apply_action}}, [{var, 3, 'cs'}]}
+            ]}
+        ]}
+    ],
+    Summary = prisma_abstract:parse_abstract_forms(Forms, [{make, 1}], #module_summary{module = Mod, language = elixir},
+        #{external_specs => #{{EctoMod, apply_action, 1} => ApplySpec}}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{EctoMod => EctoSummary, Mod => Summary}},
+    ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).
