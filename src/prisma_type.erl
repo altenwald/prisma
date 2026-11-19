@@ -340,7 +340,7 @@ consistent_subtype(_, none) -> false;
 consistent_subtype(Same, Same) -> true;
 consistent_subtype({union, SubMembers}, Super) ->
     lists:all(fun(M) -> consistent_subtype(M, Super) end, SubMembers);
-consistent_subtype({tuple, Elems} = Sub, {union, SuperMembers} = Super) ->
+consistent_subtype({tuple, Elems} = Sub, {union, SuperMembers}) ->
     case lists:any(fun has_split_union/1, Elems) of
         false ->
             lists:any(fun(M) -> consistent_subtype(Sub, M) end, SuperMembers);
@@ -351,7 +351,13 @@ consistent_subtype({tuple, Elems} = Sub, {union, SuperMembers} = Super) ->
                 too_many ->
                     lists:any(fun(M) -> consistent_subtype(Sub, M) end, SuperMembers);
                 Combinations ->
-                    lists:all(fun(Combination) -> consistent_subtype({tuple, Combination}, Super) end, Combinations)
+                    lists:all(
+                        fun(Combination) ->
+                            CombTuple = {tuple, Combination},
+                            lists:any(fun(M) -> consistent_subtype(CombTuple, M) end, SuperMembers)
+                        end,
+                        Combinations
+                    )
             end
     end;
 consistent_subtype({improper_list, _E1, T1} = Sub, {union, SuperMembers} = Super) ->
@@ -756,9 +762,14 @@ has_split_union(_) -> false.
 %% Every way of choosing one member of each union element of a tuple, or `too_many` past 32.
 tuple_combinations(Elems) ->
     Options = [tuple_elem_options(E) || E <- Elems],
-    case lists:foldl(fun(Os, N) -> N * length(Os) end, 1, Options) =< 32 of
-        true -> combinations(Options);
-        false -> too_many
+    case lists:member(too_many, Options) of
+        true ->
+            too_many;
+        false ->
+            case lists:foldl(fun(Os, N) -> N * length(Os) end, 1, Options) =< 32 of
+                true -> combinations(Options);
+                false -> too_many
+            end
     end.
 
 tuple_elem_options({union, Ms}) ->
@@ -769,7 +780,7 @@ tuple_elem_options({tuple, InnerElems} = T) ->
             [T];
         true ->
             case tuple_combinations(InnerElems) of
-                too_many -> [T];
+                too_many -> too_many;
                 Combs -> [{tuple, C} || C <- Combs]
             end
     end;
