@@ -72,6 +72,7 @@ is_compiler_generated_name(Fun) when is_atom(Fun) ->
     Str = atom_to_list(Fun),
     case Str of
         "__" ++ _ -> true; %% Elixir compiler/macro generated (__info__, __struct__, etc.)
+        "MACRO-" ++ _ -> true; %% Elixir defmacro/defmacrop expanded at compile time
         _ ->
             string:str(Str, "overridable") > 0
     end.

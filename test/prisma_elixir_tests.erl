@@ -1174,3 +1174,64 @@ external_macro_compiler_generated_with_elixir_def_context_test() ->
     ?assertEqual(true, FC#func_contract.compiler_generated),
     Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
     ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).
+
+dynamic_struct_pattern_var_test() ->
+    Mod = 'Elixir.DynamicStructPat',
+    StructMod = 'Elixir.SomeError',
+    Map = #{
+        module => Mod,
+        file => <<"lib/dyn_struct.ex">>,
+        attributes => [],
+        struct => nil,
+        definitions => [
+            {{handle, 1}, def, [{line, 1}], [
+                {[{line, 1}],
+                 [{'=', [{line, 1}], [
+                     {'%', [{line, 1}], [{mod, [{line, 1}], nil}, {'%{}', [{line, 1}], []}]},
+                     {s, [{line, 1}], nil}
+                 ]}],
+                 [[{'=:=', [{line, 1}], [{mod, [{line, 1}], nil}, StructMod]}]],
+                 {take_err, [{line, 1}], [{s, [{line, 1}], nil}]}}
+            ]},
+            {{take_err, 1}, defp, [{line, 2}], [
+                {[{line, 2}],
+                 [{'%', [{line, 2}], [StructMod, {'%{}', [{line, 2}], []}]}],
+                 [],
+                 {ok, [{line, 2}], []}}
+            ]}
+        ]
+    },
+    Summary = prisma_elixir:from_elixir_dbgi(
+        Mod,
+        {debug_info_v1, elixir_erl, {elixir_v1, Map, []}},
+        [{handle, 1}],
+        #module_summary{module = Mod, language = elixir},
+        #{}
+    ),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => discrepancy})).
+
+defmacrop_not_flagged_as_oxbow_test() ->
+    Mod = 'Elixir.MacroOxbowTest',
+    Map = #{
+        module => Mod,
+        file => <<"lib/macro_oxbow.ex">>,
+        attributes => [],
+        struct => nil,
+        definitions => [
+            {{is_pos, 1}, defmacrop, [{line, 1}], [
+                {[{line, 1}],
+                 [{x, [{line, 1}], nil}],
+                 [],
+                 {x, [{line, 1}], nil}}
+            ]}
+        ]
+    },
+    Summary = prisma_elixir:from_elixir_dbgi(
+        Mod,
+        {debug_info_v1, elixir_erl, {elixir_v1, Map, []}},
+        [],
+        #module_summary{module = Mod, language = elixir},
+        #{}
+    ),
+    ?assertEqual([], prisma_oxbow:check_module(Summary)).

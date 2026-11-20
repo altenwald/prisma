@@ -173,8 +173,12 @@ translate_pattern({'%', Meta, [{'_', _, _}, {'%{}', _, Pairs}]}) when is_list(Pa
     {map, Anno, [TagField | translate_map_pat_pairs(Anno, Pairs)]};
 translate_pattern({'%', Meta, [StructModAst, {'%{}', _, Pairs}]}) when is_list(Pairs) ->
     Anno = meta_anno(Meta),
-    StructMod = unwrap_atom(StructModAst),
-    TagField = {map_field_exact, Anno, {atom, Anno, '__struct__'}, {atom, Anno, StructMod}},
+    TagVal = case StructModAst of
+        Mod when is_atom(Mod) -> {atom, Anno, Mod};
+        {'__aliases__', _, _} -> {atom, Anno, unwrap_atom(StructModAst)};
+        _ -> translate_pattern(StructModAst)
+    end,
+    TagField = {map_field_exact, Anno, {atom, Anno, '__struct__'}, TagVal},
     {map, Anno, [TagField | translate_map_pat_pairs(Anno, Pairs)]};
 translate_pattern({'%{}', Meta, Pairs}) when is_list(Pairs) ->
     Anno = meta_anno(Meta),
