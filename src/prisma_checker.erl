@@ -132,6 +132,8 @@ attach_file_to_warnings(Warns, File) ->
         _ -> W
      end || W <- Warns].
 
+check_contract(#func_contract{compiler_generated = true}, _Behaviours, _Pplt, _Mode) ->
+    [];
 check_contract(Contract, Behaviours, Pplt, Mode) ->
     DiscrepancyWarnings =
         case Mode of

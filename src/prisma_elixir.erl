@@ -49,12 +49,26 @@ to_abstract_forms(Mod, Map, SpecsForms) ->
     ],
     StructForms = extract_struct_forms(Mod, maps:get(struct, Map, nil), SpecsForms),
     Defs = maps:get(definitions, Map, []),
+    GenAttrs = [
+        {attribute, 0, compiler_generated, {F, A}}
+        || {{F, A}, Kind, Meta, _Clauses} <- Defs,
+           Kind =:= def orelse Kind =:= defp,
+           is_list(Meta),
+           lists:any(
+               fun({context, CtxMod}) when is_atom(CtxMod), CtxMod =/= Mod ->
+                       lists:prefix("Elixir.", atom_to_list(CtxMod));
+                  (_) ->
+                       false
+               end,
+               Meta
+           )
+    ],
     FunForms = lists:append([
         translate_definition(Def)
         || {{_F, _A}, Kind, _Meta, _Clauses} = Def <- Defs,
            Kind =:= def orelse Kind =:= defp orelse Kind =:= defmacro orelse Kind =:= defmacrop
     ]),
-    AttrForms ++ SpecsForms ++ StructForms ++ FunForms.
+    AttrForms ++ GenAttrs ++ SpecsForms ++ StructForms ++ FunForms.
 
 extract_struct_forms(Mod, StructFields, SpecsForms) when is_list(StructFields) ->
     HasExplicitT = lists:any(

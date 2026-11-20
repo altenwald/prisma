@@ -455,6 +455,15 @@ subtype_non_numeric(_, _) ->
     false.
 
 subtype_map_fields(SubFields, SuperFields) ->
+    case {lists:keyfind({atom_lit, '__struct__'}, 2, SubFields),
+          lists:keyfind({atom_lit, '__struct__'}, 2, SuperFields)} of
+        {{exact, _, {atom_lit, S1}}, {exact, _, {atom_lit, S2}}} when S1 =/= S2 ->
+            false;
+        _ ->
+            subtype_map_fields_body(SubFields, SuperFields)
+    end.
+
+subtype_map_fields_body(SubFields, SuperFields) ->
     ReqSuper = [{K, V} || {exact, K, V} <- SuperFields],
     AllSuper = [{K, V} || {_Kind, K, V} <- SuperFields],
     ExactSub = #{K => V || {exact, K, V} <- SubFields},
@@ -920,6 +929,8 @@ expand_remote(CallerMod, TargetMod, Name, Args, LookupFun, Visited) ->
             case maps:is_key(Key, Visited) of
                 true ->
                     {ok, {recursive_ref, Key, ExpArgs}};
+                false when map_size(Visited) >= 5 ->
+                    {ok, {remote_type, TargetMod, Name, ExpArgs}};
                 false ->
                     case LookupFun(Key) of
                         {ok, #type_decl{kind = Kind, params = Params, body = Body}} ->

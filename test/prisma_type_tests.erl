@@ -428,3 +428,16 @@ improper_iodata_subtyping_test_() ->
     [?_assert(prisma_type:consistent_subtype({improper_list, any, {binary, 0, 8}}, Iodata)),
      ?_assert(prisma_type:consistent_subtype({improper_list, {int_range, 0, 255}, {binary, 8, 0}}, Iodata)),
      ?_assertNot(prisma_type:consistent_subtype({improper_list, any, atom}, Iodata))].
+
+expand_remote_depth_cap_test() ->
+    %% Deep mutual/chained remote type expansion terminates without blowing up
+    Lookup = fun({m, t0, 0}) -> {ok, {type_decl, {m, t0, 0}, type, true, [], {remote_type, m, t1, []}}};
+                ({m, t1, 0}) -> {ok, {type_decl, {m, t1, 0}, type, true, [], {remote_type, m, t2, []}}};
+                ({m, t2, 0}) -> {ok, {type_decl, {m, t2, 0}, type, true, [], {remote_type, m, t3, []}}};
+                ({m, t3, 0}) -> {ok, {type_decl, {m, t3, 0}, type, true, [], {remote_type, m, t4, []}}};
+                ({m, t4, 0}) -> {ok, {type_decl, {m, t4, 0}, type, true, [], {remote_type, m, t5, []}}};
+                ({m, t5, 0}) -> {ok, {type_decl, {m, t5, 0}, type, true, [], atom}};
+                (_) -> error
+             end,
+    {ok, Res} = prisma_type:expand(m, m, {remote_type, m, t0, []}, Lookup),
+    ?assertMatch({remote_type, m, t5, []}, Res).

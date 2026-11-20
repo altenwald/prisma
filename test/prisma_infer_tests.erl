@@ -1208,3 +1208,53 @@ guard_range_and_bitstring_narrowing_test() ->
     {ok, Ws} = prisma:analyze_beams([Beam], #{}),
     ?assertEqual([], Ws).
 
+match_scrutinee_var_refinement_test() ->
+    Src =
+        "-module(mini_match_var).\n"
+        "-export([run/1]).\n"
+        "-spec maybe_ok(integer()) -> ok | {error, atom()}.\n"
+        "maybe_ok(1) -> ok;\n"
+        "maybe_ok(_) -> {error, bad}.\n"
+        "-spec take_ok(ok) -> ok.\n"
+        "take_ok(ok) -> ok.\n"
+        "-spec run(integer()) -> ok | {error, atom()}.\n"
+        "run(N) ->\n"
+        "    R = maybe_ok(N),\n"
+        "    case R of\n"
+        "        X when is_atom(X) -> take_ok(R);\n"
+        "        Err -> Err\n"
+        "    end.\n",
+    {ok, Toks, _} = erl_scan:string(Src),
+    {ok, mini_match_var, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+    {ok, Ws} = prisma:analyze_beams([Beam], #{}),
+    ?assertEqual([], Ws).
+
+cross_module_wrapper_and_bounded_fun_test() ->
+    CoreSrc =
+        "-module(mini_core_id).\n"
+        "-export([id/1]).\n"
+        "-spec id(X) -> X when X :: atom() | integer() | undefined.\n"
+        "id(X) -> X.\n",
+    WrapperSrc =
+        "-module(mini_wrapper).\n"
+        "-export([wrap/1, wrap/2]).\n"
+        "wrap(X) -> wrap(X, []).\n"
+        "wrap(X, _Opts) -> mini_core_id:id(X).\n",
+    CallerSrc =
+        "-module(mini_wrap_caller).\n"
+        "-export([run/1]).\n"
+        "-spec take_int(integer()) -> integer().\n"
+        "take_int(N) -> N.\n"
+        "-spec run(integer()) -> integer().\n"
+        "run(N) ->\n"
+        "    M = mini_wrapper:wrap(N),\n"
+        "    take_int(M).\n",
+    Compile = fun(Src) ->
+        {ok, Toks, _} = erl_scan:string(Src),
+        {ok, _Mod, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+        Beam
+    end,
+    {ok, Ws} = prisma:analyze_beams([Compile(CoreSrc), Compile(WrapperSrc), Compile(CallerSrc)], #{}),
+    ?assertEqual([], Ws).
+
+

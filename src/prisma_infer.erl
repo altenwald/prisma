@@ -62,14 +62,19 @@ is_skipped_table_func(_Mod, _MFA, _IsLeex, _IsYecc) ->
 %% change between passes (those of other modules are what their `-spec`s declare). `Callers` maps each function of the module to the
 %% functions that call it.
 fixpoint_loop(Mod, ClausesMap, Contracts, Pass, Dirty, Callers) ->
-    NextContracts = lists:foldl(
-        fun(MFA, Acc) ->
-            {_Line, Clauses} = maps:get(MFA, ClausesMap),
-            Acc#{MFA := infer_function(Mod, MFA, Clauses, maps:get(MFA, Acc), Contracts)}
-        end,
-        Contracts,
-        Dirty
-    ),
+    put('$prisma_spec_cache', #{}),
+    NextContracts = try
+        lists:foldl(
+            fun(MFA, Acc) ->
+                {_Line, Clauses} = maps:get(MFA, ClausesMap),
+                Acc#{MFA := infer_function(Mod, MFA, Clauses, maps:get(MFA, Acc), Contracts)}
+            end,
+            Contracts,
+            Dirty
+        )
+    after
+        erase('$prisma_spec_cache')
+    end,
     Changed = [MFA || MFA <- Dirty, (maps:get(MFA, Contracts))#func_contract.inferred_type =/=
                                     (maps:get(MFA, NextContracts))#func_contract.inferred_type],
     case Pass >= ?MAX_FIXPOINT_PASSES orelse Changed =:= [] of
@@ -1500,6 +1505,12 @@ refine_match_scrutinee_vars({match, _, {var, _, V}, Rhs}, Pats, Remaining, Env) 
     end,
     Env1 = constrain_ast_var({var, 0, V}, ClauseType, Env),
     refine_match_scrutinee_vars(Rhs, Pats, Remaining, Env1);
+refine_match_scrutinee_vars({var, _, V}, Pats, Remaining, Env) when V =/= '_' ->
+    ClauseType = case Pats of
+        [{var, _, PV}] when PV =/= '_' -> maps:get(PV, Env, Remaining);
+        _ -> Remaining
+    end,
+    constrain_ast_var({var, 0, V}, ClauseType, Env);
 refine_match_scrutinee_vars(_, _Pats, _Remaining, Env) ->
     Env.
 
@@ -1775,11 +1786,27 @@ infer_contract_call(Mod, CallerMFA, Line, {CalleeMod, _, _} = CalleeMFA, ArgAsts
             LookupFun = fun(Key) -> maps:find(Key, AllTypes) end,
             {CallerMod, _, _} = CallerMFA,
             RetType = case declared_return(Specs, length(ExpectedArgs), ArgTypes, CallerMod, CalleeMod, LookupFun) of
-                any when Specs =:= [], CalleeMod =:= Mod, Exported =:= false,
-                         length(Clauses) >= 2, length(Clauses) =< 8 ->
-                    case should_specialize_local(CalleeMFA, ArgTypes, Inferred, Contracts) of
+                any when Specs =:= [], CalleeMod =/= Mod, ArgTypes =/= [] ->
+                    case lists:member(any, ArgTypes) of
                         true ->
-                            case infer_specialized_local_call(Mod, CalleeMFA, ArgTypes, Clauses, Contracts) of
+                            any;
+                        false ->
+                            case length(Clauses) >= 1 andalso length(Clauses) =< 8 andalso
+                                 should_specialize_local(CalleeMFA, ArgTypes, Inferred, Clauses, Contracts) of
+                                true ->
+                                    case infer_specialized_local_call(CalleeMod, CalleeMFA, ArgTypes, Clauses, Contracts) of
+                                        {ok, SpecRet} -> SpecRet;
+                                        error -> Inferred
+                                    end;
+                                false ->
+                                    Inferred
+                            end
+                    end;
+                any when Specs =:= [], Exported =:= false,
+                         length(Clauses) >= 2, length(Clauses) =< 8 ->
+                    case should_specialize_local(CalleeMFA, ArgTypes, Inferred, Clauses, Contracts) of
+                        true ->
+                            case infer_specialized_local_call(CalleeMod, CalleeMFA, ArgTypes, Clauses, Contracts) of
                                 {ok, SpecRet} -> SpecRet;
                                 error -> Inferred
                             end;
@@ -1797,16 +1824,36 @@ infer_contract_call(Mod, CallerMFA, Line, {CalleeMod, _, _} = CalleeMFA, ArgAsts
             {any, Env0, Warns0, Sites1}
     end.
 
-should_specialize_local(CalleeMFA, ArgTypes, Inferred, Contracts) ->
+should_specialize_local(CalleeMFA, ArgTypes, Inferred, Clauses, Contracts) ->
     WorthSpecializing = Inferred =:= any orelse (is_tuple(Inferred) andalso element(1, Inferred) =:= union),
     Visited = maps:get('$specializing', Contracts, #{}),
+    MaxDepth = case Clauses of
+        [_] -> 2;
+        _ -> 1
+    end,
     WorthSpecializing andalso
-        map_size(Visited) < 2 andalso
+        map_size(Visited) < MaxDepth andalso
         not maps:is_key(CalleeMFA, Visited) andalso
         lists:any(fun(T) -> T =/= any end, ArgTypes).
 
 infer_specialized_local_call(Mod, CalleeMFA, ArgTypes, Clauses, Contracts) ->
     Visited = maps:get('$specializing', Contracts, #{}),
+    CacheKey = {CalleeMFA, ArgTypes, lists:sort(maps:keys(Visited))},
+    case get('$prisma_spec_cache') of
+        #{CacheKey := Cached} ->
+            Cached;
+        Cache when is_map(Cache) ->
+            Res = do_infer_specialized_local_call(Mod, CalleeMFA, ArgTypes, Clauses, Contracts, Visited),
+            case map_size(Cache) < 2000 of
+                true -> put('$prisma_spec_cache', (get('$prisma_spec_cache'))#{CacheKey => Res});
+                false -> ok
+            end,
+            Res;
+        _ ->
+            do_infer_specialized_local_call(Mod, CalleeMFA, ArgTypes, Clauses, Contracts, Visited)
+    end.
+
+do_infer_specialized_local_call(Mod, CalleeMFA, ArgTypes, Clauses, Contracts, Visited) ->
     SubContracts = Contracts#{'$specializing' => Visited#{CalleeMFA => true}},
     {RetsRev, _} = lists:foldl(
         fun({clause, _, PatArgs, Guards, Body}, {RetsAcc, RemArgs}) ->
@@ -1876,12 +1923,10 @@ declared_return(Specs, Arity, ArgTypes, CalleeMod, LookupFun) ->
 
 -spec declared_return([prisma_type:stype()], non_neg_integer(), [prisma_type:stype()], module() | undefined, module() | undefined, prisma_type:type_lookup_fun() | undefined) -> prisma_type:stype().
 declared_return(Specs, Arity, ArgTypes, CallerMod, CalleeMod, LookupFun) ->
-    Clauses = [
-        {Args, Ret}
-     || Spec <- Specs,
-        {fun_type, Args, Ret} <- [prisma_type:unfold_bounded_fun(Spec)],
-        length(Args) =:= Arity
-    ],
+    Clauses = lists:filtermap(
+        fun(Spec) -> instantiate_bounded_clause(Spec, Arity, ArgTypes) end,
+        Specs
+    ),
     Matching = case ArgTypes of
         [] ->
             [Ret || {_, Ret} <- Clauses];
@@ -1918,6 +1963,33 @@ declared_return(Specs, Arity, ArgTypes, CallerMod, CalleeMod, LookupFun) ->
                     UnionRet
             end,
             erase_unresolved(ExpandedRet)
+    end.
+
+instantiate_bounded_clause({bounded_fun, RawArgs, RawRet, Constraints}, Arity, ArgTypes)
+  when length(RawArgs) =:= Arity, length(ArgTypes) =:= Arity ->
+    VarBindings = lists:foldl(
+        fun({{var, V}, Actual}, Acc) when Actual =/= any ->
+                Bound = maps:get(V, Constraints, any),
+                Inst = case prisma_type:meet(Actual, Bound) of
+                    none -> Actual;
+                    M -> M
+                end,
+                Acc#{V => Inst};
+           (_, Acc) ->
+                Acc
+        end,
+        #{},
+        lists:zip(RawArgs, ArgTypes)
+    ),
+    MergedConstraints = maps:merge(Constraints, VarBindings),
+    case prisma_type:unfold_bounded_fun({bounded_fun, RawArgs, RawRet, MergedConstraints}) of
+        {fun_type, UnfoldedArgs, UnfoldedRet} -> {true, {UnfoldedArgs, UnfoldedRet}};
+        _ -> false
+    end;
+instantiate_bounded_clause(Spec, Arity, _ArgTypes) ->
+    case prisma_type:unfold_bounded_fun(Spec) of
+        {fun_type, Args, Ret} when length(Args) =:= Arity -> {true, {Args, Ret}};
+        _ -> false
     end.
 
 erase_unresolved({local_type, _, _}) -> any;

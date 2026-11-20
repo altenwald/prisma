@@ -1139,3 +1139,38 @@ open_map_struct_supertype_unproven_gap_test() ->
         #{external_specs => #{{EctoMod, apply_action, 1} => ApplySpec}}),
     Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{EctoMod => EctoSummary, Mod => Summary}},
     ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).
+
+external_macro_compiler_generated_with_elixir_def_context_test() ->
+    Mod = 'Elixir.FakeRateLimit',
+    DefMeta = [{context, elixir_def}, {line, 1}, {context, 'Elixir.Hammer.ETS'}],
+    Map = #{
+        module => Mod,
+        file => <<"lib/fake_rate_limit.ex">>,
+        attributes => [],
+        struct => nil,
+        definitions => [
+            {{inc, 2}, def, DefMeta, [
+                {[{line, 1}],
+                 [{key, [{line, 1}], 'Elixir.Hammer.ETS'}, {scale, [{line, 1}], 'Elixir.Hammer.ETS'}],
+                 [],
+                 {ok, [{line, 1}], []}}
+            ]}
+        ]
+    },
+    SpecsForms = [
+        {attribute, 1, spec, {{inc, 2}, [{type, 1, 'fun', [
+            {type, 1, product, [{type, 1, binary, []}, {type, 1, pos_integer, []}]},
+            {type, 1, integer, []}
+        ]}]}}
+    ],
+    Summary = prisma_elixir:from_elixir_dbgi(
+        Mod,
+        {debug_info_v1, elixir_erl, {elixir_v1, Map, SpecsForms}},
+        [{inc, 2}],
+        #module_summary{module = Mod, language = elixir},
+        #{}
+    ),
+    FC = maps:get({Mod, inc, 2}, Summary#module_summary.functions),
+    ?assertEqual(true, FC#func_contract.compiler_generated),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Summary}},
+    ?assertEqual([], prisma_checker:check_module(Summary, Pplt, #{mode => hybrid})).

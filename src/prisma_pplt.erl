@@ -114,11 +114,11 @@ propagate_cross_module_inferred(#prisma_pplt{modules = Mods} = Pplt, BeamByMod, 
     InferredExt = maps:fold(
         fun(_Mod, #module_summary{functions = Funcs}, Acc) ->
             maps:fold(
-                fun(MFA, #func_contract{declared_specs = [], inferred_type = {fun_type, _, Ret} = InfType}, A)
+                fun(MFA, #func_contract{declared_specs = [], inferred_type = {fun_type, _, Ret}} = FC, A)
                   when Ret =/= any ->
                     case maps:is_key(MFA, Specs) of
                         true -> A;
-                        false -> A#{MFA => [InfType]}
+                        false -> A#{MFA => FC#func_contract{local_warnings = [], call_sites = []}}
                     end;
                    (_, _, A) ->
                     A

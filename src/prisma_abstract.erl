@@ -115,6 +115,8 @@ enrich_from_debug_info(Beam, Module, Dbgi, Exports, Summary, Opts) ->
 %% annotation (`erl_parse:anno_from_term` was a fifth of the time of building a PPLT).
 abstract_forms(_Beam, {debug_info_v1, erl_abstract_code, {Forms, _Opts}}) when is_list(Forms) ->
     {ok, Forms};
+abstract_forms(_Beam, {debug_info_v1, elixir_erl, _}) ->
+    error;
 abstract_forms(Beam, _Dbgi) ->
     case beam_lib:chunks(Beam, [abstract_code]) of
         {ok, {_Mod, [{abstract_code, {raw_abstract_v1, Forms}}]}} -> {ok, Forms};
