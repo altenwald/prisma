@@ -1,7 +1,7 @@
 defmodule Prisma.MixProject do
   use Mix.Project
 
-  @version "0.2.9"
+  @version "0.2.10"
   @source_url "https://github.com/altenwald/prisma"
 
   def project do

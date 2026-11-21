@@ -151,7 +151,7 @@
           </div>
           <h3 class="text-lg font-bold text-slate-900 mb-2">Built-in LSP &amp; Zero Friction</h3>
           <p class="text-sm text-slate-600 leading-relaxed">
-            Add <code>{project_plugins, [{prisma, "~> 0.2.9"}]}.</code> to <code>rebar.config</code> or <code>{:prisma, "~> 0.2.9"}</code> to <code>mix.exs</code>. Includes <strong><code>prisma_ls</code></strong> (VS Code, Zed, Emacs, Neovim) analyzing pure ASTs in-memory without loading bytecode or firing <code>-on_load</code>.
+            Add <code>{project_plugins, [{prisma, "~> 0.2.10"}]}.</code> to <code>rebar.config</code> or <code>{:prisma, "~> 0.2.10"}</code> to <code>mix.exs</code>. Includes <strong><code>prisma_ls</code></strong> (VS Code, Zed, Emacs, Neovim) analyzing pure ASTs in-memory without loading bytecode or firing <code>-on_load</code>.
           </p>
         </div>
 
@@ -447,7 +447,7 @@
               </div>
               <p class="text-xs text-slate-600 mb-4">Add to <code>rebar.config</code>:</p>
               <pre class="bg-slate-900 text-slate-200 p-3.5 rounded-xl text-xs font-mono overflow-x-auto mb-4"><code>{project_plugins, [
-    {prisma, "0.2.9"}
+    {prisma, "0.2.10"}
 ]}.</code></pre>
             </div>
             <div>
@@ -467,7 +467,7 @@ rebar3 prisma lsp</code></pre>
               <p class="text-xs text-slate-600 mb-4">Add to <code>deps</code> in <code>mix.exs</code>:</p>
               <pre class="bg-slate-900 text-slate-200 p-3.5 rounded-xl text-xs font-mono overflow-x-auto mb-4"><code>defp deps do
   [
-    {:prisma, "~> 0.2.9",
+    {:prisma, "~> 0.2.10",
      only: [:dev, :test],
      runtime: false}
   ]
@@ -678,7 +678,7 @@ prisma lsp</code></pre>
       caption.innerHTML = `<strong>${ds.name}</strong>: ${dataInfo.title} — <span class="text-blue-600 font-bold">${dataInfo.multiplier} with Prisma</span>`;
 
       const chartData = [
-        { tool: "Prisma 0.2.9", value: dataInfo.prisma, color: "#2563eb" },
+        { tool: "Prisma 0.2.10", value: dataInfo.prisma, color: "#2563eb" },
         { tool: "Dialyzer (OTP 29)", value: dataInfo.dialyzer, color: "#94a3b8" }
       ];
 
