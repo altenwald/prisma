@@ -30,19 +30,29 @@
     #{mfa_key() => #func_contract{}}
 ) -> #{mfa_key() => #func_contract{}}.
 infer_module_functions(Mod, ClausesMap, InitialContracts) ->
-    IsLeex = maps:is_key({Mod, yyaction, 5}, ClausesMap) andalso maps:is_key({Mod, yystate, 7}, ClausesMap),
-    IsYecc = maps:is_key({Mod, yeccpars0, 5}, ClausesMap) andalso maps:is_key({Mod, yeccpars1, 7}, ClausesMap),
-    Own = [MFA || MFA <- maps:keys(InitialContracts),
-                  maps:is_key(MFA, ClausesMap),
-                  not is_skipped_table_func(Mod, MFA, IsLeex, IsYecc)],
-    Contracts1 = fixpoint_loop(Mod, ClausesMap, InitialContracts, 1, Own, callers_of(Mod, ClausesMap, InitialContracts, Own)),
-    Contracts2 = case IsLeex of
-        true -> refine_leex_contracts(Mod, Contracts1);
-        false -> Contracts1
-    end,
-    case IsYecc of
-        true -> refine_yecc_contracts(Mod, ClausesMap, Contracts2);
-        false -> Contracts2
+    PrevRecDefs = get('$prisma_record_defs'),
+    RecDefs = maps:from_list([{RName, RSize} || {{record_def, RName}, RSize} <- maps:to_list(InitialContracts)]),
+    put('$prisma_record_defs', RecDefs),
+    try
+        IsLeex = maps:is_key({Mod, yyaction, 5}, ClausesMap) andalso maps:is_key({Mod, yystate, 7}, ClausesMap),
+        IsYecc = maps:is_key({Mod, yeccpars0, 5}, ClausesMap) andalso maps:is_key({Mod, yeccpars1, 7}, ClausesMap),
+        Own = [MFA || MFA <- maps:keys(InitialContracts),
+                      maps:is_key(MFA, ClausesMap),
+                      not is_skipped_table_func(Mod, MFA, IsLeex, IsYecc)],
+        Contracts1 = fixpoint_loop(Mod, ClausesMap, InitialContracts, 1, Own, callers_of(Mod, ClausesMap, InitialContracts, Own)),
+        Contracts2 = case IsLeex of
+            true -> refine_leex_contracts(Mod, Contracts1);
+            false -> Contracts1
+        end,
+        case IsYecc of
+            true -> refine_yecc_contracts(Mod, ClausesMap, Contracts2);
+            false -> Contracts2
+        end
+    after
+        case PrevRecDefs of
+            undefined -> erase('$prisma_record_defs');
+            _ -> put('$prisma_record_defs', PrevRecDefs)
+        end
     end.
 
 is_skipped_table_func(Mod, {Mod, yystate, 7}, true, _IsYecc) ->
@@ -166,7 +176,7 @@ infer_clause(Mod, MFA, {clause, Anno, PatArgs, Guards, Body}, SpecArgLists, RemA
     SeedArgs = clause_seed_args(PatArgs, Guards, SpecArgLists, RemArgs, AllContracts),
     NextRem = case Guards of
         [] -> subtract_clause_args(RemArgs, PatArgs);
-        _ -> RemArgs
+        _ -> subtract_guarded_pattern(RemArgs, PatArgs, Guards, #{})
     end,
     IsGen = is_generated_function(MFA) orelse is_generated_anno(Anno) orelse is_generated_guard(Guards),
     case bind_patterns(PatArgs, SeedArgs, #{}) of
@@ -301,8 +311,21 @@ bind_pattern({map, _, Fields}, Expected, Env0) ->
         _ ->
             bind_map_pat_fields(Fields, Expected, Env0, [])
     end;
-bind_pattern({record, _, _, _} = Pattern, Expected, Env) ->
-    {Expected, bind_variables_as_any(Pattern, Env)};
+bind_pattern({record, _, RecName, RecFields} = Pattern, Expected, Env) ->
+    RecordDefs = case get('$prisma_record_defs') of
+        M when is_map(M) -> M;
+        _ -> #{}
+    end,
+    MinLen = max(1 + length(RecFields), maps:get(RecName, RecordDefs, 0)),
+    case Expected of
+        {tuple, [Tag | _] = Elems} when Tag =/= {atom_lit, RecName}, length(Elems) < MinLen ->
+            {none, Env};
+        _ ->
+            case prisma_type:meet({record, RecName, []}, Expected) of
+                none -> {none, Env};
+                Matched -> {Matched, bind_variables_as_any(Pattern, Env)}
+            end
+    end;
 bind_pattern(_, Expected, Env) ->
     {Expected, Env}.
 
@@ -580,6 +603,12 @@ apply_guard_test_refining({op, _, Op, {var, _, V}, Lit}, Env, _Contracts)
 apply_guard_test_refining({op, _, Op, Lit, {var, _, V}}, Env, _Contracts)
   when Op =:= '=:='; Op =:= '==' ->
     refine_var(V, literal_or_any(Lit), Env);
+apply_guard_test_refining({op, _, Op, {var, _, V}, {atom, _, A}}, Env, _Contracts)
+  when Op =:= '=/='; Op =:= '/=' ->
+    refine_neq_atom(V, A, Env);
+apply_guard_test_refining({op, _, Op, {atom, _, A}, {var, _, V}}, Env, _Contracts)
+  when Op =:= '=/='; Op =:= '/=' ->
+    refine_neq_atom(V, A, Env);
 apply_guard_test_refining({atom, _, false}, _Env, _Contracts) ->
     unreachable;
 apply_guard_test_refining(_, Env, _Contracts) ->
@@ -606,6 +635,13 @@ refine_compare_int(V, Op, N, Env) ->
             refine_var(V, {union, [Range, float]}, Env);
         true ->
             {ok, Env}
+    end.
+
+refine_neq_atom(V, A, Env) ->
+    Lit = {atom_lit, A},
+    case maps:get(V, Env, any) of
+        Lit -> unreachable;
+        _ -> {ok, subtract_var_type(V, Lit, Env)}
     end.
 
 guard_int_lit({integer, _, N}) -> {ok, N};
@@ -1859,7 +1895,7 @@ do_infer_specialized_local_call(Mod, CalleeMFA, ArgTypes, Clauses, Contracts, Vi
         fun({clause, _, PatArgs, Guards, Body}, {RetsAcc, RemArgs}) ->
             NextRem = case Guards of
                 [] -> subtract_clause_args(RemArgs, PatArgs);
-                _ -> RemArgs
+                _ -> subtract_guarded_pattern(RemArgs, PatArgs, Guards, #{})
             end,
             case bind_patterns(PatArgs, RemArgs, #{}) of
                 unreachable ->
@@ -2383,6 +2419,38 @@ collect_pat_vars(L, Acc) when is_list(L) ->
 collect_pat_vars(_, Acc) ->
     Acc.
 
+subtract_guarded_pattern(RemArgs, Pats, [Conj], Env)
+  when is_list(RemArgs), length(RemArgs) =:= length(Pats) ->
+    FlatConj = flatten_guard_and(Conj),
+    case extract_var_guards(Pats, FlatConj, Env) of
+        {ok, PerPos} ->
+            Indexed = lists:zip3(lists:seq(1, length(RemArgs)), RemArgs, PerPos),
+            [
+                case Covered of
+                    none ->
+                        Rem;
+                    _ ->
+                        OthersCover = lists:all(
+                            fun({J, OtherRem, OtherCov}) ->
+                                J =:= I orelse OtherCov =:= none orelse covers(OtherCov, OtherRem)
+                            end,
+                            Indexed
+                        ),
+                        case OthersCover of
+                            true ->
+                                case subtract_covered(Rem, Covered) of
+                                    none -> Rem;
+                                    Sub -> Sub
+                                end;
+                            false ->
+                                Rem
+                        end
+                end
+             || {I, Rem, Covered} <- Indexed
+            ];
+        error ->
+            RemArgs
+    end;
 subtract_guarded_pattern(Remaining, [{var, _, V}], [Conj], Env) when not is_map_key(V, Env) ->
     case [guard_covered_type(V, G) || G <- Conj] of
         [{ok, Covered}] -> subtract_covered(Remaining, Covered);
@@ -2390,6 +2458,52 @@ subtract_guarded_pattern(Remaining, [{var, _, V}], [Conj], Env) when not is_map_
     end;
 subtract_guarded_pattern(Remaining, _, _, _Env) ->
     Remaining.
+
+flatten_guard_and([]) ->
+    [];
+flatten_guard_and([{op, _, Op, L, R} | Rest]) when Op =:= 'and'; Op =:= 'andalso' ->
+    flatten_guard_and([L, R | Rest]);
+flatten_guard_and([G | Rest]) ->
+    [G | flatten_guard_and(Rest)].
+
+extract_var_guards(Pats, Conj, Env) ->
+    VarPats = lists:all(
+        fun({var, _, V}) -> V =/= '_' andalso not maps:is_key(V, Env);
+           (_) -> false
+        end,
+        Pats
+    ),
+    case VarPats of
+        false ->
+            error;
+        true ->
+            Vars = [V || {var, _, V} <- Pats],
+            Matched = lists:map(
+                fun(G) ->
+                    case [ {V, T} || V <- Vars, {ok, T} <- [guard_covered_type(V, G)] ] of
+                        [{V, T}] -> {ok, V, T};
+                        _ -> error
+                    end
+                end,
+                Conj
+            ),
+            case lists:member(error, Matched) of
+                true ->
+                    error;
+                false ->
+                    ByVar = lists:foldl(
+                        fun({ok, V, T}, Acc) ->
+                            case maps:find(V, Acc) of
+                                error -> Acc#{V => T};
+                                {ok, Prev} -> Acc#{V => prisma_type:meet(Prev, T)}
+                            end
+                        end,
+                        #{},
+                        Matched
+                    ),
+                    {ok, [maps:get(V, ByVar, none) || V <- Vars]}
+            end
+    end.
 
 guard_covered_type(V, {op, _, '=:=', {var, _, V}, Lit}) ->
     literal_covered(Lit);
@@ -2405,6 +2519,11 @@ guard_covered_type(V, {op, _, 'orelse', L, R}) ->
         _ -> error
     end;
 guard_covered_type(V, {call, _, {remote, _, {atom, _, erlang}, {atom, _, GuardName}}, [{var, _, V}]}) ->
+    case guard_type(GuardName) of
+        undefined -> error;
+        Type -> {ok, Type}
+    end;
+guard_covered_type(V, {call, _, {atom, _, GuardName}, [{var, _, V}]}) ->
     case guard_type(GuardName) of
         undefined -> error;
         Type -> {ok, Type}

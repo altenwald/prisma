@@ -299,9 +299,10 @@ meet({local_type, _, _}, T) -> T;
 meet(T, {local_type, _, _}) -> T;
 meet({remote_type, _, _, _}, T) -> T;
 meet(T, {remote_type, _, _, _}) -> T;
+meet(Same, Same) -> Same;
+meet({opaque, Mod, Name, Args, _} = Opaque, {opaque, Mod, Name, Args, _}) -> Opaque;
 meet({opaque, _, _, _, Body}, T) -> meet(Body, T);
 meet(T, {opaque, _, _, _, Body}) -> meet(T, Body);
-meet(Same, Same) -> Same;
 meet({union, Members} = T1, T2) ->
     case too_many_pairs(Members, T2) of
         true -> smaller(T1, T2);

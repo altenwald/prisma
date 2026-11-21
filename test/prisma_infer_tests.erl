@@ -1257,4 +1257,49 @@ cross_module_wrapper_and_bounded_fun_test() ->
     {ok, Ws} = prisma:analyze_beams([Compile(CoreSrc), Compile(WrapperSrc), Compile(CallerSrc)], #{}),
     ?assertEqual([], Ws).
 
+guard_neq_atom_refinement_test() ->
+    Src =
+        "-module(mini_neq_guard).\n"
+        "-export([send/1]).\n"
+        "-spec take_int(integer()) -> integer().\n"
+        "take_int(N) -> N.\n"
+        "-spec send(integer() | no_correlation) -> integer().\n"
+        "send(C) when C /= no_correlation -> take_int(C);\n"
+        "send(no_correlation) -> 0.\n",
+    {ok, Toks, _} = erl_scan:string(Src),
+    {ok, mini_neq_guard, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+    {ok, Ws} = prisma:analyze_beams([Beam], #{}),
+    ?assertEqual([], Ws).
+
+record_pattern_filters_union_test() ->
+    Src =
+        "-module(mini_rec_union).\n"
+        "-export([handle/1]).\n"
+        "-record(reply, {term :: integer()}).\n"
+        "-record(cmd, {data :: atom()}).\n"
+        "-type msg() :: {{atom(), atom()}, #reply{}} | {command, #cmd{}}.\n"
+        "-spec take_peer({atom(), atom()}) -> ok.\n"
+        "take_peer({_, _}) -> ok.\n"
+        "-spec handle(msg()) -> ok.\n"
+        "handle({Peer, #reply{}}) -> take_peer(Peer);\n"
+        "handle({command, #cmd{}}) -> ok.\n",
+    {ok, Toks, _} = erl_scan:string(Src),
+    {ok, mini_rec_union, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+    {ok, Ws} = prisma:analyze_beams([Beam], #{}),
+    ?assertEqual([], Ws).
+
+multi_arg_guarded_clause_subtraction_test() ->
+    Src =
+        "-module(mini_guard_sub).\n"
+        "-export([match_it/2]).\n"
+        "-spec take_atom(atom()) -> boolean().\n"
+        "take_atom(A) when is_atom(A) -> true.\n"
+        "-spec match_it(binary(), binary() | atom()) -> boolean().\n"
+        "match_it(L, R) when is_binary(L) andalso is_binary(R) -> true;\n"
+        "match_it(L, R) when is_binary(L) -> take_atom(R).\n",
+    {ok, Toks, _} = erl_scan:string(Src),
+    {ok, mini_guard_sub, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+    {ok, Ws} = prisma:analyze_beams([Beam], #{}),
+    ?assertEqual([], Ws).
+
 

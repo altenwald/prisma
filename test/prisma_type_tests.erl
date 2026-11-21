@@ -441,3 +441,8 @@ expand_remote_depth_cap_test() ->
              end,
     {ok, Res} = prisma_type:expand(m, m, {remote_type, m, t0, []}, Lookup),
     ?assertMatch({remote_type, m, t5, []}, Res).
+
+meet_preserves_matching_opaque_test() ->
+    Opaque = {opaque, other_mod, state, [], {map, [{exact, {atom_lit, id}, integer}]}},
+    ?assertEqual(Opaque, prisma_type:meet(Opaque, Opaque)),
+    ?assertEqual(Opaque, prisma_type:meet(any, Opaque)).
