@@ -1337,6 +1337,8 @@ format_type({local_type, Name, Args}, Lang) ->
     [atom_to_list(Name), "(", ArgsStr, ")"];
 format_type({opaque, Mod, Name, Args, _Body}, Lang) ->
     format_remote_type(Mod, Name, Args, Lang);
+format_type({recursive_ref, {Mod, Name, _Arity}, Args}, Lang) ->
+    format_remote_type(Mod, Name, Args, Lang);
 format_type({var, Name}, _) ->
     atom_to_list(Name);
 format_type(Other, _) ->

@@ -567,9 +567,11 @@ format_human(#prisma_warning{
         {Decl, Act, undefined} when Decl =/= undefined, Act =/= undefined ->
             DeclStr = prisma_type:format(Decl, #{lang => Lang}),
             ActStr = prisma_type:format(Act, #{lang => Lang}),
+            {PathLine, ShowDecl, ShowAct} = maybe_narrow_pair(Act, Decl, ActStr, DeclStr, Lang, Color),
             [
-                "\n  ", colorize("Declared:", "\e[1;36m", Color), "  ", DeclStr,
-                "\n  ", colorize("Inferred:", "\e[1;31m", Color), "  ", ActStr
+                PathLine,
+                "\n  ", colorize("Declared:", "\e[1;36m", Color), "  ", ShowDecl,
+                "\n  ", colorize("Inferred:", "\e[1;31m", Color), "  ", ShowAct
             ];
         {undefined, Act, Exp} when Exp =/= undefined, Act =/= undefined ->
             ExpStr = prisma_type:format(Exp, #{lang => Lang}),
@@ -583,16 +585,139 @@ format_human(#prisma_warning{
                 _ ->
                     []
             end,
+            {PathLine, ShowExp, ShowAct} = maybe_narrow_pair(Act, Exp, ActStr, ExpStr, Lang, Color),
             [
                 CalleeLines,
-                "\n  ", colorize("Expected:", "\e[1;32m", Color), "  ", ExpStr,
-                "\n  ", colorize("Actual:  ", "\e[1;31m", Color), "  ", ActStr
+                PathLine,
+                "\n  ", colorize("Expected:", "\e[1;32m", Color), "  ", ShowExp,
+                "\n  ", colorize("Actual:  ", "\e[1;31m", Color), "  ", ShowAct
             ];
         _ ->
             CleanMsg = clean_message_text(Msg),
             ["\n  ", CleanMsg]
     end,
     iolist_to_binary([Header, Details]).
+
+maybe_narrow_pair(Act, Exp, ActStr, ExpStr, Lang, Color) ->
+    case iolist_size(ExpStr) > 140 orelse iolist_size(ActStr) > 140 of
+        false ->
+            {[], ExpStr, ActStr};
+        true ->
+            case narrow_mismatch(Act, Exp, []) of
+                {[], _, _} ->
+                    {[], ExpStr, ActStr};
+                {Path, NarrowAct, NarrowExp} ->
+                    PathStr = format_mismatch_path(lists:reverse(Path), Lang),
+                    PathLine = ["\n  ", colorize("At:      ", "\e[1;33m", Color), "  ", PathStr],
+                    {PathLine,
+                     prisma_type:format(NarrowExp, #{lang => Lang}),
+                     prisma_type:format(NarrowAct, #{lang => Lang})}
+            end
+    end.
+
+narrow_mismatch({union, AM}, Exp, Path) when length(AM) > 1 ->
+    Bad = [M || M <- AM, not prisma_type:consistent_subtype(M, Exp)],
+    case Bad of
+        [] -> {Path, {union, AM}, Exp};
+        [_] -> narrow_mismatch(hd(Bad), Exp, Path);
+        _ when length(Bad) < length(AM) -> narrow_mismatch(prisma_type:normalize_union(Bad), Exp, Path);
+        _ -> {Path, {union, AM}, Exp}
+    end;
+narrow_mismatch({LTag1, A}, {LTag2, E}, Path)
+  when (LTag1 =:= list orelse LTag1 =:= nonempty_list),
+       (LTag2 =:= list orelse LTag2 =:= nonempty_list) ->
+    case {keyword_entries(A), keyword_entries(E)} of
+        {{ok, AEntries}, {ok, EEntries}} ->
+            narrow_keyword_entries(AEntries, EEntries, E, Path);
+        _ ->
+            narrow_mismatch(A, E, [elem | Path])
+    end;
+narrow_mismatch({tuple, AE}, {tuple, EE}, Path) when length(AE) =:= length(EE) ->
+    BadIdx = [I || {I, {A, E}} <- lists:zip(lists:seq(1, length(AE)), lists:zip(AE, EE)),
+                   not prisma_type:consistent_subtype(A, E)],
+    case BadIdx of
+        [I] ->
+            Step = case AE of
+                [{atom_lit, K}, _] when I =:= 2 -> {kw, K};
+                _ -> {elem, I}
+            end,
+            narrow_mismatch(lists:nth(I, AE), lists:nth(I, EE), [Step | Path]);
+        _ ->
+            {Path, {tuple, AE}, {tuple, EE}}
+    end;
+narrow_mismatch({map, AFields}, {map, EFields}, Path) ->
+    EMap = #{{Kind, K} => V || {Kind, K, V} <- EFields},
+    Bad = [
+        {K, AV, EV}
+     || {exact, K, AV} <- AFields,
+        EV <- [maps:get({exact, K}, EMap, maps:get({assoc, K}, EMap, not_found))],
+        EV =/= not_found,
+        not prisma_type:consistent_subtype(AV, EV)
+    ],
+    case Bad of
+        [{K, AV, EV}] -> narrow_mismatch(AV, EV, [{map_key, K} | Path]);
+        _ -> {Path, {map, AFields}, {map, EFields}}
+    end;
+narrow_mismatch(Act, Exp, Path) ->
+    {Path, Act, Exp}.
+
+narrow_keyword_entries(AEntries, EEntries, EUnion, Path) ->
+    EMap = maps:from_list([{K, V} || {K, V} <- EEntries]),
+    Bad = [
+        {K, AV}
+     || {K, AV} <- AEntries,
+        not prisma_type:consistent_subtype({tuple, [{atom_lit, K}, AV]}, EUnion)
+    ],
+    case Bad of
+        [{K, AV}] ->
+            case maps:find(K, EMap) of
+                {ok, EV} ->
+                    narrow_mismatch(AV, EV, [{kw, K} | Path]);
+                error ->
+                    {[{kw, K} | Path], {tuple, [{atom_lit, K}, AV]}, EUnion}
+            end;
+        _ when Bad =/= [] ->
+            BadTypes = [{tuple, [{atom_lit, K}, AV]} || {K, AV} <- Bad],
+            {[{kw_keys, [K || {K, _} <- Bad]} | Path],
+             {list, prisma_type:normalize_union(BadTypes)},
+             {list, EUnion}};
+        [] ->
+            {Path, {list, union_of_kw(AEntries)}, {list, EUnion}}
+    end.
+
+union_of_kw(Entries) ->
+    prisma_type:normalize_union([{tuple, [{atom_lit, K}, V]} || {K, V} <- Entries]).
+
+keyword_entries({union, Members}) ->
+    collect_kw_entries(Members, []);
+keyword_entries({tuple, [{atom_lit, K}, V]}) ->
+    {ok, [{K, V}]};
+keyword_entries(_) ->
+    error.
+
+collect_kw_entries([], Acc) ->
+    {ok, lists:reverse(Acc)};
+collect_kw_entries([{tuple, [{atom_lit, K}, V]} | Rest], Acc) ->
+    collect_kw_entries(Rest, [{K, V} | Acc]);
+collect_kw_entries(_, _Acc) ->
+    error.
+
+format_mismatch_path(Steps, Lang) ->
+    lists:map(
+        fun({kw, K}) when Lang =:= elixir -> [$[, $:, atom_to_list(K), $]];
+           ({kw, K}) -> [$[, atom_to_list(K), $]];
+           ({kw_keys, Ks}) when Lang =:= elixir ->
+               Strs = [":" ++ atom_to_list(K) || K <- Ks],
+               [$[, string:join(Strs, ", "), $]];
+           ({kw_keys, Ks}) ->
+               Strs = [atom_to_list(K) || K <- Ks],
+               [$[, string:join(Strs, ", "), $]];
+           ({map_key, K}) -> [$[, prisma_type:format(K, #{lang => Lang}), $]];
+           ({elem, I}) -> [$#, integer_to_list(I)];
+           (elem) -> "[]"
+        end,
+        Steps
+    ).
 
 format_oneline(#prisma_warning{
     kind = Kind,

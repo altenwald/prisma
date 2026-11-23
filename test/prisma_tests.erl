@@ -276,3 +276,38 @@ cli_mode_option_test() ->
 
 %% What Prisma lists of its own code: the notes (branches that depend on the system, which it has in the Mix task) are counted, not warnings.
 listed({ok, Ws}) -> [W || W <- Ws, prisma_checker:severity(W#prisma_warning.kind) =/= note].
+
+pretty_narrowed_keyword_mismatch_and_recursive_ref_format_test() ->
+    ?assertEqual(<<"Optimus.spec()">>, prisma_type:format({recursive_ref, {'Elixir.Optimus', spec, 0}, []}, #{lang => elixir})),
+    Exp = {list, {union, [
+        {tuple, [{atom_lit, description}, {binary, 0, 8}]},
+        {tuple, [{atom_lit, version}, {binary, 0, 8}]},
+        {tuple, [{atom_lit, about}, {binary, 0, 8}]},
+        {tuple, [{atom_lit, author}, {binary, 0, 8}]},
+        {tuple, [{atom_lit, name}, {binary, 0, 8}]},
+        {tuple, [{atom_lit, flags}, {list, {tuple, [atom, {list, {union, [
+            {tuple, [{atom_lit, short}, {binary, 0, 8}]},
+            {tuple, [{atom_lit, help}, {binary, 0, 8}]},
+            {tuple, [{atom_lit, multiple}, boolean]}
+        ]}}]}}]}
+    ]}},
+    Act = {nonempty_list, {union, [
+        {tuple, [{atom_lit, description}, {binary, 0, 8}]},
+        {tuple, [{atom_lit, flags}, {nonempty_list, {tuple, [{atom_lit, verbosity}, {nonempty_list, {union, [
+            {tuple, [{atom_lit, default}, {int_lit, 1}]},
+            {tuple, [{atom_lit, help}, {binary, 0, 8}]}
+        ]}}]}}]}
+    ]}},
+    W = #prisma_warning{
+        kind = gradual_mismatch,
+        mfa = {'Elixir.Lambdapad.Cli', parse_options, 1},
+        line = 351,
+        message = <<"mismatch">>,
+        actual = Act,
+        expected = Exp,
+        callee = {'Elixir.Optimus', new, 1},
+        arg_idx = 1
+    },
+    Out = prisma_checker:format_warning(W, #{format => pretty, color => never}),
+    ?assert(binary:match(Out, <<"At:        [:flags][][:verbosity][:default]">>) =/= nomatch),
+    ?assert(binary:match(Out, <<"Actual:    {:default, 1}">>) =/= nomatch).
