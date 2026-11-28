@@ -2194,8 +2194,21 @@ bif_return_type(is_function, [TermType, {int_lit, Arity}], _Static, _Contracts) 
     end;
 bif_return_type(element, [{int_lit, N}, TupleType], _Static, _Contracts) when N >= 1 ->
     tuple_elem_type(N, TupleType);
+bif_return_type(map_get, [KeyType, MapType], _Static, _Contracts) ->
+    map_get_return_type(KeyType, MapType);
 bif_return_type(_Bif, _ArgTypes, Static, _Contracts) ->
     Static.
+
+map_get_return_type(KeyType, {map, Fields}) ->
+    Matches = [FV || {_Kind, FK, FV} <- Fields, prisma_type:meet(KeyType, FK) =/= none],
+    case Matches of
+        [] -> any;
+        _ -> prisma_type:normalize_union(Matches)
+    end;
+map_get_return_type(KeyType, {union, Members}) ->
+    prisma_type:normalize_union([map_get_return_type(KeyType, M) || M <- Members]);
+map_get_return_type(_KeyType, _Other) ->
+    any.
 
 tuple_elem_type(N, {tuple, Elems}) when N >= 1, N =< length(Elems) ->
     lists:nth(N, Elems);
@@ -2207,6 +2220,7 @@ tuple_elem_type(_N, _Other) ->
     any.
 
 bif_signature(length, 1) -> {ok, [{list, any}], non_neg_integer};
+bif_signature(map_get, 2) -> {ok, [any, any_map], any};
 %% BIFs that always return integers. Arguments are left as `any`: their types are checked against the spec of the BIF elsewhere.
 bif_signature(iolist_size, 1) -> {ok, [any], non_neg_integer};
 bif_signature(size, 1) -> {ok, [any], non_neg_integer};

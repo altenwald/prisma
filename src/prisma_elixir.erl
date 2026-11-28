@@ -242,6 +242,35 @@ translate_expr({'case', Meta, [Scrutinee, Blocks]}) when is_list(Blocks) ->
         _ -> []
     end,
     {'case', Anno, translate_expr(Scrutinee), [translate_case_clause(C) || C <- DoClauses]};
+translate_expr({'cond', Meta, [Blocks]}) when is_list(Blocks) ->
+    Anno = meta_anno(Meta),
+    DoClauses = case proplists:get_value(do, Blocks, []) of
+        L when is_list(L) -> L;
+        _ -> []
+    end,
+    translate_cond_clauses(DoClauses, Anno);
+translate_expr({'with', Meta, Args}) when is_list(Args), Args =/= [] ->
+    Anno = meta_anno(Meta),
+    case lists:last(Args) of
+        Blocks when is_list(Blocks) ->
+            Clauses = lists:droplast(Args),
+            DoAst = proplists:get_value(do, Blocks, nil),
+            ElseClauses = case proplists:get_value('else', Blocks, []) of
+                EL when is_list(EL) -> EL;
+                _ -> []
+            end,
+            translate_with_clauses(Clauses, DoAst, ElseClauses, Anno);
+        _ ->
+            {atom, Anno, nil}
+    end;
+translate_expr({'for', Meta, Args}) when is_list(Args), Args =/= [] ->
+    Anno = meta_anno(Meta),
+    case lists:last(Args) of
+        Opts when is_list(Opts) ->
+            translate_for(Anno, lists:droplast(Args), Opts);
+        _ ->
+            {nil, Anno}
+    end;
 translate_expr({'receive', Meta, [Blocks]}) when is_list(Blocks) ->
     Anno = meta_anno(Meta),
     DoClauses = case proplists:get_value(do, Blocks, []) of
@@ -428,6 +457,109 @@ translate_try_catch_clause(DefaultKind, {'->', Meta, [[Pat], Body]}) ->
     {clause, Anno, [CatchPat], [], translate_body(Body)};
 translate_try_catch_clause(_DefaultKind, Other) ->
     translate_case_clause(Other).
+
+body_to_expr(_Anno, [Expr]) ->
+    Expr;
+body_to_expr(Anno, Exprs) when is_list(Exprs) ->
+    {'block', Anno, Exprs}.
+
+translate_cond_clauses([], Anno) ->
+    {atom, Anno, nil};
+translate_cond_clauses([{'->', CMeta, [[true], Body]} | _], _Anno) ->
+    CAnno = meta_anno(CMeta),
+    body_to_expr(CAnno, translate_body(Body));
+translate_cond_clauses([{'->', CMeta, [[CondExpr], Body]} | Rest], Anno) ->
+    CAnno = meta_anno(CMeta),
+    RestExpr = translate_cond_clauses(Rest, Anno),
+    CondVar = {var, CAnno, '_cond_val'},
+    FalsyGuard = [[{op, CAnno, 'orelse',
+                    {op, CAnno, '=:=', CondVar, {atom, CAnno, false}},
+                    {op, CAnno, '=:=', CondVar, {atom, CAnno, nil}}}]],
+    {'case', CAnno, translate_expr(CondExpr), [
+        {clause, CAnno, [CondVar], FalsyGuard, [RestExpr]},
+        {clause, CAnno, [{var, CAnno, '_'}], [], translate_body(Body)}
+    ]};
+translate_cond_clauses([_ | Rest], Anno) ->
+    translate_cond_clauses(Rest, Anno).
+
+translate_with_clauses([], DoAst, _ElseClauses, Anno) ->
+    body_to_expr(Anno, translate_body(DoAst));
+translate_with_clauses([{'<-', CMeta, [Pat, Rhs]} | Rest], DoAst, ElseClauses, Anno) ->
+    CAnno = meta_anno(CMeta),
+    RestExpr = translate_with_clauses(Rest, DoAst, ElseClauses, Anno),
+    FailClauses = case ElseClauses of
+        [] -> [{clause, CAnno, [{var, CAnno, '_with_fail'}], [], [{var, CAnno, '_with_fail'}]}];
+        _ -> [translate_case_clause(C) || C <- ElseClauses]
+    end,
+    {'case', CAnno, translate_expr(Rhs), [
+        {clause, CAnno, [translate_pattern(Pat)], [], [RestExpr]}
+        | FailClauses
+    ]};
+translate_with_clauses([Other | Rest], DoAst, ElseClauses, Anno) ->
+    {'block', Anno, [translate_expr(Other), translate_with_clauses(Rest, DoAst, ElseClauses, Anno)]}.
+
+translate_for(Anno, QualArgs, Opts) ->
+    Qualifiers = [translate_for_qualifier(Q) || Q <- QualArgs],
+    case proplists:get_value(reduce, Opts, undefined) of
+        undefined ->
+            DoAst = proplists:get_value(do, Opts, nil),
+            LcExpr = {lc, Anno, body_to_expr(Anno, translate_body(DoAst)), Qualifiers},
+            case proplists:get_value(into, Opts, []) of
+                [] ->
+                    LcExpr;
+                {'%{}', _, []} ->
+                    {call, Anno, {remote, Anno, {atom, Anno, maps}, {atom, Anno, from_list}}, [LcExpr]};
+                {'<<>>', _, []} ->
+                    {call, Anno, {remote, Anno, {atom, Anno, erlang}, {atom, Anno, iolist_to_binary}}, [LcExpr]};
+                IntoAst ->
+                    {'block', Anno, [LcExpr, translate_expr(IntoAst)]}
+            end;
+        InitAst ->
+            Vars = lists:usort(lists:flatmap(fun collect_qualifier_vars/1, Qualifiers)),
+            VarTuple = {tuple, Anno, [{var, Anno, V} || V <- Vars]},
+            ElemList = {lc, Anno, VarTuple, Qualifiers},
+            DoClauses = case proplists:get_value(do, Opts, []) of
+                L when is_list(L) -> L;
+                _ -> []
+            end,
+            FunClauses = [
+                begin
+                    CAnno = meta_anno(CMeta),
+                    {clause, CAnno, [VarTuple, translate_pattern(AccPat)], [], translate_body(Body)}
+                end
+                || {'->', CMeta, [[AccPat], Body]} <- DoClauses
+            ],
+            FunAst = case FunClauses of
+                [] -> {'fun', Anno, {clauses, [{clause, Anno, [VarTuple, {var, Anno, '_acc'}], [], [{var, Anno, '_acc'}]}]}};
+                _ -> {'fun', Anno, {clauses, FunClauses}}
+            end,
+            {call, Anno, {remote, Anno, {atom, Anno, lists}, {atom, Anno, foldl}}, [FunAst, translate_expr(InitAst), ElemList]}
+    end.
+
+translate_for_qualifier({'<-', Meta, [Pat, ListExpr]}) ->
+    {generate, meta_anno(Meta), translate_pattern(Pat), translate_expr(ListExpr)};
+translate_for_qualifier({'<<>>', Meta, [{'<-', _, [Pat, BinExpr]}]}) ->
+    {b_generate, meta_anno(Meta), translate_pattern(Pat), translate_expr(BinExpr)};
+translate_for_qualifier(FilterExpr) ->
+    translate_expr(FilterExpr).
+
+collect_qualifier_vars({generate, _, Pat, _}) ->
+    collect_pat_vars(Pat);
+collect_qualifier_vars({b_generate, _, Pat, _}) ->
+    collect_pat_vars(Pat);
+collect_qualifier_vars(_) ->
+    [].
+
+collect_pat_vars({var, _, '_'}) ->
+    [];
+collect_pat_vars({var, _, Name}) ->
+    [Name];
+collect_pat_vars(T) when is_tuple(T) ->
+    collect_pat_vars(tuple_to_list(T));
+collect_pat_vars(L) when is_list(L) ->
+    lists:flatmap(fun collect_pat_vars/1, L);
+collect_pat_vars(_) ->
+    [].
 
 translate_bin_segment(_DefaultAnno, {'::', Meta, [Expr, Spec]}) ->
     Anno = meta_anno(Meta),
