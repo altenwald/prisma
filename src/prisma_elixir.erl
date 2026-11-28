@@ -242,6 +242,44 @@ translate_expr({'case', Meta, [Scrutinee, Blocks]}) when is_list(Blocks) ->
         _ -> []
     end,
     {'case', Anno, translate_expr(Scrutinee), [translate_case_clause(C) || C <- DoClauses]};
+translate_expr({'receive', Meta, [Blocks]}) when is_list(Blocks) ->
+    Anno = meta_anno(Meta),
+    DoClauses = case proplists:get_value(do, Blocks, []) of
+        L when is_list(L) -> [translate_case_clause(C) || C <- L];
+        _ -> []
+    end,
+    case proplists:get_value('after', Blocks, undefined) of
+        [{'->', _, [[TimeoutAst], AfterBody]} | _] ->
+            {'receive', Anno, DoClauses, translate_expr(TimeoutAst), translate_body(AfterBody)};
+        _ ->
+            {'receive', Anno, DoClauses}
+    end;
+translate_expr({'try', Meta, [Blocks]}) when is_list(Blocks) ->
+    Anno = meta_anno(Meta),
+    BodyExprs = case proplists:get_value(do, Blocks, undefined) of
+        undefined -> [{atom, Anno, nil}];
+        DoAst -> translate_body(DoAst)
+    end,
+    ElseClauses = case proplists:get_value('else', Blocks, []) of
+        EL when is_list(EL) -> [translate_case_clause(C) || C <- EL];
+        _ -> []
+    end,
+    RescueClauses = case proplists:get_value(rescue, Blocks, []) of
+        RL when is_list(RL) -> [translate_try_catch_clause(error, C) || C <- RL];
+        _ -> []
+    end,
+    CatchClauses = case proplists:get_value('catch', Blocks, []) of
+        CL when is_list(CL) -> [translate_try_catch_clause(throw, C) || C <- CL];
+        _ -> []
+    end,
+    AfterExprs = case proplists:get_value('after', Blocks, undefined) of
+        undefined -> [];
+        AfterAst -> translate_body(AfterAst)
+    end,
+    {'try', Anno, BodyExprs, ElseClauses, RescueClauses ++ CatchClauses, AfterExprs};
+translate_expr({'<<>>', Meta, Segments}) when is_list(Segments) ->
+    Anno = meta_anno(Meta),
+    {bin, Anno, [translate_bin_segment(Anno, S) || S <- Segments]};
 translate_expr({'%', Meta, [_StructModAst, {'%{}', _, [{'|', _, [Base, Pairs]}]}]}) when is_list(Pairs) ->
     Anno = meta_anno(Meta),
     {map, Anno, translate_expr(Base), translate_map_expr_pairs(Anno, Pairs)};
@@ -282,7 +320,14 @@ translate_expr({{'.', _, [Target]}, Meta, Args}) when is_list(Args) ->
     {call, Anno, translate_expr(Target), [translate_expr(A) || A <- Args]};
 translate_expr({{'.', _, [Target, Field]}, Meta, []}) when is_atom(Field) ->
     Anno = meta_anno(Meta),
-    {call, Anno, {remote, Anno, {atom, Anno, erlang}, {atom, Anno, map_get}}, [{atom, Anno, Field}, translate_expr(Target)]};
+    case Target of
+        Mod when is_atom(Mod) ->
+            {call, Anno, {remote, Anno, {atom, Anno, Mod}, {atom, Anno, Field}}, []};
+        {'__aliases__', _, _} ->
+            {call, Anno, {remote, Anno, {atom, Anno, unwrap_atom(Target)}, {atom, Anno, Field}}, []};
+        _ ->
+            {call, Anno, {remote, Anno, {atom, Anno, erlang}, {atom, Anno, map_get}}, [{atom, Anno, Field}, translate_expr(Target)]}
+    end;
 translate_expr({{'.', _, [ModAst, FunAtom]}, Meta, Args}) when is_atom(FunAtom), is_list(Args) ->
     Anno = meta_anno(Meta),
     {call, Anno, {remote, Anno, translate_expr(ModAst), {atom, Anno, FunAtom}}, [translate_expr(A) || A <- Args]};
@@ -371,6 +416,34 @@ translate_case_clause({'->', Meta, [Pats, Body]}) when is_list(Pats) ->
 translate_case_clause(_) ->
     Anno = erl_anno:new(1),
     {clause, Anno, [{var, Anno, '_'}], [], [{atom, Anno, ok}]}.
+
+translate_try_catch_clause(DefaultKind, {'->', Meta, [[KindPat, ValPat], Body]}) ->
+    Anno = meta_anno(Meta),
+    _ = DefaultKind,
+    CatchPat = {tuple, Anno, [translate_pattern(KindPat), translate_pattern(ValPat), {var, Anno, '_'}]},
+    {clause, Anno, [CatchPat], [], translate_body(Body)};
+translate_try_catch_clause(DefaultKind, {'->', Meta, [[Pat], Body]}) ->
+    Anno = meta_anno(Meta),
+    CatchPat = {tuple, Anno, [{atom, Anno, DefaultKind}, translate_pattern(Pat), {var, Anno, '_'}]},
+    {clause, Anno, [CatchPat], [], translate_body(Body)};
+translate_try_catch_clause(_DefaultKind, Other) ->
+    translate_case_clause(Other).
+
+translate_bin_segment(_DefaultAnno, {'::', Meta, [Expr, Spec]}) ->
+    Anno = meta_anno(Meta),
+    {bin_element, Anno, translate_expr(Expr), extract_bin_size(Spec), default};
+translate_bin_segment(Anno, Expr) ->
+    {bin_element, Anno, translate_expr(Expr), default, default}.
+
+extract_bin_size({'-', _, [L, R]}) ->
+    case extract_bin_size(L) of
+        default -> extract_bin_size(R);
+        SizeAst -> SizeAst
+    end;
+extract_bin_size({size, _, [SizeExpr]}) ->
+    translate_expr(SizeExpr);
+extract_bin_size(_) ->
+    default.
 
 translate_map_expr_pairs(Anno, Pairs) when is_list(Pairs) ->
     lists:flatmap(

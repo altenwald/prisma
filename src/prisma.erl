@@ -28,7 +28,7 @@ init(State) ->
 %% @doc Returns the current Prisma version.
 -spec version() -> binary().
 version() ->
-    <<"0.2.10">>.
+    <<"0.2.11">>.
 
 %% @doc Builds a portable `.pplt` file from BEAM directories or files.
 -spec build([file:filename_all()], file:filename_all()) ->

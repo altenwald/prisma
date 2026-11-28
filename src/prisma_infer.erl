@@ -1740,6 +1740,8 @@ covers({union, Ps}, M) -> lists:any(fun(P) -> covers(P, M) end, Ps);
 covers(P, P) -> true;
 covers({tuple, Ps}, {tuple, Ms}) when length(Ps) =:= length(Ms) ->
     lists:all(fun({P, M}) -> covers(P, M) end, lists:zip(Ps, Ms));
+covers({map, PFields}, any_map) ->
+    PFields =:= [] orelse lists:all(fun({assoc, any, any}) -> true; (_) -> false end, PFields);
 covers({map, PFields}, {map, MFields}) ->
     MExact = #{K => V || {exact, K, V} <- MFields},
     lists:all(

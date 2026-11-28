@@ -333,7 +333,13 @@ ensure_elixir_pplt(Opts) ->
         {ok, Path} ->
             case filelib:is_regular(Path) of
                 true ->
-                    prisma_pplt:load(Path);
+                    case prisma_pplt:load(Path) of
+                        {ok, _} = Ok ->
+                            Ok;
+                        {error, _} ->
+                            {ok, Vsn} = elixir_version(),
+                            build_system_pplt([elixir], Path, <<"elixir">>, list_to_binary(Vsn))
+                    end;
                 false ->
                     {ok, Vsn} = elixir_version(),
                     build_system_pplt([elixir], Path, <<"elixir">>, list_to_binary(Vsn))
@@ -387,22 +393,41 @@ resolve_project_pplts(ProjectRoot, Opts) ->
     SysOpts = Opts#{cache_dir => CacheDir},
     Deps = discover_deps(ProjectRoot),
     OtpApps = maps:get(otp_apps, Opts, []),
-    Otp = case OtpApps of
-        [] -> [];
-        _ -> [P || {ok, P} <- [ensure_otp_pplt(OtpApps, SysOpts)]]
+    OtpRes = case OtpApps of
+        [] -> {ok, []};
+        _ ->
+            case ensure_otp_pplt(OtpApps, SysOpts) of
+                {ok, P} -> {ok, [P]};
+                {error, _} = OtpBuildErr -> OtpBuildErr
+            end
     end,
     ElixirFlag = case maps:find(elixir, Opts) of
         {ok, Val} -> Val;
         error -> filelib:is_regular(filename:join(unicode:characters_to_list(ProjectRoot), "mix.exs"))
     end,
-    Elixir = case ElixirFlag of
-        true -> [P || {ok, P} <- [ensure_elixir_pplt(SysOpts)]];
-        false -> []
-    end,
-    DepPplts = lists:append(
-        [resolve_single_dep(ProjectRoot, CacheDir, Dep, Opts) || Dep <- Deps]
-    ),
-    {ok, prisma_pplt:merge(Otp ++ Elixir ++ DepPplts)}.
+    case OtpRes of
+        {error, _} = OtpErr ->
+            OtpErr;
+        {ok, Otp} ->
+            ElixirRes = case ElixirFlag of
+                true ->
+                    case ensure_elixir_pplt(SysOpts) of
+                        {ok, EP} -> {ok, [EP]};
+                        {error, _} = ElxBuildErr -> ElxBuildErr
+                    end;
+                false ->
+                    {ok, []}
+            end,
+            case ElixirRes of
+                {error, _} = ElxErr ->
+                    ElxErr;
+                {ok, Elixir} ->
+                    DepPplts = lists:append(
+                        [resolve_single_dep(ProjectRoot, CacheDir, Dep, Opts) || Dep <- Deps]
+                    ),
+                    {ok, prisma_pplt:merge(Otp ++ Elixir ++ DepPplts)}
+            end
+    end.
 
 resolve_single_dep(ProjectRoot, CacheDir, #{name := Name, version := Vsn} = Dep, Opts) ->
     App = maps:get(app, Dep, Name),
@@ -417,8 +442,11 @@ resolve_single_dep(ProjectRoot, CacheDir, #{name := Name, version := Vsn} = Dep,
             Result = case filelib:is_regular(Path) of
                 true ->
                     case prisma_pplt:load(Path) of
-                        {ok, _} = Ok ->
-                            Ok;
+                        {ok, Pplt} ->
+                            case cached_dep_matches_beams(Pplt, ProjectRoot, App, Opts) of
+                                true -> {ok, Pplt};
+                                false -> build_and_cache_local_dep(ProjectRoot, Path, App, Name, Vsn, Opts)
+                            end;
                         {error, _Why} ->
                             build_and_cache_local_dep(ProjectRoot, Path, App, Name, Vsn, Opts)
                     end;
@@ -453,16 +481,38 @@ why(stale) -> "it does not match the sources of the dependency (it is out of dat
 why({otp_release, Made, Running}) ->
     io_lib:format("it was made with OTP ~s and this is OTP ~s (only the same release or the two before are used)", [Made, Running]).
 
-build_and_cache_local_dep(ProjectRoot, CachePath, App, Name, Vsn, Opts) ->
+dep_beams(ProjectRoot, App, Opts) ->
     Root = unicode:characters_to_list(ProjectRoot),
     AppStr = binary_to_list(App),
-    Beams = case maps:find(env, Opts) of
+    case maps:find(env, Opts) of
         {ok, Env} ->
             EnvStr = unicode:characters_to_list(Env),
             filelib:wildcard(filename:join([Root, "_build", EnvStr, "lib", AppStr, "ebin", "*.beam"]));
         error ->
             filelib:wildcard(filename:join([Root, "_build", "*", "lib", AppStr, "ebin", "*.beam"]))
-    end,
+    end.
+
+cached_dep_matches_beams(#prisma_pplt{modules = Mods}, ProjectRoot, App, Opts) ->
+    case dep_beams(ProjectRoot, App, Opts) of
+        [] ->
+            true;
+        Beams when length(Beams) =/= map_size(Mods) ->
+            false;
+        Beams ->
+            lists:all(
+                fun(B) ->
+                    Mod = list_to_atom(filename:basename(B, ".beam")),
+                    case {maps:find(Mod, Mods), beam_lib:md5(B)} of
+                        {{ok, #module_summary{beam_md5 = Md5}}, {ok, {_, Md5}}} -> true;
+                        _ -> false
+                    end
+                end,
+                Beams
+            )
+    end.
+
+build_and_cache_local_dep(ProjectRoot, CachePath, App, Name, Vsn, Opts) ->
+    Beams = dep_beams(ProjectRoot, App, Opts),
     case Beams of
         [] ->
             error;

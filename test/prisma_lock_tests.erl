@@ -484,3 +484,59 @@ cached_otp_pplt_expands_for_new_apps_test() ->
     ?assert(lists:member(yecc, prisma_pplt:modules(Expanded))),
     ?assert(lists:member(eunit, prisma_pplt:modules(Expanded))),
     os:cmd("rm -rf " ++ TmpCache).
+
+same_env_dep_recompile_invalidates_cached_pplt_test() ->
+    TmpProj = "/tmp/prisma_dev/tmp_same_env_recompile",
+    TmpCache = "/tmp/prisma_dev/tmp_same_env_cache",
+    os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache),
+    Ebin = filename:join([TmpProj, "_build", "test", "lib", "sample_dep", "ebin"]),
+    ok = filelib:ensure_dir(filename:join(Ebin, "dummy")),
+    ok = filelib:ensure_dir(filename:join(TmpCache, "dummy")),
+    ok = file:write_file(filename:join(TmpProj, "mix.lock"),
+        <<"%{\n  \"sample_dep\": {:hex, :sample_dep, \"1.0.0\", \"cs\", [:mix], [], \"hexpm\", \"cs\"},\n}\n">>),
+    CompileDep = fun(RetType, RetVal) ->
+        Src = lists:flatten(io_lib:format(
+            "-module(sample_dep_mod).\n-export([val/0]).\n-spec val() -> ~s.\nval() -> ~s.\n",
+            [RetType, RetVal])),
+        {ok, Toks, _} = erl_scan:string(Src),
+        Forms = lists:reverse(element(1, lists:foldl(
+            fun({dot, _}=D, {Acc, Cur}) -> {[lists:reverse([D|Cur])|Acc], []};
+               (T, {Acc, Cur}) -> {Acc, [T|Cur]}
+            end, {[], []}, Toks))),
+        Parsed = [begin {ok, F} = erl_parse:parse_form(Ts), F end || Ts <- Forms],
+        {ok, sample_dep_mod, Bin} = compile:forms(Parsed, [debug_info, binary]),
+        ok = file:write_file(filename:join(Ebin, "sample_dep_mod.beam"), Bin)
+    end,
+    CompileDep("integer()", "1"),
+    Opts = #{env => "test", cache_dir => TmpCache, elixir => false},
+    {ok, Pplt1} = prisma_lock:resolve_project_pplts(TmpProj, Opts),
+    {ok, #func_contract{declared_specs = [{fun_type, [], integer}]}} =
+        prisma_pplt:lookup_mfa({sample_dep_mod, val, 0}, Pplt1),
+    CompileDep("atom()", "wrong"),
+    {ok, Pplt2} = prisma_lock:resolve_project_pplts(TmpProj, Opts),
+    {ok, #func_contract{declared_specs = [{fun_type, [], atom}]}} =
+        prisma_pplt:lookup_mfa({sample_dep_mod, val, 0}, Pplt2),
+    os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache).
+
+corrupted_otp_or_elixir_pplt_errors_or_rebuilds_test() ->
+    TmpProj = "/tmp/prisma_dev/tmp_corrupt_sys_pplt",
+    TmpCache = "/tmp/prisma_dev/tmp_corrupt_sys_cache",
+    os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache),
+    ok = filelib:ensure_dir(filename:join(TmpProj, "dummy")),
+    ok = filelib:ensure_dir(filename:join(TmpCache, "dummy")),
+    ?assertMatch({error, {unknown_applications, [nonexistent_otp_app_xyz]}},
+                 prisma_lock:resolve_project_pplts(TmpProj, #{
+                     cache_dir => TmpCache,
+                     elixir => false,
+                     otp_apps => [nonexistent_otp_app_xyz]
+                 })),
+    %% Corrupted OTP cache file is rebuilt when otp_apps are valid
+    OtpPath = prisma_lock:otp_cache_path(TmpCache),
+    ok = file:write_file(OtpPath, <<"corrupted">>),
+    {ok, Rebuilt} = prisma_lock:resolve_project_pplts(TmpProj, #{
+        cache_dir => TmpCache,
+        elixir => false,
+        otp_apps => [parsetools]
+    }),
+    ?assert(lists:member(yecc, prisma_pplt:modules(Rebuilt))),
+    os:cmd("rm -rf " ++ TmpProj ++ " " ++ TmpCache).

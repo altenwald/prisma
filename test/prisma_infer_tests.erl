@@ -1302,4 +1302,56 @@ multi_arg_guarded_clause_subtraction_test() ->
     {ok, Ws} = prisma:analyze_beams([Beam], #{}),
     ?assertEqual([], Ws).
 
+struct_clause_does_not_cover_plain_map_test() ->
+    Src =
+        "-module(mini_struct_vs_map).\n"
+        "-export([pick/1]).\n"
+        "-spec pick(#{'__struct__' := packet, entry := term()} | map() | list()) -> atom().\n"
+        "pick(#{'__struct__' := packet}) -> packet;\n"
+        "pick(#{entry := _}) -> field;\n"
+        "pick(V) when is_map(V) -> map;\n"
+        "pick(V) when is_list(V) -> list.\n",
+    {ok, Toks, _} = erl_scan:string(Src),
+    {ok, mini_struct_vs_map, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+    {ok, Ws} = prisma:analyze_beams([Beam], #{mode => hybrid}),
+    ?assertEqual([], Ws).
+
+overloaded_spec_invalid_return_detected_test() ->
+    Src =
+        "-module(mini_overloaded_ret).\n"
+        "-export([encode/1]).\n"
+        "-spec encode(integer_tag) -> integer();\n"
+        "            (binary_tag) -> binary().\n"
+        "encode(integer_tag) -> wrong;\n"
+        "encode(binary_tag) -> <<1>>.\n",
+    {ok, Toks, _} = erl_scan:string(Src),
+    {ok, mini_overloaded_ret, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+    {ok, Ws} = prisma:analyze_beams([Beam], #{mode => hybrid}),
+    ?assertMatch([#prisma_warning{kind = gradual_mismatch, mfa = {mini_overloaded_ret, encode, 1}}], Ws).
+
+overloaded_bif_single_discrepancy_test() ->
+    Src =
+        "-module(mini_abs_discrepancy).\n"
+        "-export([input/0, value/0]).\n"
+        "input() -> bad.\n"
+        "value() -> erlang:abs(input()).\n",
+    {ok, Toks, _} = erl_scan:string(Src),
+    {ok, mini_abs_discrepancy, Beam} = compile:forms(split_forms(Toks, [], []), [debug_info, binary]),
+    %% Simulate loaded :erts Pplt having overloaded erlang:abs/1
+    ErtsAbs = #func_contract{
+        mfa = {erlang, abs, 1},
+        exported = true,
+        declared_specs = [
+            {fun_type, [float], float},
+            {fun_type, [integer], non_neg_integer}
+        ],
+        inferred_type = {fun_type, [number], number}
+    },
+    ErtsSummary = #module_summary{module = erlang, language = erlang, functions = #{{erlang, abs, 1} => ErtsAbs}},
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{erlang => ErtsSummary}},
+    {ok, Summary} = prisma_abstract:extract_beam(Beam),
+    Ws = prisma_checker:check_module(Summary, Pplt, #{mode => hybrid}),
+    Discrepancies = [W || W <- Ws, W#prisma_warning.kind =:= discrepancy],
+    ?assertEqual(1, length(Discrepancies)).
+
 

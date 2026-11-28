@@ -180,7 +180,7 @@ check_contract(Contract, Behaviours, Pplt, Mode) ->
     ]),
     FilteredGradual = [
         W || W <- GradualWarnings,
-        W#prisma_warning.kind =/= gradual_mismatch orelse
+        (W#prisma_warning.kind =/= gradual_mismatch andalso W#prisma_warning.kind =/= discrepancy) orelse
             not maps:is_key(
                 {W#prisma_warning.mfa, W#prisma_warning.line, W#prisma_warning.callee, W#prisma_warning.arg_idx},
                 DiscrepancyCallKeys
@@ -217,7 +217,21 @@ collect_discrepancies(#func_contract{mfa = {CallerMod, _, _} = CallerMFA, local_
         end,
         Sites
     ),
-    LocalWarns ++ InterModWarns.
+    LocalKeys = maps:from_list([
+        {{W#prisma_warning.mfa, W#prisma_warning.line, W#prisma_warning.callee, W#prisma_warning.arg_idx}, true}
+        || W <- LocalWarns,
+           W#prisma_warning.callee =/= undefined,
+           W#prisma_warning.arg_idx =/= undefined
+    ]),
+    FilteredInterMod = [
+        W || W <- InterModWarns,
+        W#prisma_warning.kind =/= discrepancy orelse
+            not maps:is_key(
+                {W#prisma_warning.mfa, W#prisma_warning.line, W#prisma_warning.callee, W#prisma_warning.arg_idx},
+                LocalKeys
+            )
+    ],
+    LocalWarns ++ FilteredInterMod.
 
 %% A site is `{Line, MFA, Args}` or has a fourth element that says how the code protects the call (see prisma.hrl).
 site_parts({Line, MFA, Args}) -> {Line, MFA, Args, none};

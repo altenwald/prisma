@@ -1235,3 +1235,110 @@ defmacrop_not_flagged_as_oxbow_test() ->
         #{}
     ),
     ?assertEqual([], prisma_oxbow:check_module(Summary)).
+
+zero_arity_remote_call_not_map_get_test() ->
+    SrcMod = 'Elixir.ZeroArgSource',
+    CallerMod = 'Elixir.ZeroArgCaller',
+    SrcMap = #{
+        module => SrcMod,
+        file => <<"lib/zero_arg.ex">>,
+        attributes => [],
+        struct => nil,
+        definitions => [
+            {{value, 0}, def, [{line, 1}], [{[{line, 1}], [], [], ok}]}
+        ]
+    },
+    CallerMap = #{
+        module => CallerMod,
+        file => <<"lib/zero_arg_caller.ex">>,
+        attributes => [],
+        struct => nil,
+        definitions => [
+            {{good, 0}, def, [{line, 2}], [
+                {[{line, 2}], [], [], {{'.', [{line, 2}], [SrcMod, value]}, [{line, 2}], []}}
+            ]},
+            {{bad, 0}, def, [{line, 3}], [
+                {[{line, 3}], [], [], {{'.', [{line, 3}], [SrcMod, value]}, [{line, 3}], []}}
+            ]}
+        ]
+    },
+    SrcSpecs = [
+        {attribute, 1, spec, {{value, 0}, [{type, 1, 'fun', [{type, 1, product, []}, {atom, 1, ok}]}]}}
+    ],
+    Specs = [
+        {attribute, 2, spec, {{good, 0}, [{type, 2, 'fun', [{type, 2, product, []}, {atom, 2, ok}]}]}},
+        {attribute, 3, spec, {{bad, 0}, [{type, 3, 'fun', [{type, 3, product, []}, {type, 3, integer, []}]}]}}
+    ],
+    SrcSum = prisma_elixir:from_elixir_dbgi(SrcMod, {debug_info_v1, elixir_erl, {elixir_v1, SrcMap, SrcSpecs}},
+        [{value, 0}], #module_summary{module = SrcMod, language = elixir}, #{}),
+    ExtSpecs = #{{SrcMod, value, 0} => [{fun_type, [], {atom_lit, ok}}]},
+    CallerSum = prisma_elixir:from_elixir_dbgi(CallerMod, {debug_info_v1, elixir_erl, {elixir_v1, CallerMap, Specs}},
+        [{good, 0}, {bad, 0}], #module_summary{module = CallerMod, language = elixir}, #{external_specs => ExtSpecs}),
+    Pplt = prisma_pplt:merge([
+        (prisma_pplt:new())#prisma_pplt{modules = #{SrcMod => SrcSum}},
+        (prisma_pplt:new())#prisma_pplt{modules = #{CallerMod => CallerSum}}
+    ]),
+    Ws = prisma_checker:check_module(CallerSum, Pplt, #{mode => hybrid}),
+    ?assertMatch([#prisma_warning{kind = gradual_mismatch, mfa = {CallerMod, bad, 0}}], Ws).
+
+elixir_try_and_receive_return_checks_test() ->
+    Mod = 'Elixir.TryRecvRet',
+    Map = #{
+        module => Mod,
+        file => <<"lib/try_recv.ex">>,
+        attributes => [],
+        struct => nil,
+        definitions => [
+            {{cleanup, 0}, def, [{line, 1}], [
+                {[{line, 1}], [], [], {'try', [{line, 1}], [[{do, wrong}, {'after', ok}]]}}
+            ]},
+            {{wait, 0}, def, [{line, 2}], [
+                {[{line, 2}], [], [], {'receive', [{line, 2}], [[
+                    {do, [{'->', [{line, 2}], [[go], wrong]}]},
+                    {'after', [{'->', [{line, 2}], [[0], wrong]}]}
+                ]]}}
+            ]}
+        ]
+    },
+    Specs = [
+        {attribute, 1, spec, {{cleanup, 0}, [{type, 1, 'fun', [{type, 1, product, []}, {type, 1, integer, []}]}]}},
+        {attribute, 2, spec, {{wait, 0}, [{type, 2, 'fun', [{type, 2, product, []}, {type, 2, integer, []}]}]}}
+    ],
+    Sum = prisma_elixir:from_elixir_dbgi(Mod, {debug_info_v1, elixir_erl, {elixir_v1, Map, Specs}},
+        [{cleanup, 0}, {wait, 0}], #module_summary{module = Mod, language = elixir}, #{}),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Sum}},
+    Ws = prisma_checker:check_module(Sum, Pplt, #{mode => hybrid}),
+    ?assertEqual(2, length([W || W <- Ws, W#prisma_warning.kind =:= gradual_mismatch])).
+
+elixir_bitstring_size_not_erlang_size_test() ->
+    Mod = 'Elixir.BitSizePack',
+    Map = #{
+        module => Mod,
+        file => <<"lib/bit_size.ex">>,
+        attributes => [],
+        struct => nil,
+        definitions => [
+            {{width, 0}, def, [{line, 1}], [{[{line, 1}], [], [], 8}]},
+            {{byte, 1}, def, [{line, 2}], [
+                {[{line, 2}], [{x, [{line, 2}], nil}], [],
+                 {'<<>>', [{line, 2}], [
+                     {'::', [{line, 2}], [
+                         {x, [{line, 2}], nil},
+                         {'-', [{line, 2}], [{integer, [], nil}, {size, [], [{width, [{line, 2}], []}]}]}
+                     ]}
+                 ]}}
+            ]}
+        ]
+    },
+    Sum = prisma_elixir:from_elixir_dbgi(Mod, {debug_info_v1, elixir_erl, {elixir_v1, Map, []}},
+        [{width, 0}, {byte, 1}], #module_summary{module = Mod, language = elixir}, #{}),
+    FC = maps:get({Mod, byte, 1}, Sum#module_summary.functions),
+    ?assertNot(lists:member({erlang, size, 1}, FC#func_contract.calls)),
+    Pplt = (prisma_pplt:new())#prisma_pplt{modules = #{Mod => Sum}},
+    ?assertEqual([], prisma_checker:check_module(Sum, Pplt, #{mode => hybrid})).
+
+mix_config_and_args_otp_apps_test() ->
+    ?assertEqual(#{otp_apps => [stdlib, crypto]},
+                 'Elixir.Mix.Tasks.Prisma':parse_mix_config([{otp_apps, [stdlib, crypto]}])),
+    ?assertMatch(#{otp_apps := [stdlib]},
+                 'Elixir.Mix.Tasks.Prisma':parse_args([<<"--otp-app">>, <<"stdlib">>])).
